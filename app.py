@@ -94,30 +94,78 @@ def create_app():
         )
 
     # ── UI ────────────────────────────────────────────────────────────
-    # Injected into ui.html: intercepts every fetch() and redirects to
-    # /login on 401. Also wires the logout button if the UI has one.
+    # Injected into ui.html: Enterprise Blue theme + auth guard + logout button
     _AUTH_GUARD = """
+<style>
+:root {
+  --bg:      #1A252F;
+  --card:    #243542;
+  --border:  #344955;
+  --hover:   #29414e;
+  --primary: #005EB8;
+  --text:    #E9ECEF;
+  --muted:   #728B9A;
+}
+/* focus ring matches Enterprise Blue */
+input:focus, select:focus, textarea:focus { border-color: #0073D1 !important; box-shadow: 0 0 0 3px rgba(0,115,209,.18); }
+.btn-primary, button.btn-primary { background: #005EB8 !important; }
+.btn-primary:hover, button.btn-primary:hover { background: #0073D1 !important; }
+</style>
 <script>
 (function () {
-  /* NaSnap auth guard — intercept fetch globally */
+  /* intercept fetch globally — redirect to /login on 401 */
   var _fetch = window.fetch;
   window.fetch = function () {
     return _fetch.apply(this, arguments).then(function (r) {
-      if (r.status === 401 && !r.url.endsWith('/api/auth/me') && !r.url.endsWith('/api/auth/login')) {
+      if (r.status === 401 &&
+          !r.url.endsWith('/api/auth/me') &&
+          !r.url.endsWith('/api/auth/login')) {
         window.location.replace('/login');
       }
       return r;
     });
   };
 
-  /* Logout helper — call from any button: window.nasnapLogout() */
   window.nasnapLogout = function () {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
       .finally(function () { window.location.replace('/login'); });
   };
+
+  /* populate username in topbar once DOM is ready */
+  document.addEventListener('DOMContentLoaded', function () {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var el = document.getElementById('ns-username');
+        if (el && d.username) el.textContent = d.username;
+      });
+  });
 })();
 </script>
 """
+
+    # Logout button + username chip injected at the right end of .subtabs
+    _LOGOUT_BTN = (
+        '<div id="ns-userbar" style="margin-left:auto;display:flex;align-items:center;'
+        'gap:8px;padding-bottom:4px;">'
+        '<span id="ns-username" style="font-size:11px;color:var(--muted);'
+        'white-space:nowrap;padding:0 4px;"></span>'
+        '<button onclick="nasnapLogout()" title="Sign out" '
+        'style="display:flex;align-items:center;gap:5px;padding:5px 10px;'
+        'font-size:11px;font-weight:500;color:var(--muted);background:none;'
+        'border:1px solid var(--border);border-radius:6px;cursor:pointer;'
+        'transition:color .15s,border-color .15s,background .15s;white-space:nowrap;" '
+        'onmouseover="this.style.color=\'var(--text)\';this.style.borderColor=\'var(--text)\';this.style.background=\'var(--hover)\'" '
+        'onmouseout="this.style.color=\'var(--muted)\';this.style.borderColor=\'var(--border)\';this.style.background=\'none\'">'
+        '<svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>'
+        '<polyline points="16 17 21 12 16 7"/>'
+        '<line x1="21" y1="12" x2="9" y2="12"/>'
+        '</svg>'
+        'Sign out'
+        '</button>'
+        '</div>'
+    )
 
     @app.route('/')
     def _index():
@@ -126,8 +174,14 @@ def create_app():
             return redirect('/login')
         with open(_UI_FILE, 'r', encoding='utf-8') as f:
             html = f.read()
-        # Inject auth guard right after <head> so it runs before any other JS
+        # Auth guard before any other JS
         html = html.replace('<head>', '<head>' + _AUTH_GUARD, 1)
+        # Logout button at right end of .subtabs bar
+        html = html.replace(
+            '</div>\n\n  <!-- Scrollable content -->',
+            _LOGOUT_BTN + '</div>\n\n  <!-- Scrollable content -->',
+            1,
+        )
         return Response(html, mimetype='text/html')
 
     @app.route('/login')
