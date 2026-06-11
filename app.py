@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from datetime import datetime, timezone
 
 # pegaprox_compat must be importable before the plugin loads
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -12,7 +13,7 @@ from auth import (
     verify_password, create_session, delete_session,
     ensure_default_admin, get_session, ROLE_ADMIN,
     list_users, create_user, delete_user, change_password,
-    require_admin,
+    require_admin, require_auth,
 )
 
 logging.basicConfig(
@@ -20,11 +21,15 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
 )
 
-_HERE       = os.path.dirname(os.path.abspath(__file__))
-_PLUGIN_DIR = os.path.join(_HERE, 'plugins', 'netapp_storage')
-_UI_FILE    = os.path.join(_PLUGIN_DIR, 'ui.html')
-_LOGIN_FILE = os.path.join(_HERE, 'login.html')
-_ADMIN_FILE = os.path.join(_HERE, 'admin.html')
+NASNAP_VERSION = '1.0.0'
+_START_TIME    = datetime.now(timezone.utc)
+
+_HERE          = os.path.dirname(os.path.abspath(__file__))
+_PLUGIN_DIR    = os.path.join(_HERE, 'plugins', 'netapp_storage')
+_UI_FILE       = os.path.join(_PLUGIN_DIR, 'ui.html')
+_LOGIN_FILE    = os.path.join(_HERE, 'login.html')
+_ADMIN_FILE    = os.path.join(_HERE, 'admin.html')
+_SETTINGS_FILE = os.path.join(_HERE, 'settings.html')
 
 
 def create_app():
@@ -138,6 +143,72 @@ def create_app():
             return redirect('/')
         return send_file(_ADMIN_FILE, mimetype='text/html')
 
+    # ── Change own password ───────────────────────────────────────────
+    @app.route('/api/auth/me/password', methods=['POST'])
+    @require_auth
+    def _me_change_password():
+        sess = getattr(g, '_nasnap_session', {})
+        data = request.get_json() or {}
+        current = data.get('current_password') or ''
+        new_pw  = data.get('new_password') or ''
+        if len(new_pw) < 6:
+            return jsonify({'error': 'New password must be at least 6 characters'}), 400
+        row = get_db().query_one(
+            "SELECT password_hash FROM np_users WHERE username=?", (sess['username'],)
+        )
+        if not row or not verify_password(row['password_hash'], current):
+            return jsonify({'error': 'Current password is incorrect'}), 401
+        change_password(sess['username'], new_pw)
+        return jsonify({'ok': True})
+
+    # ── System info ───────────────────────────────────────────────────
+    @app.route('/api/system/info')
+    @require_auth
+    def _system_info():
+        import platform, sys as _sys
+        from db import DB_FILE
+        sess  = getattr(g, '_nasnap_session', {})
+        urow  = get_db().query_one(
+            "SELECT role, created_at FROM np_users WHERE username=?", (sess['username'],)
+        )
+        info = {
+            'version':    NASNAP_VERSION,
+            'username':   sess.get('username'),
+            'role':       urow['role']       if urow else 'viewer',
+            'created_at': urow['created_at'] if urow else '',
+        }
+        if urow and urow['role'] == ROLE_ADMIN:
+            uptime_s = int((datetime.now(timezone.utc) - _START_TIME).total_seconds())
+            h, rem   = divmod(uptime_s, 3600)
+            m        = rem // 60
+            db_size  = os.path.getsize(DB_FILE) if os.path.exists(DB_FILE) else 0
+            tables   = get_db().query(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            )
+            table_stats = []
+            for t in tables:
+                cnt = get_db().query_one(f"SELECT COUNT(*) AS c FROM \"{t['name']}\"")
+                table_stats.append({'table': t['name'], 'rows': cnt['c'] if cnt else 0})
+            info.update({
+                'started_at':     _START_TIME.isoformat(),
+                'uptime':         f'{h}h {m:02d}m',
+                'python_version': _sys.version.split()[0],
+                'platform':       platform.system() + ' ' + platform.release(),
+                'data_dir':       os.environ.get('NASNAP_DATA', os.path.dirname(DB_FILE)),
+                'debug':          os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes'),
+                'db_path':        DB_FILE,
+                'db_size_bytes':  db_size,
+                'tables':         table_stats,
+            })
+        return jsonify(info)
+
+    # ── Settings UI ───────────────────────────────────────────────────
+    @app.route('/settings')
+    def _settings():
+        if not getattr(g, '_nasnap_session', {}):
+            return redirect('/login')
+        return send_file(_SETTINGS_FILE, mimetype='text/html')
+
     # ── Plugin registration ───────────────────────────────────────────
     sys.path.insert(0, os.path.join(_HERE, 'plugins'))
     import netapp_storage
@@ -225,6 +296,19 @@ def create_app():
         'gap:8px;padding-bottom:4px;">'
         '<span id="ns-username" style="font-size:11px;color:var(--muted);'
         'white-space:nowrap;padding:0 4px;"></span>'
+        # Settings link (all authenticated users)
+        '<a href="/settings" title="Settings" '
+        'style="display:flex;align-items:center;gap:5px;padding:5px 10px;'
+        'font-size:11px;font-weight:500;color:var(--muted);background:none;'
+        'border:1px solid var(--border);border-radius:6px;cursor:pointer;'
+        'text-decoration:none;transition:color .15s,border-color .15s,background .15s;" '
+        'onmouseover="this.style.color=\'var(--text)\';this.style.borderColor=\'var(--text)\';this.style.background=\'var(--hover)\'" '
+        'onmouseout="this.style.color=\'var(--muted)\';this.style.borderColor=\'var(--border)\';this.style.background=\'none\'">'
+        '<svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="12" cy="12" r="3"/>'
+        '<path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>'
+        '</svg>'
+        '</a>'
         # Users admin link (hidden until /api/auth/me confirms admin role)
         '<a id="ns-admin-link" href="/admin" title="User Management" '
         'style="display:none;align-items:center;gap:5px;padding:5px 10px;'
