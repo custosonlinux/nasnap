@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NaSnap — User Management</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #1A252F;
+      --surface:  #1F2D3A;
+      --card:     #243542;
+      --border:   #344955;
+      --hover:    #2C3E50;
+      --primary:  #005EB8;
+      --primary-h:#0070D8;
+      --text:     #E9ECEF;
+      --muted:    #728B9A;
+      --success:  #27AE60;
+      --warning:  #F39C12;
+      --error:    #E74C3C;
+      --info:     #3498DB;
+      --radius:   6px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .topbar-brand svg { color: var(--primary); flex-shrink: 0; }
+    .topbar-brand .brand-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .3px;
+    }
+    .topbar-sep {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+    }
+    .topbar-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .topbar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-ghost {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      text-decoration: none;
+      transition: color .15s, border-color .15s, background .15s;
+      white-space: nowrap;
+    }
+    .btn-ghost:hover {
+      color: var(--text);
+      border-color: var(--text);
+      background: var(--hover);
+    }
+
+    /* ── Main content ── */
+    .content {
+      flex: 1;
+      padding: 32px 24px;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .card-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .card-header .count {
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1px 8px;
+    }
+    .toolbar {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-primary {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+      background: var(--primary);
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-primary:hover { background: var(--primary-h); }
+    .search-wrap {
+      margin-left: auto;
+      position: relative;
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .search-input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 12px;
+      padding: 6px 10px 6px 30px;
+      width: 220px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--primary); }
+
+    /* ── Table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      padding: 10px 20px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    thead th:hover { color: var(--text); }
+    thead th .sort-icon { margin-left: 4px; opacity: .4; font-size: 10px; }
+    thead th.asc .sort-icon::after  { content: '▲'; opacity: 1; }
+    thead th.desc .sort-icon::after { content: '▼'; opacity: 1; }
+    thead th:not(.asc):not(.desc) .sort-icon::after { content: '⇅'; }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background .1s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--hover); }
+    tbody td { padding: 12px 20px; vertical-align: middle; }
+    .td-user { display: flex; align-items: center; gap: 10px; }
+    .avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+    .role-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .role-badge.admin   { background: rgba(0,94,184,.2); color: #49afd9; border: 1px solid rgba(0,94,184,.4); }
+    .role-badge.viewer  { background: rgba(114,139,154,.15); color: var(--muted); border: 1px solid var(--border); }
+    .td-date { color: var(--muted); font-size: 12px; }
+    .actions { display: flex; gap: 6px; }
+    .btn-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      color: var(--muted);
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    .btn-icon:hover           { color: var(--text); border-color: var(--text); background: var(--hover); }
+    .btn-icon.danger:hover    { color: var(--error); border-color: var(--error); background: rgba(231,76,60,.1); }
+    .btn-icon[disabled]       { opacity: .35; cursor: not-allowed; pointer-events: none; }
+
+    /* ── Empty state ── */
+    .empty {
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+      opacity: 0; pointer-events: none;
+      transition: opacity .15s;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+      transform: translateY(-12px);
+      transition: transform .15s;
+    }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal-header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-header h3 { font-size: 14px; font-weight: 600; }
+    .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+    .modal-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .form-control {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .15s;
+      width: 100%;
+    }
+    .form-control:focus { border-color: var(--primary); }
+    .form-control::placeholder { color: var(--muted); }
+    select.form-control { cursor: pointer; }
+    select.form-control option { background: var(--card); }
+    .pw-wrap { position: relative; }
+    .pw-wrap .form-control { padding-right: 36px; }
+    .pw-toggle {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; color: var(--muted);
+      display: flex; align-items: center;
+    }
+    .pw-toggle:hover { color: var(--text); }
+    .error-msg { font-size: 12px; color: var(--error); min-height: 16px; }
+    .btn-cancel {
+      padding: 7px 16px; font-size: 12px; font-weight: 500;
+      background: none; border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--muted); cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-cancel:hover { color: var(--text); border-color: var(--text); background: var(--hover); }
+    .btn-submit {
+      padding: 7px 16px; font-size: 12px; font-weight: 600;
+      background: var(--primary); border: none;
+      border-radius: var(--radius); color: #fff; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-submit:hover { background: var(--primary-h); }
+    .btn-submit:disabled { opacity: .6; cursor: not-allowed; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 2000;
+      padding: 10px 16px; border-radius: var(--radius);
+      font-size: 13px; font-weight: 500;
+      opacity: 0; transform: translateY(8px);
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.success { background: var(--success); color: #fff; }
+    #toast.error   { background: var(--error);   color: #fff; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <a class="topbar-brand" href="/">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
+      <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/>
+    </svg>
+    <span class="brand-name">NaSnap</span>
+  </a>
+  <div class="topbar-sep"></div>
+  <span class="topbar-title">User Management</span>
+  <div class="topbar-right">
+    <a href="/" class="btn-ghost">
+      <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+      Back to App
+    </a>
+    <button class="btn-ghost" onclick="logout()">
+      <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+      Sign out
+    </button>
+  </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+  <div class="card">
+    <div class="card-header">
+      <h2>Users</h2>
+      <span class="count" id="user-count">—</span>
+    </div>
+    <div class="toolbar">
+      <button class="btn-primary" onclick="openAddModal()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Add User
+      </button>
+      <div class="search-wrap">
+        <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input id="search" class="search-input" type="search" placeholder="Search users…" oninput="renderTable()">
+      </div>
+    </div>
+    <div id="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-col="username" onclick="sortBy('username')">Username<span class="sort-icon"></span></th>
+            <th data-col="role"     onclick="sortBy('role')">Role<span class="sort-icon"></span></th>
+            <th data-col="created_at" onclick="sortBy('created_at')">Created<span class="sort-icon"></span></th>
+            <th style="cursor:default">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div id="empty" class="empty" style="display:none">No users found.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Add User modal -->
+<div id="modal-add" class="modal-overlay" onclick="closeModal('modal-add', event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add User</h3>
+      <button class="btn-icon" onclick="closeModal('modal-add')">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Username</label>
+        <input id="add-username" class="form-control" type="text" placeholder="e.g. jsmith" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <div class="pw-wrap">
+          <input id="add-password" class="form-control" type="password" placeholder="Min. 6 characters" autocomplete="new-password">
+          <button type="button" class="pw-toggle" onclick="togglePw('add-password', this)">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Role</label>
+        <select id="add-role" class="form-control">
+          <option value="viewer">Viewer — read-only access</option>
+          <option value="admin">Admin — full access</option>
+        </select>
+      </div>
+      <div id="add-error" class="error-msg"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('modal-add')">Cancel</button>
+      <button id="add-submit" class="btn-submit" onclick="submitAdd()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change Password modal -->
+<div id="modal-pw" class="modal-overlay" onclick="closeModal('modal-pw', event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Change Password — <span id="pw-target-name" style="color:var(--muted)"></span></h3>
+      <button class="btn-icon" onclick="closeModal('modal-pw')">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>New Password</label>
+        <div class="pw-wrap">
+          <input id="pw-new" class="form-control" type="password" placeholder="Min. 6 characters" autocomplete="new-password">
+          <button type="button" class="pw-toggle" onclick="togglePw('pw-new', this)">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="pw-error" class="error-msg"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('modal-pw')">Cancel</button>
+      <button id="pw-submit" class="btn-submit" onclick="submitPw()">Save Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+var _users = [];
+var _sortCol = 'username';
+var _sortDir = 'asc';
+var _me = null;
+var _pwTarget = null;
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+function logout() {
+  fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    .finally(function() { window.location.replace('/login'); });
+}
+
+fetch('/api/auth/me', { credentials: 'include' })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (!d.authenticated) { window.location.replace('/login'); return; }
+    _me = d.username;
+    loadUsers();
+  })
+  .catch(function() { window.location.replace('/login'); });
+
+// ── Data ──────────────────────────────────────────────────────────────────────
+
+function loadUsers() {
+  fetch('/api/auth/users', { credentials: 'include' })
+    .then(function(r) {
+      if (r.status === 401 || r.status === 403) { window.location.replace('/'); return; }
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data) return;
+      _users = data;
+      renderTable();
+    });
+}
+
+// ── Table ─────────────────────────────────────────────────────────────────────
+
+function sortBy(col) {
+  if (_sortCol === col) _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+  else { _sortCol = col; _sortDir = 'asc'; }
+  renderTable();
+}
+
+function renderTable() {
+  var q = (document.getElementById('search').value || '').toLowerCase();
+  var rows = _users.filter(function(u) {
+    return u.username.toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
+  });
+  rows.sort(function(a, b) {
+    var va = (a[_sortCol] || '').toLowerCase();
+    var vb = (b[_sortCol] || '').toLowerCase();
+    return _sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+
+  // Update sort indicators
+  document.querySelectorAll('thead th[data-col]').forEach(function(th) {
+    th.classList.remove('asc', 'desc');
+    if (th.dataset.col === _sortCol) th.classList.add(_sortDir);
+  });
+
+  var tbody = document.getElementById('tbody');
+  var empty = document.getElementById('empty');
+  var count = document.getElementById('user-count');
+  count.textContent = _users.length + ' user' + (_users.length === 1 ? '' : 's');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(function(u) {
+    var initials = u.username.substring(0, 2).toUpperCase();
+    var createdFmt = u.created_at ? u.created_at.substring(0, 10) : '—';
+    var isSelf = (u.username === _me);
+    return '<tr>' +
+      '<td><div class="td-user">' +
+        '<div class="avatar">' + initials + '</div>' +
+        '<span>' + esc(u.username) + (isSelf ? ' <span style="font-size:10px;color:var(--muted)">(you)</span>' : '') + '</span>' +
+      '</div></td>' +
+      '<td><span class="role-badge ' + esc(u.role) + '">' + esc(u.role) + '</span></td>' +
+      '<td class="td-date">' + createdFmt + '</td>' +
+      '<td><div class="actions">' +
+        '<button class="btn-icon" title="Change password" onclick="openPwModal(\'' + esc(u.username) + '\')">' +
+          '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>' +
+            '<path d="M7 11V7a5 5 0 0110 0v4"/>' +
+          '</svg>' +
+        '</button>' +
+        '<button class="btn-icon danger" title="Delete user" ' + (isSelf ? 'disabled' : 'onclick="deleteUser(\'' + esc(u.username) + '\')"') + '>' +
+          '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<polyline points="3 6 5 6 21 6"/>' +
+            '<path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>' +
+            '<path d="M10 11v6"/><path d="M14 11v6"/>' +
+            '<path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>' +
+          '</svg>' +
+        '</button>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+
+function deleteUser(username) {
+  if (!confirm('Delete user "' + username + '"?\nAll their active sessions will be terminated.')) return;
+  fetch('/api/auth/users/' + encodeURIComponent(username), {
+    method: 'DELETE', credentials: 'include'
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { toast('User deleted', 'success'); loadUsers(); }
+      else       { toast(d.error || 'Delete failed', 'error'); }
+    });
+}
+
+// ── Add User modal ────────────────────────────────────────────────────────────
+
+function openAddModal() {
+  document.getElementById('add-username').value = '';
+  document.getElementById('add-password').value = '';
+  document.getElementById('add-role').value = 'viewer';
+  document.getElementById('add-error').textContent = '';
+  openModal('modal-add');
+  setTimeout(function() { document.getElementById('add-username').focus(); }, 150);
+}
+
+function submitAdd() {
+  var username = document.getElementById('add-username').value.trim();
+  var password = document.getElementById('add-password').value;
+  var role     = document.getElementById('add-role').value;
+  var errEl    = document.getElementById('add-error');
+  errEl.textContent = '';
+  if (!username) { errEl.textContent = 'Username is required.'; return; }
+  if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+
+  var btn = document.getElementById('add-submit');
+  btn.disabled = true;
+  fetch('/api/auth/users', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: username, password: password, role: role })
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      btn.disabled = false;
+      if (d.ok) { closeModal('modal-add'); toast('User created', 'success'); loadUsers(); }
+      else       { errEl.textContent = d.error || 'Failed to create user.'; }
+    })
+    .catch(function() { btn.disabled = false; errEl.textContent = 'Network error.'; });
+}
+
+// ── Change Password modal ─────────────────────────────────────────────────────
+
+function openPwModal(username) {
+  _pwTarget = username;
+  document.getElementById('pw-target-name').textContent = username;
+  document.getElementById('pw-new').value = '';
+  document.getElementById('pw-error').textContent = '';
+  openModal('modal-pw');
+  setTimeout(function() { document.getElementById('pw-new').focus(); }, 150);
+}
+
+function submitPw() {
+  var password = document.getElementById('pw-new').value;
+  var errEl    = document.getElementById('pw-error');
+  errEl.textContent = '';
+  if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+
+  var btn = document.getElementById('pw-submit');
+  btn.disabled = true;
+  fetch('/api/auth/users/' + encodeURIComponent(_pwTarget) + '/password', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: password })
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      btn.disabled = false;
+      if (d.ok) { closeModal('modal-pw'); toast('Password updated', 'success'); }
+      else       { errEl.textContent = d.error || 'Failed to update password.'; }
+    })
+    .catch(function() { btn.disabled = false; errEl.textContent = 'Network error.'; });
+}
+
+// ── Modal helpers ─────────────────────────────────────────────────────────────
+
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+
+function closeModal(id, evt) {
+  if (evt && evt.target !== document.getElementById(id)) return;
+  document.getElementById(id).classList.remove('open');
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.open').forEach(function(m) {
+      m.classList.remove('open');
+    });
+  }
+  if (e.key === 'Enter') {
+    if (document.getElementById('modal-add').classList.contains('open')) submitAdd();
+    else if (document.getElementById('modal-pw').classList.contains('open')) submitPw();
+  }
+});
+
+// ── Password show/hide ────────────────────────────────────────────────────────
+
+function togglePw(inputId, btn) {
+  var inp = document.getElementById(inputId);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+var _toastTimer;
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + (type || 'success');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function() { el.className = ''; }, 3000);
+}
+</script>
+</body>
+</html>

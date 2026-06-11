@@ -11,6 +11,8 @@ from db import get_db
 from auth import (
     verify_password, create_session, delete_session,
     ensure_default_admin, get_session, ROLE_ADMIN,
+    list_users, create_user, delete_user, change_password,
+    require_admin,
 )
 
 logging.basicConfig(
@@ -22,6 +24,7 @@ _HERE       = os.path.dirname(os.path.abspath(__file__))
 _PLUGIN_DIR = os.path.join(_HERE, 'plugins', 'netapp_storage')
 _UI_FILE    = os.path.join(_PLUGIN_DIR, 'ui.html')
 _LOGIN_FILE = os.path.join(_HERE, 'login.html')
+_ADMIN_FILE = os.path.join(_HERE, 'admin.html')
 
 
 def create_app():
@@ -77,6 +80,63 @@ def create_app():
         if not sess:
             return jsonify({'authenticated': False}), 401
         return jsonify({'authenticated': True, 'username': sess.get('username'), 'role': sess.get('role', ROLE_ADMIN)})
+
+    # ── User management API (admin only) ─────────────────────────────
+    @app.route('/api/auth/users')
+    @require_admin
+    def _users_list():
+        return jsonify(list_users())
+
+    @app.route('/api/auth/users', methods=['POST'])
+    @require_admin
+    def _users_create():
+        data = request.get_json() or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        role = data.get('role', 'viewer')
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        if role not in ('admin', 'viewer'):
+            return jsonify({'error': 'Invalid role'}), 400
+        try:
+            create_user(username, password, role)
+        except Exception as e:
+            if 'UNIQUE' in str(e):
+                return jsonify({'error': 'Username already exists'}), 409
+            raise
+        return jsonify({'ok': True})
+
+    @app.route('/api/auth/users/<username>', methods=['DELETE'])
+    @require_admin
+    def _users_delete(username):
+        sess = getattr(g, '_nasnap_session', {})
+        if username == sess.get('username'):
+            return jsonify({'error': 'Cannot delete your own account'}), 400
+        delete_user(username)
+        return jsonify({'ok': True})
+
+    @app.route('/api/auth/users/<username>/password', methods=['POST'])
+    @require_admin
+    def _users_change_password(username):
+        data = request.get_json() or {}
+        password = data.get('password') or ''
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        change_password(username, password)
+        return jsonify({'ok': True})
+
+    # ── Admin UI ──────────────────────────────────────────────────────
+    @app.route('/admin')
+    def _admin():
+        sess = getattr(g, '_nasnap_session', {})
+        if not sess:
+            return redirect('/login')
+        row = get_db().query_one("SELECT role FROM np_users WHERE username=?", (sess.get('username'),))
+        if not row or row['role'] != ROLE_ADMIN:
+            return redirect('/')
+        return send_file(_ADMIN_FILE, mimetype='text/html')
 
     # ── Plugin registration ───────────────────────────────────────────
     sys.path.insert(0, os.path.join(_HERE, 'plugins'))
@@ -142,13 +202,17 @@ def create_app():
       .finally(function () { window.location.replace('/login'); });
   };
 
-  /* populate username in topbar once DOM is ready */
+  /* populate username in topbar; show admin link for admin role */
   document.addEventListener('DOMContentLoaded', function () {
     fetch('/api/auth/me', { credentials: 'include' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         var el = document.getElementById('ns-username');
         if (el && d.username) el.textContent = d.username;
+        if (d.role === 'admin') {
+          var lnk = document.getElementById('ns-admin-link');
+          if (lnk) lnk.style.display = 'flex';
+        }
       });
   });
 })();
@@ -161,6 +225,22 @@ def create_app():
         'gap:8px;padding-bottom:4px;">'
         '<span id="ns-username" style="font-size:11px;color:var(--muted);'
         'white-space:nowrap;padding:0 4px;"></span>'
+        # Users admin link (hidden until /api/auth/me confirms admin role)
+        '<a id="ns-admin-link" href="/admin" title="User Management" '
+        'style="display:none;align-items:center;gap:5px;padding:5px 10px;'
+        'font-size:11px;font-weight:500;color:var(--muted);background:none;'
+        'border:1px solid var(--border);border-radius:6px;cursor:pointer;'
+        'text-decoration:none;transition:color .15s,border-color .15s,background .15s;" '
+        'onmouseover="this.style.color=\'var(--text)\';this.style.borderColor=\'var(--text)\';this.style.background=\'var(--hover)\'" '
+        'onmouseout="this.style.color=\'var(--muted)\';this.style.borderColor=\'var(--border)\';this.style.background=\'none\'">'
+        '<svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>'
+        '<circle cx="9" cy="7" r="4"/>'
+        '<path d="M23 21v-2a4 4 0 00-3-3.87"/>'
+        '<path d="M16 3.13a4 4 0 010 7.75"/>'
+        '</svg>'
+        'Users'
+        '</a>'
         '<button onclick="nasnapLogout()" title="Sign out" '
         'style="display:flex;align-items:center;gap:5px;padding:5px 10px;'
         'font-size:11px;font-weight:500;color:var(--muted);background:none;'

@@ -95,6 +95,34 @@ def ensure_default_admin():
         logging.info("Default admin user created (set NASNAP_ADMIN_PASSWORD to change)")
 
 
+def list_users() -> list:
+    from db import get_db
+    rows = get_db().query("SELECT username, role, created_at FROM np_users ORDER BY username")
+    return [dict(r) for r in rows]
+
+
+def create_user(username: str, password: str, role: str = 'viewer') -> None:
+    from db import get_db
+    get_db().execute(
+        "INSERT INTO np_users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
+        (username, hash_password(password), role, datetime.now(timezone.utc).isoformat())
+    )
+
+
+def delete_user(username: str) -> None:
+    from db import get_db
+    get_db().execute("DELETE FROM np_users WHERE username=?", (username,))
+    get_db().execute("DELETE FROM np_sessions WHERE username=?", (username,))
+
+
+def change_password(username: str, new_password: str) -> None:
+    from db import get_db
+    get_db().execute(
+        "UPDATE np_users SET password_hash=? WHERE username=?",
+        (hash_password(new_password), username)
+    )
+
+
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -102,6 +130,22 @@ def require_auth(f):
         sess = get_session(token) if token else None
         if not sess:
             return jsonify({'error': 'Unauthorized'}), 401
+        g._nasnap_session = sess
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        from db import get_db
+        token = request.cookies.get('nasnap_session')
+        sess = get_session(token) if token else None
+        if not sess:
+            return jsonify({'error': 'Unauthorized'}), 401
+        row = get_db().query_one("SELECT role FROM np_users WHERE username=?", (sess['username'],))
+        if not row or row['role'] != ROLE_ADMIN:
+            return jsonify({'error': 'Forbidden'}), 403
         g._nasnap_session = sess
         return f(*args, **kwargs)
     return decorated
