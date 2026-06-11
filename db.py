@@ -67,7 +67,8 @@ class NaSnapDB:
     def _get_conn(self):
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             os.makedirs(DATA_DIR, exist_ok=True)
-            conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30.0)
+            conn = sqlite3.connect(DB_FILE, check_same_thread=False,
+                                   timeout=30.0, isolation_level=None)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("PRAGMA journal_mode = WAL")
