@@ -4,7 +4,7 @@ import json as _json
 import logging
 from datetime import datetime, timezone
 
-# pegaprox_compat must be importable before the plugin loads
+# nasnap_core must be importable before the plugin loads
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, request, jsonify, send_file, redirect, g, Response
@@ -224,7 +224,7 @@ def create_app():
         'settings/update/apply',
     }
 
-    from pegaprox.api.plugins import get_all_routes, make_view
+    from nasnap_core.api.plugins import get_all_routes, make_view
     for path, handler in get_all_routes('netapp_storage').items():
         if path in _NS_ROUTE_SKIP:
             continue
@@ -349,6 +349,25 @@ def create_app():
             '>Export Plugin Data</a>',
             '>Export NaSnap Backup</a>',
         ),
+        # localStorage key for language preference
+        (
+            "localStorage.getItem('pegaprox-language')",
+            "localStorage.getItem('nasnap-language')",
+        ),
+        # Default ONTAP account name in endpoint form (JS reset)
+        ("document.getElementById('ep_user').value = 'pegaprox'",
+         "document.getElementById('ep_user').value = 'nasnap'"),
+        # Default ONTAP account name in endpoint form (JS fallback)
+        (".value.trim() || 'pegaprox'", ".value.trim() || 'nasnap'"),
+        # Default ONTAP account name in wizard input
+        ('<input class="form-control" id="wiz_ep_user" value="pegaprox">',
+         '<input class="form-control" id="wiz_ep_user" value="nasnap">'),
+        # Default ONTAP account name in endpoint input
+        ('<input id="ep_user" value="pegaprox">',
+         '<input id="ep_user" value="nasnap">'),
+        # Help text: ONTAP account suggestion
+        ('create a dedicated <code>pegaprox</code> account on ONTAP and register',
+         'create a dedicated <code>nasnap</code> account on ONTAP and register'),
     ]
 
     # Enterprise Blue palette — replaces the plugin's orange-dark defaults.

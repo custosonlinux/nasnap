@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Build the NaSnap Docker image.
-# Resolves symlinks (plugins/netapp_storage, pegaprox) into a real temp context
-# so Docker can include them — these point outside the build context in dev.
+# Uses rsync to create a clean build context (no .venv, no .env, no DB files).
 set -euo pipefail
 
 IMAGE="${1:-nasnap:latest}"

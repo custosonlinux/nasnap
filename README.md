@@ -2,7 +2,7 @@
 
 **Standalone NetApp ONTAP Snapshot Manager for Proxmox VE**
 
-NaSnap is a self-contained web application that brings NetApp ONTAP snapshot and backup management to Proxmox VE environments — without requiring a full PegaProx installation. It runs as a single Docker container with its own authentication, SQLite database, and Enterprise Blue UI.
+NaSnap is a self-contained web application that brings NetApp ONTAP snapshot and backup management to Proxmox VE environments — without requiring any external framework. It runs as a single Docker container with its own authentication, SQLite database, and Enterprise Blue UI.
 
 ---
 
@@ -16,7 +16,7 @@ NaSnap is a self-contained web application that brings NetApp ONTAP snapshot and
 - **Multi-Host / Multi-Endpoint** — manage multiple Proxmox VE hosts and ONTAP clusters from one instance
 - **User Management** — built-in auth with admin and viewer roles; Argon2id password hashing; session tokens
 - **Encrypted Credentials** — ONTAP passwords stored with AES-256-GCM at rest
-- **DB Export / Import** — backup and restore all configuration from Settings
+- **DB Export / Import** — backup and restore all configuration (including user accounts) from Settings
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Network access from the NaSnap container to:
 git clone https://github.com/custosonlinux/nasnap.git
 cd nasnap
 
-# 2. Build image (resolves plugin symlinks — use this instead of docker build directly)
+# 2. Build image
 ./build-docker.sh
 
 # 3. Configure
@@ -105,21 +105,14 @@ Open **`/admin`** (top bar → Users) to create, delete users and reset password
 git clone https://github.com/custosonlinux/nasnap.git
 cd nasnap
 
-# Symlink the NetApp plugin source (adjust path to your checkout)
-mkdir -p plugins
-ln -s /path/to/netapp/plugins/netapp_storage plugins/netapp_storage
-ln -s pegaprox_compat pegaprox
-
 # Virtual environment
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # Run dev server (auto-login available at /dev/autologin)
-DEBUG=1 python app.py
+DEBUG=1 .venv/bin/python app.py
 ```
-
-The `pegaprox_compat/` shim layer provides stub implementations of all PegaProx framework imports so the plugin runs unmodified.
 
 ## Architecture
 
@@ -131,31 +124,35 @@ nasnap/
 ├── login.html              # Standalone login page
 ├── admin.html              # User management (admin only)
 ├── settings.html           # Profile, password change, system + DB info
-├── pegaprox_compat/        # Shim layer — replaces PegaProx imports for standalone use
+├── nasnap_core/            # Framework layer — standalone replacements for all external dependencies
 │   ├── api/plugins.py      # Route registry (register_plugin_route / get_all_routes)
 │   ├── core/db.py          # Delegates to nasnap db.py
-│   └── utils/              # auth, ssh_pool, permissions shims
+│   └── utils/              # auth, ssh_pool, permissions
 ├── plugins/
-│   └── netapp_storage/     # NetApp ONTAP plugin (symlink in dev, dereferenced at Docker build)
+│   └── netapp_storage/     # NetApp ONTAP plugin (full source, no external dependency)
 │       ├── ui.html         # Plugin UI — served at / with Enterprise Blue theme injected
 │       ├── api/            # snapshots, restore, schedules, DR, provisioning, recovery, …
 │       └── db/schema.sql
-├── build-docker.sh         # Docker build script — dereferences symlinks via rsync -L
+├── build-docker.sh         # Docker build script — creates clean build context via rsync
 ├── Dockerfile
 └── docker-compose.yml
 ```
 
 ### How theme injection works
 
-`ui.html` ships with the PegaProx orange theme. `app.py` patches two layers before serving it:
+`ui.html` ships with an orange dark theme. `app.py` patches two layers before serving it:
 
 1. **Static CSS** — direct string replacement of `:root` variable values via `_THEME_SUBS`
-2. **JS runtime** — the plugin's theme switcher defaults are redirected from `proxmoxDark` to `enterpriseBlue` (which is already defined in the plugin's theme table)
+2. **JS runtime** — the plugin's theme switcher default is redirected from `proxmoxDark` to `enterpriseBlue` (which is already defined in the plugin's theme table)
 
 ### How plugin routes work
 
-The plugin registers routes via `pegaprox.api.plugins.register_plugin_route()`. After `netapp_storage.register(app)` runs, NaSnap reads all registered paths from `get_all_routes('netapp_storage')` and mounts them as Flask URL rules at `/api/plugins/netapp_storage/api/<path>`.
+The plugin registers routes via `nasnap_core.api.plugins.register_plugin_route()`. After `netapp_storage.register(app)` runs, NaSnap reads all registered paths from `get_all_routes('netapp_storage')` and mounts them as Flask URL rules at `/api/plugins/netapp_storage/api/<path>`. A small skip-set (`_NS_ROUTE_SKIP`) allows NaSnap to override specific routes with its own implementations (e.g. export/import that include user accounts).
 
 ## License
 
-Proprietary — © Custon Online GmbH. All rights reserved.
+GNU Affero General Public License v3.0 (AGPL-3.0)
+
+Copyright © 2024–2026 Custon Online GmbH
+
+See [LICENSE](LICENSE) for full terms.

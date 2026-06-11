@@ -8,6 +8,3 @@ data/
 *.db
 *.db-wal
 *.db-shm
-# local symlinks — created at runtime / dev setup
-pegaprox
-plugins/
