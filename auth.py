@@ -89,7 +89,7 @@ def ensure_default_admin():
     if row and row['c'] == 0:
         pwd = os.environ.get('NASNAP_ADMIN_PASSWORD', 'admin')
         get_db().execute(
-            "INSERT INTO np_users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
+            "INSERT OR IGNORE INTO np_users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
             ('admin', hash_password(pwd), 'admin', datetime.now(timezone.utc).isoformat())
         )
         logging.info("Default admin user created (set NASNAP_ADMIN_PASSWORD to change)")

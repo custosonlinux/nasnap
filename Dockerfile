@@ -19,4 +19,4 @@ EXPOSE 5000
 ENV NASNAP_DATA=/data \
     PORT=5000
 
-CMD ["python", "app.py"]
+CMD ["sh", "-c", "gunicorn -w ${WORKERS:-2} -b 0.0.0.0:${PORT:-5000} --timeout 120 --access-logfile - 'app:create_app()'"]
