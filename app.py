@@ -93,24 +93,35 @@ def create_app():
             methods=['GET', 'POST', 'DELETE', 'PUT'],
         )
 
+    # ── Debug: auto-login (only in DEBUG mode) ───────────────────────
+    if os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes'):
+        @app.route('/dev/autologin')
+        def _dev_autologin():
+            token = create_session('admin')
+            resp = redirect('/')
+            resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax', max_age=3600)
+            return resp
+
     # ── UI ────────────────────────────────────────────────────────────
-    # Injected into ui.html: Enterprise Blue theme + auth guard + logout button
+    # Enterprise Blue palette — replaces the plugin's orange-dark defaults.
+    # _THEME_SUBS patches both the static :root CSS block AND the JS runtime
+    # theme system (which overrides CSS vars at page load when running standalone).
+    _THEME_SUBS = [
+        # Static :root block (lines 11-19 of ui.html)
+        ('--bg:      #0F1419', '--bg:      #1A252F'),
+        ('--card:    #161B22', '--card:    #243542'),
+        ('--border:  #30363D', '--border:  #344955'),
+        ('--hover:   #1C2128', '--hover:   #29414E'),
+        ('--primary: #E57000', '--primary: #005EB8'),
+        ('--text:    #E6EDF3', '--text:    #E9ECEF'),
+        ('--muted:   #8B949E', '--muted:   #728B9A'),
+        # JS runtime theme default (standalone fallback — no parent PegaProx frame)
+        ("|| 'proxmoxDark'",           "|| 'enterpriseBlue'"),
+        ("|| themes['proxmoxDark']",   "|| themes['enterpriseBlue']"),
+    ]
+
+    # Injected into ui.html: auth guard + logout button
     _AUTH_GUARD = """
-<style>
-:root {
-  --bg:      #1A252F;
-  --card:    #243542;
-  --border:  #344955;
-  --hover:   #29414e;
-  --primary: #005EB8;
-  --text:    #E9ECEF;
-  --muted:   #728B9A;
-}
-/* focus ring matches Enterprise Blue */
-input:focus, select:focus, textarea:focus { border-color: #0073D1 !important; box-shadow: 0 0 0 3px rgba(0,115,209,.18); }
-.btn-primary, button.btn-primary { background: #005EB8 !important; }
-.btn-primary:hover, button.btn-primary:hover { background: #0073D1 !important; }
-</style>
 <script>
 (function () {
   /* intercept fetch globally — redirect to /login on 401 */
@@ -174,6 +185,9 @@ input:focus, select:focus, textarea:focus { border-color: #0073D1 !important; bo
             return redirect('/login')
         with open(_UI_FILE, 'r', encoding='utf-8') as f:
             html = f.read()
+        # Apply Enterprise Blue theme by replacing CSS variable values directly
+        for old, new in _THEME_SUBS:
+            html = html.replace(old, new)
         # Auth guard before any other JS
         html = html.replace('<head>', '<head>' + _AUTH_GUARD, 1)
         # Logout button at right end of .subtabs bar
