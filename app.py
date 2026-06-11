@@ -5,7 +5,7 @@ import logging
 # pegaprox_compat must be importable before the plugin loads
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, request, jsonify, send_file, g
+from flask import Flask, request, jsonify, send_file, redirect, g, Response
 
 from db import get_db
 from auth import (
@@ -94,12 +94,47 @@ def create_app():
         )
 
     # ── UI ────────────────────────────────────────────────────────────
+    # Injected into ui.html: intercepts every fetch() and redirects to
+    # /login on 401. Also wires the logout button if the UI has one.
+    _AUTH_GUARD = """
+<script>
+(function () {
+  /* NaSnap auth guard — intercept fetch globally */
+  var _fetch = window.fetch;
+  window.fetch = function () {
+    return _fetch.apply(this, arguments).then(function (r) {
+      if (r.status === 401 && !r.url.endsWith('/api/auth/me') && !r.url.endsWith('/api/auth/login')) {
+        window.location.replace('/login');
+      }
+      return r;
+    });
+  };
+
+  /* Logout helper — call from any button: window.nasnapLogout() */
+  window.nasnapLogout = function () {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+      .finally(function () { window.location.replace('/login'); });
+  };
+})();
+</script>
+"""
+
     @app.route('/')
     def _index():
-        return send_file(_UI_FILE, mimetype='text/html')
+        sess = getattr(g, '_nasnap_session', {})
+        if not sess:
+            return redirect('/login')
+        with open(_UI_FILE, 'r', encoding='utf-8') as f:
+            html = f.read()
+        # Inject auth guard right after <head> so it runs before any other JS
+        html = html.replace('<head>', '<head>' + _AUTH_GUARD, 1)
+        return Response(html, mimetype='text/html')
 
     @app.route('/login')
     def _login_page():
+        # Already logged in → skip login page
+        if getattr(g, '_nasnap_session', {}):
+            return redirect('/')
         return send_file(_LOGIN_FILE, mimetype='text/html')
 
     # ── Startup ───────────────────────────────────────────────────────
