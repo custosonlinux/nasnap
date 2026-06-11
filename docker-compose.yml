@@ -1,0 +1,22 @@
+services:
+  napprox:
+    build: .
+    image: napprox:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - napprox_data:/data
+    environment:
+      NAPPROX_ADMIN_PASSWORD: "${NAPPROX_ADMIN_PASSWORD:-admin}"
+      SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
+      SESSION_HOURS: "8"
+      # DEBUG: "1"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/auth/me')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  napprox_data:

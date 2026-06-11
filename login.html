@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NapProx — Login</title>
+<style>
+  :root {
+    --bg:      #0F1419;
+    --card:    #161B22;
+    --border:  #30363D;
+    --primary: #E57000;
+    --text:    #E6EDF3;
+    --muted:   #8B949E;
+    --error:   #F85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    width: 360px;
+  }
+  .logo {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .logo h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary);
+    letter-spacing: -0.5px;
+  }
+  .logo p {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    margin-top: 16px;
+  }
+  input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus { border-color: var(--primary); }
+  button {
+    width: 100%;
+    margin-top: 24px;
+    background: var(--primary);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 11px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error {
+    margin-top: 14px;
+    color: var(--error);
+    font-size: 13px;
+    text-align: center;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>NapProx</h1>
+    <p>NetApp Storage Manager for Proxmox</p>
+  </div>
+  <form id="loginForm">
+    <label for="username">Username</label>
+    <input id="username" type="text" autocomplete="username" placeholder="admin" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+    <button type="submit" id="btn">Sign in</button>
+    <div class="error" id="err"></div>
+  </form>
+</div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btn');
+  const err = document.getElementById('err');
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  err.style.display = 'none';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value,
+      }),
+      credentials: 'include',
+    });
+    const data = await r.json();
+    if (r.ok) {
+      window.location.href = '/';
+    } else {
+      err.textContent = data.error || 'Login failed';
+      err.style.display = 'block';
+    }
+  } catch (ex) {
+    err.textContent = 'Network error';
+    err.style.display = 'block';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Sign in';
+});
+</script>
+</body>
+</html>
