@@ -1,1 +1,1 @@
-PEGAPROX_VERSION = "napprox-standalone"
+PEGAPROX_VERSION = "nasnap-standalone"

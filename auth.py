@@ -87,21 +87,21 @@ def ensure_default_admin():
     from db import get_db
     row = get_db().query_one("SELECT COUNT(*) as c FROM np_users")
     if row and row['c'] == 0:
-        pwd = os.environ.get('NAPPROX_ADMIN_PASSWORD', 'admin')
+        pwd = os.environ.get('NASNAP_ADMIN_PASSWORD', 'admin')
         get_db().execute(
             "INSERT INTO np_users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
             ('admin', hash_password(pwd), 'admin', datetime.now(timezone.utc).isoformat())
         )
-        logging.info("Default admin user created (set NAPPROX_ADMIN_PASSWORD to change)")
+        logging.info("Default admin user created (set NASNAP_ADMIN_PASSWORD to change)")
 
 
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.cookies.get('napprox_session')
+        token = request.cookies.get('nasnap_session')
         sess = get_session(token) if token else None
         if not sess:
             return jsonify({'error': 'Unauthorized'}), 401
-        g._napprox_session = sess
+        g._nasnap_session = sess
         return f(*args, **kwargs)
     return decorated

@@ -31,18 +31,18 @@ def create_app():
     # ── Custom Request: add .session for plugin compat ────────────────
     from flask import Request as _FlaskRequest
 
-    class NapProxRequest(_FlaskRequest):
+    class NaSnapRequest(_FlaskRequest):
         @property
         def session(self):
-            return getattr(g, '_napprox_session', {})
+            return getattr(g, '_nasnap_session', {})
 
-    app.request_class = NapProxRequest
+    app.request_class = NaSnapRequest
 
     # ── Session middleware ────────────────────────────────────────────
     @app.before_request
     def _load_session():
-        token = request.cookies.get('napprox_session')
-        g._napprox_session = get_session(token) if token else {}
+        token = request.cookies.get('nasnap_session')
+        g._nasnap_session = get_session(token) if token else {}
 
     # ── Auth API ──────────────────────────────────────────────────────
     @app.route('/api/auth/login', methods=['POST'])
@@ -59,21 +59,21 @@ def create_app():
             return jsonify({'error': 'Invalid credentials'}), 401
         token = create_session(username)
         resp = jsonify({'ok': True, 'username': username, 'role': row['role']})
-        resp.set_cookie('napprox_session', token, httponly=True, samesite='Lax', max_age=8 * 3600)
+        resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax', max_age=8 * 3600)
         return resp
 
     @app.route('/api/auth/logout', methods=['POST'])
     def _logout():
-        token = request.cookies.get('napprox_session')
+        token = request.cookies.get('nasnap_session')
         if token:
             delete_session(token)
         resp = jsonify({'ok': True})
-        resp.delete_cookie('napprox_session')
+        resp.delete_cookie('nasnap_session')
         return resp
 
     @app.route('/api/auth/me')
     def _me():
-        sess = getattr(g, '_napprox_session', {})
+        sess = getattr(g, '_nasnap_session', {})
         if not sess:
             return jsonify({'authenticated': False}), 401
         return jsonify({'authenticated': True, 'username': sess.get('username'), 'role': sess.get('role', ROLE_ADMIN)})

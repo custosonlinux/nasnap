@@ -10,15 +10,15 @@ try:
 except ImportError:
     ENCRYPTION_AVAILABLE = False
 
-DATA_DIR = os.environ.get('NAPPROX_DATA', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
-DB_FILE  = os.path.join(DATA_DIR, 'napprox.db')
-KEY_FILE = os.path.join(DATA_DIR, '.napprox_aes256.key')
+DATA_DIR = os.environ.get('NASNAP_DATA', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
+DB_FILE  = os.path.join(DATA_DIR, 'nasnap.db')
+KEY_FILE = os.path.join(DATA_DIR, '.nasnap_aes256.key')
 
 _PLUGIN_SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                'plugins', 'netapp_storage', 'db', 'schema.sql')
 
 
-class NapProxDB:
+class NaSnapDB:
     _instance = None
     _lock = threading.Lock()
 
@@ -38,7 +38,7 @@ class NapProxDB:
         self._init_encryption()
         self._init_schema()
         self._initialized = True
-        logging.info(f"NapProx DB initialized: {DB_FILE}")
+        logging.info(f"NaSnap DB initialized: {DB_FILE}")
 
     def _init_encryption(self):
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -143,11 +143,11 @@ class NapProxDB:
         return data
 
 
-_db: NapProxDB | None = None
+_db: NaSnapDB | None = None
 
 
-def get_db() -> NapProxDB:
+def get_db() -> NaSnapDB:
     global _db
     if _db is None:
-        _db = NapProxDB()
+        _db = NaSnapDB()
     return _db

@@ -3,139 +3,321 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NapProx — Login</title>
+<title>NaSnap — Sign In</title>
 <style>
   :root {
-    --bg:      #0F1419;
-    --card:    #161B22;
-    --border:  #30363D;
-    --primary: #E57000;
-    --text:    #E6EDF3;
-    --muted:   #8B949E;
-    --error:   #F85149;
+    --bg:       #1A252F;
+    --bg2:      #2C3E50;
+    --card:     #34495E;
+    --border:   #4A6278;
+    --hover:    #3D5266;
+    --primary:  #005EB8;
+    --primary2: #0073D1;
+    --text:     #ECF0F1;
+    --muted:    #95A5A6;
+    --error-bg: rgba(231,76,60,0.12);
+    --error:    #E74C3C;
+    --success:  #27AE60;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14px;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 40px;
-    width: 360px;
+
+  /* Subtle grid pattern background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,94,184,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,94,184,0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
   }
-  .logo {
-    text-align: center;
-    margin-bottom: 32px;
+
+  .wrap {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
   }
-  .logo h1 {
-    font-size: 24px;
+
+  /* Product icon */
+  .logo-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary2) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 32px rgba(0,94,184,0.35);
+  }
+  .logo-icon svg { width: 38px; height: 38px; color: #fff; }
+
+  .logo-title {
+    font-size: 26px;
     font-weight: 700;
-    color: var(--primary);
+    color: var(--text);
     letter-spacing: -0.5px;
+    margin-bottom: 4px;
   }
-  .logo p {
+  .logo-sub {
     font-size: 12px;
     color: var(--muted);
-    margin-top: 4px;
+    margin-bottom: 28px;
+    text-align: center;
   }
-  label {
-    display: block;
-    font-size: 13px;
-    color: var(--muted);
-    margin-bottom: 6px;
-    margin-top: 16px;
-  }
-  input {
+
+  /* Card */
+  .card {
     width: 100%;
-    background: var(--bg);
+    background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 16px;
+    padding: 28px 28px 24px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+  }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 20px;
+  }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+
+  .input-wrap { position: relative; }
+  input[type=text], input[type=password] {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
     color: var(--text);
     font-size: 14px;
-    padding: 10px 12px;
+    padding: 10px 14px;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    -webkit-appearance: none;
   }
-  input:focus { border-color: var(--primary); }
-  button {
+  input[type=text]:focus, input[type=password]:focus {
+    border-color: var(--primary2);
+    box-shadow: 0 0 0 3px rgba(0,115,209,0.18);
+  }
+  input::placeholder { color: var(--muted); opacity: 0.55; }
+
+  .eye-btn {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s;
+    border-radius: 4px;
+  }
+  .eye-btn:hover { color: var(--text); }
+  .eye-btn svg { width: 16px; height: 16px; }
+  input[type=password].has-eye, input[type=text].has-eye { padding-right: 38px; }
+
+  .error-box {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    background: var(--error-bg);
+    border: 1px solid rgba(231,76,60,0.3);
+    border-radius: 8px;
+    color: var(--error);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .btn-primary {
     width: 100%;
-    margin-top: 24px;
+    margin-top: 20px;
     background: var(--primary);
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     color: #fff;
     font-size: 14px;
     font-weight: 600;
-    padding: 11px;
+    padding: 11px 16px;
     cursor: pointer;
-    transition: opacity 0.15s;
+    letter-spacing: 0.2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.15s, opacity 0.15s, box-shadow 0.15s;
   }
-  button:hover { opacity: 0.85; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .error {
-    margin-top: 14px;
-    color: var(--error);
-    font-size: 13px;
-    text-align: center;
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary2);
+    box-shadow: 0 4px 16px rgba(0,94,184,0.35);
+  }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
     display: none;
+  }
+
+  .footer {
+    margin-top: 20px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--muted);
+    opacity: 0.6;
   }
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="logo">
-    <h1>NapProx</h1>
-    <p>NetApp Storage Manager for Proxmox</p>
+<div class="wrap">
+  <!-- Logo -->
+  <div class="logo-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/>
+      <path d="M3 5v4c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+      <path d="M3 9v4c0 1.657 4.03 3 9 3s9-1.343 9-3V9"/>
+      <path d="M3 13v4c0 1.657 4.03 3 9 3s9-1.343 9-3v-4"/>
+    </svg>
   </div>
-  <form id="loginForm">
-    <label for="username">Username</label>
-    <input id="username" type="text" autocomplete="username" placeholder="admin" required>
-    <label for="password">Password</label>
-    <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
-    <button type="submit" id="btn">Sign in</button>
-    <div class="error" id="err"></div>
-  </form>
+  <div class="logo-title">NaSnap</div>
+  <div class="logo-sub">NetApp Storage Manager for Proxmox</div>
+
+  <!-- Card -->
+  <div class="card">
+    <div class="card-title">Sign in to your account</div>
+
+    <div class="error-box" id="errBox"></div>
+
+    <form id="loginForm" autocomplete="on" novalidate>
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text"
+               autocomplete="username" placeholder="admin" required autofocus>
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="input-wrap">
+          <input id="password" name="password" type="password"
+                 autocomplete="current-password" placeholder="••••••••"
+                 class="has-eye" required>
+          <button type="button" class="eye-btn" id="eyeBtn" aria-label="Show password">
+            <svg id="eyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary" id="submitBtn">
+        <div class="spinner" id="spinner"></div>
+        <span id="btnText">Sign In</span>
+      </button>
+    </form>
+  </div>
+
+  <div class="footer">NaSnap &nbsp;·&nbsp; NetApp ONTAP for Proxmox VE</div>
 </div>
+
 <script>
-document.getElementById('loginForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const btn = document.getElementById('btn');
-  const err = document.getElementById('err');
-  btn.disabled = true;
-  btn.textContent = 'Signing in…';
-  err.style.display = 'none';
-  try {
-    const r = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        username: document.getElementById('username').value,
-        password: document.getElementById('password').value,
-      }),
-      credentials: 'include',
-    });
-    const data = await r.json();
-    if (r.ok) {
-      window.location.href = '/';
-    } else {
-      err.textContent = data.error || 'Login failed';
-      err.style.display = 'block';
-    }
-  } catch (ex) {
-    err.textContent = 'Network error';
-    err.style.display = 'block';
+(function () {
+  const form    = document.getElementById('loginForm');
+  const btn     = document.getElementById('submitBtn');
+  const btnText = document.getElementById('btnText');
+  const spinner = document.getElementById('spinner');
+  const errBox  = document.getElementById('errBox');
+  const pwdInput = document.getElementById('password');
+  const eyeBtn  = document.getElementById('eyeBtn');
+  const eyeIcon = document.getElementById('eyeIcon');
+
+  // Show/hide password toggle
+  const eyeOpen  = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const eyeClosed = '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+
+  eyeBtn.addEventListener('click', () => {
+    const show = pwdInput.type === 'password';
+    pwdInput.type = show ? 'text' : 'password';
+    eyeIcon.innerHTML = show ? eyeClosed : eyeOpen;
+  });
+
+  function showError(msg) {
+    errBox.textContent = msg;
+    errBox.style.display = 'block';
   }
-  btn.disabled = false;
-  btn.textContent = 'Sign in';
-});
+  function clearError() { errBox.style.display = 'none'; }
+
+  function setLoading(on) {
+    btn.disabled = on;
+    spinner.style.display = on ? 'block' : 'none';
+    btnText.textContent = on ? 'Signing in…' : 'Sign In';
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearError();
+    const username = document.getElementById('username').value.trim();
+    const password = pwdInput.value;
+    if (!username || !password) { showError('Please enter username and password.'); return; }
+
+    setLoading(true);
+    try {
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await r.json();
+      if (r.ok && data.ok) {
+        window.location.href = '/';
+      } else {
+        showError(data.error || 'Authentication failed.');
+      }
+    } catch (_) {
+      showError('Network error — please check your connection.');
+    }
+    setLoading(false);
+  });
+})();
 </script>
 </body>
 </html>

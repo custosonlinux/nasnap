@@ -2,7 +2,7 @@ import os
 import logging
 import threading
 
-_CM_DIR_CANDIDATES = ['/run/napprox', '/var/run/napprox', '/tmp/napprox-cm']
+_CM_DIR_CANDIDATES = ['/run/nasnap', '/var/run/nasnap', '/tmp/nasnap-cm']
 _cm_dir = None
 _cm_dir_lock = threading.Lock()
 

@@ -1,13 +1,13 @@
 services:
-  napprox:
+  nasnap:
     build: .
-    image: napprox:latest
+    image: nasnap:latest
     ports:
       - "5000:5000"
     volumes:
-      - napprox_data:/data
+      - nasnap_data:/data
     environment:
-      NAPPROX_ADMIN_PASSWORD: "${NAPPROX_ADMIN_PASSWORD:-admin}"
+      NASNAP_ADMIN_PASSWORD: "${NASNAP_ADMIN_PASSWORD:-admin}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
       SESSION_HOURS: "8"
       # DEBUG: "1"
@@ -19,4 +19,4 @@ services:
       retries: 3
 
 volumes:
-  napprox_data:
+  nasnap_data:

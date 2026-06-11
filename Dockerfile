@@ -16,7 +16,7 @@ COPY . .
 VOLUME ["/data"]
 EXPOSE 5000
 
-ENV NAPPROX_DATA=/data \
+ENV NASNAP_DATA=/data \
     PORT=5000
 
 CMD ["python", "app.py"]
