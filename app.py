@@ -1,5 +1,6 @@
 import os
 import sys
+import json as _json
 import logging
 from datetime import datetime, timezone
 
@@ -214,8 +215,19 @@ def create_app():
     import netapp_storage
     netapp_storage.register(app)
 
+    # These routes are replaced by NaSnap-specific versions below.
+    # settings/update/* references the plugin GitHub repo — not applicable here.
+    _NS_ROUTE_SKIP = {
+        'settings/export',
+        'settings/import',
+        'settings/update/info',
+        'settings/update/apply',
+    }
+
     from pegaprox.api.plugins import get_all_routes, make_view
     for path, handler in get_all_routes('netapp_storage').items():
+        if path in _NS_ROUTE_SKIP:
+            continue
         route    = f'/api/plugins/netapp_storage/api/{path}'
         endpoint = 'plugin_netapp_' + path.replace('/', '_').replace('-', '__')
         app.add_url_rule(
@@ -223,6 +235,63 @@ def create_app():
             view_func=make_view(handler),
             methods=['GET', 'POST', 'DELETE', 'PUT'],
         )
+
+    # ── DB Export / Import (NaSnap-extended) ─────────────────────────
+    # Extends the plugin's export with np_users so a backup file is
+    # sufficient to fully restore a NaSnap installation on a new server.
+    from netapp_storage.api.settings import build_export_payload, apply_import_payload
+
+    @app.route('/api/plugins/netapp_storage/api/settings/export')
+    @require_admin
+    def _ns_db_export():
+        payload = build_export_payload()
+        payload['nasnap'] = {
+            'np_users': [dict(r) for r in get_db().query(
+                "SELECT username, password_hash, role, created_at FROM np_users"
+            )]
+        }
+        ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        return Response(
+            _json.dumps(payload, indent=2, ensure_ascii=False),
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename="nasnap_backup_{ts}.json"'},
+        )
+
+    @app.route('/api/plugins/netapp_storage/api/settings/import', methods=['POST'])
+    @require_admin
+    def _ns_db_import():
+        try:
+            if request.content_type and 'multipart' in request.content_type:
+                f = request.files.get('file')
+                if not f:
+                    return jsonify({'error': 'No file uploaded'}), 400
+                payload = _json.load(f)
+            else:
+                payload = request.get_json(force=True) or {}
+        except Exception as exc:
+            return jsonify({'error': f'Invalid JSON: {exc}'}), 400
+
+        try:
+            result = apply_import_payload(payload)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        # Restore NaSnap users if present in the backup
+        user_count = 0
+        for u in payload.get('nasnap', {}).get('np_users', []):
+            try:
+                get_db().execute(
+                    "INSERT OR REPLACE INTO np_users "
+                    "(username, password_hash, role, created_at) VALUES (?,?,?,?)",
+                    (u['username'], u['password_hash'],
+                     u.get('role', 'admin'), u.get('created_at', '')),
+                )
+                user_count += 1
+            except Exception as exc:
+                logging.warning(f"[nasnap] import: skipped user {u.get('username')}: {exc}")
+        result['np_users_imported'] = user_count
+
+        return jsonify(result)
 
     # ── Debug: auto-login (only in DEBUG mode) ───────────────────────
     if os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes'):
@@ -234,6 +303,54 @@ def create_app():
             return resp
 
     # ── UI ────────────────────────────────────────────────────────────
+    # ── UI patches: hide PegaProx-specific sections ───────────────────
+    # Deploy Wizard  — only relevant when deploying into PegaProx
+    # Plugin Update  — updates happen via ./build-docker.sh in NaSnap
+    _UI_PATCHES = [
+        # Deploy Wizard: remove the sub-header block (5 lines, unique SVG path)
+        (
+            '<!-- ═══════════════════════ DEPLOY WIZARD ═══════════════════════ -->\n'
+            '      <div class="sub-header">\n'
+            '        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14"'
+            ' fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round"'
+            ' stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286'
+            ' 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>'
+            'Deploy Wizard</span>\n'
+            '        <button class="btn btn-primary btn-sm" onclick="setupWizardOpen()">'
+            '+ Initial Setup</button>\n'
+            '      </div>',
+            '',
+        ),
+        # Plugin Update: wrap section in display:none (start marker)
+        (
+            '      <!-- ═══════════════ PLUGIN UPDATE ═══════════════ -->',
+            '      <div style="display:none"><!-- ═══════════════ PLUGIN UPDATE ═══════════════ -->',
+        ),
+        # Plugin Update: close the display:none wrapper after the card's closing </div>
+        # and rewrite the stale "restart PegaProx" hint to something accurate
+        (
+            'After applying an update, restart PegaProx to activate the new version.\n'
+            '          Your configuration (<code>config.json</code>) and database are never overwritten.\n'
+            '        </p>\n'
+            '      </div>',
+            'To update NaSnap: <code>./build-docker.sh &amp;&amp; docker compose up -d</code>\n'
+            '        </p>\n'
+            '      </div></div>',
+        ),
+        # Data Backup description: mention NaSnap user accounts are included
+        (
+            'Export plugin configuration (endpoints, PVE hosts, volume mappings, schedules,'
+            ' provisioned datastores, SMTP config) as a JSON file.',
+            'Export full NaSnap configuration (endpoints, PVE hosts, volume mappings, schedules,'
+            ' provisioned datastores, SMTP config, and user accounts) as a JSON file.',
+        ),
+        # Export button label
+        (
+            '>Export Plugin Data</a>',
+            '>Export NaSnap Backup</a>',
+        ),
+    ]
+
     # Enterprise Blue palette — replaces the plugin's orange-dark defaults.
     # _THEME_SUBS patches both the static :root CSS block AND the JS runtime
     # theme system (which overrides CSS vars at page load when running standalone).
@@ -349,6 +466,9 @@ def create_app():
             return redirect('/login')
         with open(_UI_FILE, 'r', encoding='utf-8') as f:
             html = f.read()
+        # Hide PegaProx-specific UI sections (Deploy Wizard, Plugin Update)
+        for old, new in _UI_PATCHES:
+            html = html.replace(old, new)
         # Apply Enterprise Blue theme by replacing CSS variable values directly
         for old, new in _THEME_SUBS:
             html = html.replace(old, new)
