@@ -2130,10 +2130,12 @@ async function deleteEndpoint(id, name) {
 // ═══════════════════════════ PVE-HOSTS ════════════════════════════════════
 
 function showAddPveHostForm() {
-  ['pve_name','pve_host','pve_pass','pve_nfs_ip'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['pve_name','pve_host','pve_pass','pve_nfs_ip','pve_nfs_network'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('pve_port').value = '8006';
   document.getElementById('pve_user').value = 'root@pam';
   document.getElementById('pve_ssl').value  = '0';
+  document.getElementById('pveDiscoverResults').style.display = 'none';
+  document.getElementById('pveDiscoverResults').innerHTML = '';
   document.getElementById('addPveHostForm').style.display = '';
   document.body.style.overflow = 'hidden';
 }
@@ -2165,6 +2167,111 @@ async function loadPveHosts() {
         '</div></td></tr>';
     }).join('');
   } catch(e) { toast(e.message,'error'); }
+}
+
+function _extractDomain(host) {
+  // Returns ".ultra.test" from "pve1.ultra.test", "" from bare IPs or single names
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return '';
+  var parts = host.split('.');
+  return parts.length > 1 ? '.' + parts.slice(1).join('.') : '';
+}
+
+async function discoverPveCluster() {
+  var host        = document.getElementById('pve_host').value.trim();
+  var port        = parseInt(document.getElementById('pve_port').value) || 8006;
+  var username    = document.getElementById('pve_user').value.trim();
+  var password    = document.getElementById('pve_pass').value;
+  var ssl_verify  = document.getElementById('pve_ssl').value === '1';
+  var nfs_network = document.getElementById('pve_nfs_network').value.trim();
+  if (!host || !username || !password) { toast('Enter Host, Username and Password first.', 'error'); return; }
+
+  var domain = _extractDomain(host);
+
+  var sp  = document.getElementById('pveDiscoverSpinner');
+  var box = document.getElementById('pveDiscoverResults');
+  sp.style.display = '';
+  box.style.display = 'none';
+  try {
+    var d = await apiPost('pve-hosts/discover', {host, port, username, password, ssl_verify, nfs_network});
+    sp.style.display = 'none';
+    if (!d.success) { toast(d.error || 'Discovery failed', 'error'); return; }
+
+    var nodes = d.nodes;
+    if (!nodes.length) { toast('No nodes found in cluster.', 'error'); return; }
+
+    var rows = nodes.map(function(n, i) {
+      var hostVal = n.has_ip ? n.host : (n.name + domain);
+      var disabled = n.already_exists ? 'disabled' : '';
+      var checked  = n.already_exists ? '' : 'checked';
+      var badge = n.already_exists
+        ? '<span class="badge badge-green" style="font-size:10px;white-space:nowrap">already added</span>'
+        : (n.status === 'online'
+            ? '<span class="badge badge-green" style="font-size:10px">online</span>'
+            : '<span class="badge badge-orange" style="font-size:10px">'+esc(n.status)+'</span>');
+      return '<div style="display:grid;grid-template-columns:20px 80px 1fr 1fr auto;align-items:center;gap:8px;padding:8px 6px;border-bottom:1px solid var(--border)">'
+        + '<input type="checkbox" class="pve-disc-cb" data-idx="'+i+'" '+checked+' '+disabled+'>'
+        + '<span style="font-size:13px;font-weight:600">'+esc(n.name)+'</span>'
+        + '<input class="form-control" id="pve-disc-host-'+i+'" value="'+esc(hostVal)+'" placeholder="host/IP" style="font-size:12px" '+(n.already_exists?'disabled':'')+'>'
+        + '<input class="form-control" id="pve-disc-nfs-'+i+'" value="'+esc(n.nfs_ip||'')+'" placeholder="NFS IP (optional)" style="font-size:12px" '+(n.already_exists?'disabled':'')+'>'
+        + badge
+        + '</div>';
+    }).join('');
+
+    var header = '<div style="display:grid;grid-template-columns:20px 80px 1fr 1fr auto;gap:8px;padding:4px 6px 6px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">'
+      + '<span></span><span>Node</span><span>Host / IP</span><span>NFS Storage IP</span><span></span></div>';
+
+    box.innerHTML =
+      '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">'
+      + 'Found '+nodes.length+' node'+(nodes.length!==1?'s':'')+' — edit host/NFS as needed, then import</div>'
+      + '<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">'+header+rows+'</div>'
+      + '<button class="btn btn-primary btn-sm" onclick="importSelectedPveNodes()">Import Selected <span id="pveImportSpinner" class="spinner" style="display:none;margin-left:4px"></span></button>'
+      + ' <span style="font-size:11px;color:var(--muted);margin-left:6px">NFS IP can also be set later via Edit.</span>'
+      + '<div id="pveImportResult" style="font-size:12px;margin-top:8px"></div>';
+    box.style.display = '';
+  } catch(e) {
+    sp.style.display = 'none';
+    toast(e.message, 'error');
+  }
+}
+
+async function importSelectedPveNodes() {
+  var checked = Array.from(document.querySelectorAll('.pve-disc-cb:checked'));
+  if (!checked.length) { toast('Select at least one node.', 'error'); return; }
+
+  var port      = parseInt(document.getElementById('pve_port').value) || 8006;
+  var username  = document.getElementById('pve_user').value.trim();
+  var password  = document.getElementById('pve_pass').value;
+  var ssl_verify = document.getElementById('pve_ssl').value === '1';
+
+  var sp  = document.getElementById('pveImportSpinner');
+  var res = document.getElementById('pveImportResult');
+  sp.style.display = '';
+  res.textContent  = '';
+
+  var ok = 0, fail = [];
+  for (var i = 0; i < checked.length; i++) {
+    var idx    = checked[i].dataset.idx;
+    var nameEl = checked[i].closest('div').querySelector('span[style*="font-weight:600"]');
+    var name   = nameEl ? nameEl.textContent : 'node'+idx;
+    var host   = document.getElementById('pve-disc-host-'+idx).value.trim();
+    var nfs_ip = document.getElementById('pve-disc-nfs-'+idx).value.trim();
+    if (!host) { fail.push(name + ': Host is empty'); continue; }
+    try {
+      await apiPost('pve-hosts/add', {name, host, port, username, password, ssl_verify, nfs_ip});
+      ok++;
+    } catch(e) {
+      fail.push(name + ': ' + e.message);
+    }
+  }
+
+  sp.style.display = 'none';
+  if (fail.length) {
+    res.innerHTML = '<span style="color:var(--danger)">❌ '+ok+' imported, '+fail.length+' failed:<br>'+fail.map(esc).join('<br>')+'</span>';
+  } else {
+    toast('✓ '+ok+' PVE node'+(ok!==1?'s':'')+' imported.', 'success');
+    hideForm('addPveHostForm');
+    loadPveHosts();
+  }
 }
 
 async function addPveHost() {
@@ -9114,10 +9221,21 @@ loadSnapshots();
           <input id="pve_nfs_ip" placeholder="10.230.77.x — leave blank to use Host/IP above">
         </div>
       </div>
+      <div class="form-group" style="margin-top:4px">
+        <label>NFS Storage Network <span style="font-weight:400;color:var(--muted)">(optional — for cluster auto-discovery)</span></label>
+        <input id="pve_nfs_network" placeholder="e.g. 10.230.77.0/24 or 10.230.77.">
+      </div>
       <div class="form-actions">
         <button class="btn btn-primary" onclick="addPveHost()" data-i18n="btn_save">Save</button>
+        <button class="btn btn-ghost" onclick="discoverPveCluster()">
+          Discover Cluster
+          <span id="pveDiscoverSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+        </button>
         <button class="btn btn-ghost"   onclick="hideForm('addPveHostForm')" data-i18n="btn_cancel">Cancel</button>
       </div>
+
+      <!-- Discovery results (shown after Discover Cluster) -->
+      <div id="pveDiscoverResults" style="display:none;margin-top:16px;border-top:1px solid var(--border);padding-top:16px"></div>
     </div>
   </div>
 </div><!-- /addPveHostForm -->

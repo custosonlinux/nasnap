@@ -230,6 +230,87 @@ def _add_pve_host():
     return {"success": True, "id": hid}
 
 
+def _discover_pve_cluster():
+    """Connect to a seed PVE host and return all cluster nodes with their IPs.
+
+    Optional body field ``nfs_network`` (CIDR or prefix like ``10.230.77.``)
+    triggers a per-node network scan to find the NFS storage IP automatically.
+    """
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    for field in ("host", "username", "password"):
+        if not data.get(field):
+            return {"error": f"Required field missing: {field}"}, 400
+
+    nfs_network = data.get("nfs_network", "").strip()
+
+    def _ip_in_network(ip_str, net):
+        import ipaddress as _ipaddress
+        try:
+            return _ipaddress.ip_address(ip_str) in _ipaddress.ip_network(net, strict=False)
+        except ValueError:
+            prefix = net.rstrip(".")
+            return ip_str.startswith(prefix + ".") or ip_str == prefix
+
+    try:
+        from ..core._helpers import PluginPveSession
+        pve = PluginPveSession({
+            "host":      data["host"],
+            "port":      int(data.get("port", 8006)),
+            "username":  data["username"],
+            "password":  data["password"],
+            "ssl_verify": 1 if data.get("ssl_verify", False) else 0,
+            "nfs_ip":    "",
+        })
+        r = pve._api_get(f"{pve._base}/nodes")
+        if not r.ok:
+            return {"error": f"Failed to fetch nodes: HTTP {r.status_code}"}, 400
+
+        db = get_db()
+        existing_hosts = {row["host"] for row in db.query("SELECT host FROM netapp_pve_hosts")}
+        existing_names = {row["name"] for row in db.query("SELECT name FROM netapp_pve_hosts")}
+
+        nodes = []
+        for n in r.json().get("data", []):
+            node_name = n.get("node", "")
+            if not node_name:
+                continue
+            ip = n.get("ip", "").strip()
+            host_val = ip or node_name
+
+            # Scan node network interfaces for NFS storage IP
+            nfs_ip = ""
+            if nfs_network:
+                try:
+                    nr = pve._api_get(f"{pve._base}/nodes/{node_name}/network")
+                    if nr.ok:
+                        for iface in nr.json().get("data", []):
+                            addr = iface.get("address", "").strip()
+                            if addr and _ip_in_network(addr, nfs_network):
+                                nfs_ip = addr
+                                break
+                except Exception:
+                    pass
+
+            nodes.append({
+                "name":           node_name,
+                "host":           host_val,
+                "has_ip":         bool(ip),
+                "nfs_ip":         nfs_ip,
+                "status":         n.get("status", "unknown"),
+                "already_exists": (
+                    host_val in existing_hosts
+                    or node_name in existing_hosts
+                    or node_name in existing_names
+                ),
+            })
+        return {"success": True, "nodes": nodes}
+    except Exception as exc:
+        return {"error": str(exc)}, 400
+
+
 def _update_pve_host():
     err = _require_admin()
     if err:
@@ -959,6 +1040,7 @@ def register_routes():
 
     register_plugin_route(PLUGIN_ID, "pve-hosts", _list_pve_hosts)
     register_plugin_route(PLUGIN_ID, "pve-hosts/add", _add_pve_host)
+    register_plugin_route(PLUGIN_ID, "pve-hosts/discover", _discover_pve_cluster)
     register_plugin_route(PLUGIN_ID, "pve-hosts/update", _update_pve_host)
     register_plugin_route(PLUGIN_ID, "pve-hosts/delete", _delete_pve_host)
     register_plugin_route(PLUGIN_ID, "pve-hosts/test", _test_pve_host)
