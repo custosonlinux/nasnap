@@ -1795,8 +1795,6 @@ function toast(msg, type, detail) {
     + '<span>' + esc(msg) + detailHtml + '</span>'
     + '<button onclick="_toastHide()" style="background:none;border:none;padding:0;cursor:pointer;font-size:15px;line-height:1;opacity:.6;flex-shrink:0;margin-top:-1px">✕</button>'
     + '</div>';
-  document.documentElement.style.overflow = 'visible';
-  document.body.style.overflow = 'visible';
   el.style.display = 'block';
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(_toastHide, isErr ? 12000 : 4500);
@@ -1970,6 +1968,13 @@ document.querySelectorAll('.subtab').forEach(function(t) {
     document.querySelectorAll('.subtab').forEach(function(x){ if (!x.dataset.drTab) x.classList.remove('active'); });
     document.querySelectorAll('.tab-panel').forEach(function(x){ x.style.display='none'; });
     if (typeof drCloseAllModals === 'function') drCloseAllModals();
+    // Close any open full-screen form overlays so they don't block the new tab
+    ['createSnapshotForm','addScheduleForm','addEndpointForm','editEndpointForm',
+     'addPveHostForm','editPveHostForm','setupWizardModal','provWizModal','bindWizModal',
+     'vmImportModal'].forEach(function(fid) {
+      var fe = document.getElementById(fid);
+      if (fe && fe.style.display !== 'none') hideForm(fid);
+    });
     t.classList.add('active');
     document.getElementById('tab-'+t.dataset.tab).style.display = 'block';
     var loaders = {
@@ -1985,7 +1990,11 @@ document.querySelectorAll('.subtab').forEach(function(t) {
   });
 });
 
-function hideForm(id) { document.getElementById(id).style.display = 'none'; document.body.style.overflow = ''; }
+function hideForm(id) {
+  document.getElementById(id).style.display = 'none';
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
+}
 
 // ═══════════════════════════ ENDPOINTS ════════════════════════════════════
 
@@ -2889,13 +2898,19 @@ async function createSnapshot() {
   var sm_update   = smUpdEl ? smUpdEl.checked : false;
   if (!mapping_id) { toast(t('msg_snap_mapping_req'),'error'); return; }
   if (!name) { toast(t('msg_snap_name_req'),'error'); return; }
+  var _btn = document.querySelector('#createSnapshotForm button.btn-primary');
+  if (_btn) _btn.disabled = true;
   try {
     await apiPost('snapshots/create', {mapping_id, vmids, consistency, label, name, snapmirror_update: sm_update});
-    toast(t('msg_snap_started'),'success');
     hideForm('createSnapshotForm');
     document.getElementById('snap_name').value = '';
     setTimeout(loadSnapshots, 2500);
-  } catch(e) { toast(e.message,'error'); }
+    toast(t('msg_snap_started'),'success');
+  } catch(e) {
+    toast(e.message,'error');
+  } finally {
+    if (_btn) _btn.disabled = false;
+  }
 }
 
 function snapCbChange(key, cb) {
@@ -4722,13 +4737,16 @@ async function updateSchedule(id) {
   var sel = document.getElementById('sched_vmids_select');
   var vmids = sync_vmids ? [] : Array.from(sel.selectedOptions).map(function(o){ return parseInt(o.value); }).filter(function(v){ return !isNaN(v); });
   if (!name||!mapping_id||!cron_expr) { toast(t('msg_fill_required'),'error'); return; }
+  var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
+  if (_sbtn) _sbtn.disabled = true;
   try {
     await apiPost('schedules/update', Object.assign({id,name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload()));
-    toast(t('msg_sched_updated'),'success');
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
+    toast(t('msg_sched_updated'),'success');
   } catch(e) { toast(e.message,'error'); }
+  finally { if (_sbtn) _sbtn.disabled = false; }
 }
 
 async function addSchedule() {
@@ -4745,13 +4763,16 @@ async function addSchedule() {
   var sel = document.getElementById('sched_vmids_select');
   var vmids = sync_vmids ? [] : Array.from(sel.selectedOptions).map(function(o){ return parseInt(o.value); }).filter(function(v){ return !isNaN(v); });
   if (!name||!mapping_id||!cron_expr) { toast(t('msg_fill_required'),'error'); return; }
+  var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
+  if (_sbtn) _sbtn.disabled = true;
   try {
     await apiPost('schedules/add', Object.assign({name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload()));
-    toast(t('msg_sched_saved'),'success');
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
+    toast(t('msg_sched_saved'),'success');
   } catch(e) { toast(e.message,'error'); }
+  finally { if (_sbtn) _sbtn.disabled = false; }
 }
 
 async function toggleSchedule(id, enabled) {
