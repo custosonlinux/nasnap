@@ -5,8 +5,8 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - nasnap_data:/data
-      - nasnap_ssh:/root/.ssh
+      - /docker/nasnap/data:/data
+      - /docker/nasnap/ssh:/root/.ssh
     environment:
       NASNAP_ADMIN_PASSWORD: "${NASNAP_ADMIN_PASSWORD:-admin}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
@@ -23,6 +23,3 @@ services:
       timeout: 5s
       retries: 3
 
-volumes:
-  nasnap_data:
-  nasnap_ssh:
