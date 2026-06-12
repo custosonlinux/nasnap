@@ -374,23 +374,6 @@ def create_app():
          'create a dedicated <code>nasnap</code> account on ONTAP and register'),
     ]
 
-    # Enterprise Blue palette — replaces the plugin's orange-dark defaults.
-    # _THEME_SUBS patches both the static :root CSS block AND the JS runtime
-    # theme system (which overrides CSS vars at page load when running standalone).
-    _THEME_SUBS = [
-        # Static :root block (lines 11-19 of ui.html)
-        ('--bg:      #0F1419', '--bg:      #1A252F'),
-        ('--card:    #161B22', '--card:    #243542'),
-        ('--border:  #30363D', '--border:  #344955'),
-        ('--hover:   #1C2128', '--hover:   #29414E'),
-        ('--primary: #E57000', '--primary: #005EB8'),
-        ('--text:    #E6EDF3', '--text:    #E9ECEF'),
-        ('--muted:   #8B949E', '--muted:   #728B9A'),
-        # JS runtime theme default (standalone fallback — no parent PegaProx frame)
-        ("|| 'proxmoxDark'",           "|| 'enterpriseBlue'"),
-        ("|| themes['proxmoxDark']",   "|| themes['enterpriseBlue']"),
-    ]
-
     # Injected into ui.html: auth guard + logout button
     _AUTH_GUARD = """
 <script>
@@ -491,9 +474,6 @@ def create_app():
             html = f.read()
         # Hide PegaProx-specific UI sections (Deploy Wizard, Plugin Update)
         for old, new in _UI_PATCHES:
-            html = html.replace(old, new)
-        # Apply Enterprise Blue theme by replacing CSS variable values directly
-        for old, new in _THEME_SUBS:
             html = html.replace(old, new)
         # Auth guard before any other JS
         html = html.replace('<head>', '<head>' + _AUTH_GUARD, 1)

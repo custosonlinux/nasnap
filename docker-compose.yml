@@ -5,17 +5,16 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - /docker/nasnap/data:/data
-      - /docker/nasnap/ssh:/root/.ssh
+      - ./data:/data
+      - ./ssh:/root/.ssh
     environment:
       NASNAP_ADMIN_PASSWORD: "${NASNAP_ADMIN_PASSWORD:-admin}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
       SESSION_HOURS: "8"
       # DEBUG: "1"
     dns:
-      - 10.200.1.1
-      - 10.200.1.2
-      - 10.200.1.26
+      - 10.230.3.151
+      - 10.230.3.152
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]

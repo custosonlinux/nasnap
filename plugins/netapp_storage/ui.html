@@ -9,17 +9,17 @@
   media="print" onload="this.media='all'">
 <style>
   :root {
-    --bg:      #0F1419;
-    --card:    #161B22;
-    --border:  #30363D;
-    --hover:   #1C2128;
-    --primary: #E57000;
-    --text:    #E6EDF3;
-    --muted:   #8B949E;
-    --success: #3FB950;
-    --warning: #D29922;
-    --error:   #F85149;
-    --info:    #58A6FF;
+    --bg:      #2C3E50;
+    --card:    #34495E;
+    --border:  #4A6278;
+    --hover:   #3D5266;
+    --primary: #005EB8;
+    --text:    #ECF0F1;
+    --muted:   #95A5A6;
+    --success: #27AE60;
+    --warning: #F39C12;
+    --error:   #E74C3C;
+    --info:    #3498DB;
     --font:    'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --mono:    'JetBrains Mono', 'Fira Code', monospace;
   }
@@ -347,92 +347,6 @@
 </style>
 </head>
 <body>
-
-<script>
-/* Apply PegaProx theme.
- * Strategy 1 (preferred): read --color-* vars directly from the parent document
- *   and watch for changes via MutationObserver.  Works because the plugin is
- *   served same-origin, so window.parent.document is accessible.
- * Strategy 2 (fallback for standalone use): ?theme= URL param + local table.
- */
-(function() {
-  // PegaProx sets --color-<key> on its documentElement via applyTheme().
-  // Map those to the plugin's CSS variable names.
-  var PARENT_MAP = {
-    '--primary':  '--color-primary',
-    '--bg':       '--color-dark',
-    '--card':     '--color-card',
-    '--border':   '--color-border',
-    '--hover':    '--color-hover',
-    '--text':     '--color-text',
-    '--muted':    '--color-textMuted',
-    '--success':  '--color-success',
-    '--warning':  '--color-warning',
-    '--error':    '--color-error',
-    '--info':     '--color-info',
-  };
-
-  var r = document.documentElement.style;
-
-  function syncFromParent() {
-    try {
-      var ps = window.parent.document.documentElement.style;
-      var any = false;
-      Object.keys(PARENT_MAP).forEach(function(local) {
-        var val = ps.getPropertyValue(PARENT_MAP[local]).trim();
-        if (val) { r.setProperty(local, val); any = true; }
-      });
-      return any;
-    } catch(e) { return false; }
-  }
-
-  // Initial sync
-  var synced = syncFromParent();
-
-  // Watch parent for live theme changes
-  try {
-    new MutationObserver(syncFromParent).observe(
-      window.parent.document.documentElement,
-      {attributes: true, attributeFilter: ['style']}
-    );
-  } catch(e) {}
-
-  // Fallback: ?theme= URL param with full local table (standalone / old PegaProx)
-  if (!synced) {
-    function th(c) {
-      return {'--bg':c.dark,'--card':c.card,'--border':c.border,'--hover':c.hover,
-              '--primary':c.primary,'--text':c.text,'--muted':c.textMuted,
-              '--success':c.success,'--warning':c.warning,'--error':c.error,'--info':c.info};
-    }
-    var themes = {
-      'proxmoxDark':   th({primary:'#E57000',dark:'#0F1419',card:'#161B22',border:'#30363D',hover:'#1C2128',text:'#FFFFFF',textMuted:'#8B949E',success:'#3FB950',warning:'#D29922',error:'#F85149',info:'#58A6FF'}),
-      'midnight':      th({primary:'#6366F1',dark:'#0F172A',card:'#1E293B',border:'#334155',hover:'#1E3A5F',text:'#F1F5F9',textMuted:'#94A3B8',success:'#22C55E',warning:'#EAB308',error:'#EF4444',info:'#3B82F6'}),
-      'forest':        th({primary:'#10B981',dark:'#0D1117',card:'#161B22',border:'#21262D',hover:'#1C2128',text:'#C9D1D9',textMuted:'#8B949E',success:'#3FB950',warning:'#D29922',error:'#F85149',info:'#58A6FF'}),
-      'rose':          th({primary:'#F43F5E',dark:'#18181B',card:'#27272A',border:'#3F3F46',hover:'#2D2D33',text:'#FAFAFA',textMuted:'#A1A1AA',success:'#22C55E',warning:'#EAB308',error:'#EF4444',info:'#3B82F6'}),
-      'ocean':         th({primary:'#0EA5E9',dark:'#0C1222',card:'#132337',border:'#1E3A5F',hover:'#1A3550',text:'#E2E8F0',textMuted:'#94A3B8',success:'#22C55E',warning:'#F59E0B',error:'#EF4444',info:'#3B82F6'}),
-      'highContrast':  th({primary:'#FFD700',dark:'#000000',card:'#0A0A0A',border:'#FFFFFF',hover:'#1A1A1A',text:'#FFFFFF',textMuted:'#CCCCCC',success:'#00FF00',warning:'#FFFF00',error:'#FF0000',info:'#00FFFF'}),
-      'dracula':       th({primary:'#BD93F9',dark:'#282A36',card:'#343746',border:'#44475A',hover:'#3D4051',text:'#F8F8F2',textMuted:'#6272A4',success:'#50FA7B',warning:'#F1FA8C',error:'#FF5555',info:'#8BE9FD'}),
-      'nord':          th({primary:'#88C0D0',dark:'#2E3440',card:'#3B4252',border:'#4C566A',hover:'#434C5E',text:'#ECEFF4',textMuted:'#D8DEE9',success:'#A3BE8C',warning:'#EBCB8B',error:'#BF616A',info:'#81A1C1'}),
-      'monokai':       th({primary:'#F92672',dark:'#272822',card:'#3E3D32',border:'#49483E',hover:'#3E3D32',text:'#F8F8F2',textMuted:'#75715E',success:'#A6E22E',warning:'#E6DB74',error:'#F92672',info:'#66D9EF'}),
-      'matrix':        th({primary:'#00FF41',dark:'#0D0208',card:'#0D0D0D',border:'#003B00',hover:'#001A00',text:'#00FF41',textMuted:'#008F11',success:'#00FF41',warning:'#ADFF2F',error:'#FF0000',info:'#39FF14'}),
-      'sunset':        th({primary:'#FF6B35',dark:'#1A1423',card:'#2D2137',border:'#4A3B5C',hover:'#3D2F4A',text:'#FFF4E6',textMuted:'#B8A9C9',success:'#7CB518',warning:'#FFB627',error:'#E63946',info:'#A855F7'}),
-      'cyberpunk':     th({primary:'#00D9FF',dark:'#0A0A0F',card:'#12121A',border:'#FF00FF',hover:'#1A1A25',text:'#FFFFFF',textMuted:'#8888AA',success:'#00FF9F',warning:'#FFFF00',error:'#FF0055',info:'#00D9FF'}),
-      'github':        th({primary:'#238636',dark:'#0D1117',card:'#161B22',border:'#30363D',hover:'#1F2428',text:'#C9D1D9',textMuted:'#8B949E',success:'#238636',warning:'#D29922',error:'#F85149',info:'#58A6FF'}),
-      'solarizedDark': th({primary:'#B58900',dark:'#002B36',card:'#073642',border:'#586E75',hover:'#094552',text:'#FDF6E3',textMuted:'#93A1A1',success:'#859900',warning:'#B58900',error:'#DC322F',info:'#268BD2'}),
-      'gruvbox':       th({primary:'#FE8019',dark:'#1D2021',card:'#282828',border:'#3C3836',hover:'#32302F',text:'#EBDBB2',textMuted:'#A89984',success:'#B8BB26',warning:'#FABD2F',error:'#FB4934',info:'#83A598'}),
-      'corporateDark': th({primary:'#49afd9',dark:'#1b2a32',card:'#243542',border:'#344955',hover:'#29414e',text:'#e9ecef',textMuted:'#728b9a',success:'#60b515',warning:'#efc006',error:'#f54f47',info:'#49afd9'}),
-      'corporateLight':th({primary:'#0079b8',dark:'#fafafa',card:'#ffffff',border:'#cccccc',hover:'#eeeeee',text:'#313131',textMuted:'#666666',success:'#60b515',warning:'#efc006',error:'#f54f47',info:'#0079b8'}),
-      'enterpriseBlue':th({primary:'#005EB8',dark:'#2C3E50',card:'#34495E',border:'#4A6278',hover:'#3D5266',text:'#ECF0F1',textMuted:'#95A5A6',success:'#27AE60',warning:'#F39C12',error:'#E74C3C',info:'#3498DB'}),
-      'dark':          th({primary:'#E57000',dark:'#0F1419',card:'#161B22',border:'#30363D',hover:'#1C2128',text:'#E6EDF3',textMuted:'#8B949E',success:'#3FB950',warning:'#D29922',error:'#F85149',info:'#58A6FF'}),
-      'corp-dark':     th({primary:'#49afd9',dark:'#1b2a32',card:'#243542',border:'#344955',hover:'#29414e',text:'#e9ecef',textMuted:'#728b9a',success:'#60b515',warning:'#efc006',error:'#f54f47',info:'#49afd9'}),
-      'corp-light':    th({primary:'#0072a3',dark:'#f0f2f5',card:'#ffffff',border:'#cfd8dc',hover:'#e8f0f4',text:'#333333',textMuted:'#888888',success:'#60b515',warning:'#d46b08',error:'#f54f47',info:'#0072a3'}),
-    };
-    var key = new URLSearchParams(window.location.search).get('theme') || 'proxmoxDark';
-    var vars = themes[key] || themes['proxmoxDark'];
-    Object.keys(vars).forEach(function(k) { r.setProperty(k, vars[k]); });
-  }
-})();
-</script>
 
 <script>
 // ─── i18n ─────────────────────────────────────────────────────────────────
@@ -1853,12 +1767,13 @@ window.addEventListener('pageshow', function(evt) {
     'bindWizModal','vmImportModal','drAddPlanModal','drAddEntryModal',
     'drAddGroupModal','drAddVmModal','drRoleModal','drPeerConfigModal',
     'drFailoverModal','drEditEntryModal','restoreConfirmModal',
-    'deleteConfirmModal','logViewModal','rwModal','cwModal'
+    'deleteConfirmModal','logViewModal','rwModal','cwModal','ncModal'
   ];
   forms.forEach(function(id) {
     var el = document.getElementById(id);
     if (el && el.style.display !== 'none') el.style.display = 'none';
   });
+  _ncmSnap = null;
   document.querySelectorAll('[data-ui-overlay]').forEach(function(el) {
     if (el.parentNode === document.body) document.body.removeChild(el);
   });
@@ -1952,8 +1867,9 @@ document.addEventListener('keydown', function(ev) {
     { id: 'logViewModal',      fn: function(){ hideJobLog(); } },
     { id: 'deleteConfirmModal', fn: function(){ var b=document.querySelector('#deleteConfirmModal ._cancel-btn'); if(b) b.click(); } },
     { id: 'rwModal', fn: function(){ closeRestoreWizard(); } },
-    { id: 'cwModal', fn: function(){ closeCloneWizard(); } },
-    { id: 'addScheduleForm',   fn: function(){ hideForm('addScheduleForm'); } }
+    { id: 'cwModal',  fn: function(){ closeCloneWizard(); } },
+    { id: 'ncModal',  fn: function(){ closeNativeCloneModal(); } },
+    { id: 'addScheduleForm', fn: function(){ hideForm('addScheduleForm'); } }
   ];
   for (var i = 0; i < order.length; i++) {
     var el = document.getElementById(order[i].id);
@@ -1975,6 +1891,8 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       var fe = document.getElementById(fid);
       if (fe && fe.style.display !== 'none') hideForm(fid);
     });
+    var _ncm = document.getElementById('ncModal');
+    if (_ncm && _ncm.style.display !== 'none') closeNativeCloneModal();
     t.classList.add('active');
     document.getElementById('tab-'+t.dataset.tab).style.display = 'block';
     var loaders = {
@@ -2738,7 +2656,11 @@ function _snapRowHtml(s) {
   var actions = '';
   if (s.status === 'done') {
     actions += '<button class="btn btn-ghost btn-sm" onclick="prepareRestore(\''+s.id+'\')">'+t('act_restore')+'</button>';
-    if (!isNative) actions += '<button class="btn btn-ghost btn-sm" onclick="prepareClone(\''+s.id+'\')">'+t('act_clone')+'</button>';
+    if (!isNative) {
+      actions += '<button class="btn btn-ghost btn-sm" onclick="prepareClone(\''+s.id+'\')">'+t('act_clone')+'</button>';
+    } else {
+      actions += '<button class="btn btn-ghost btn-sm" onclick="prepareCloneNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')">'+t('act_clone')+'</button>';
+    }
   }
   var delCall = isNative
     ? 'deleteSnapshotNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')'
@@ -5264,6 +5186,149 @@ function prepareClone(snapId) {
     setTimeout(function(){ openCloneWizard(vmid, snapId); }, 600);
   } else {
     openCloneWizard(vmid, snapId);
+  }
+}
+
+// ─── Native ONTAP snapshot clone ─────────────────────────────────────────────
+
+var _ncmSnap = null;
+
+async function prepareCloneNative(uuid, mappingId, snapName) {
+  var snap = _allSnapshots.find(function(s) {
+    return s.source === 'ontap_native'
+        && String(s.mapping_id) === String(mappingId)
+        && (s.ontap_snap_uuid === uuid || s.snap_name === snapName);
+  });
+  if (!snap) { toast('Snapshot not found', 'error'); return; }
+  _ncmSnap = snap;
+
+  document.getElementById('ncm_snap_name').textContent = snap.snap_name;
+  document.getElementById('ncm_snap_ds').textContent =
+    (snap.pve_storage_id || snap.volume_name || '') +
+    (snap.svm_name ? '  (' + snap.svm_name + ')' : '');
+
+  document.getElementById('ncm_new_vmid').value = '';
+  document.getElementById('ncm_new_name').value = '';
+  document.getElementById('ncm_net_iso').checked = true;
+  document.getElementById('ncm_start_after').checked = false;
+  var btn = document.getElementById('ncm_submit');
+  btn.disabled = false; btn.textContent = 'Start Clone';
+
+  document.getElementById('ncModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  ncmLoadManifest(snap);
+  ncmLoadNodes(snap.pve_cluster_id || '');
+  if (snap.pve_cluster_id) {
+    apiFetch('clone/nextid?pve_cluster_id=' + encodeURIComponent(snap.pve_cluster_id))
+      .then(function(d) { if (d.vmid) document.getElementById('ncm_new_vmid').value = d.vmid; })
+      .catch(function(){});
+  }
+}
+
+async function ncmLoadManifest(snap) {
+  var srcSel  = document.getElementById('ncm_src_sel');
+  var srcTxt  = document.getElementById('ncm_src_txt');
+  var hint    = document.getElementById('ncm_manifest_hint');
+  var loading = document.getElementById('ncm_src_loading');
+
+  srcSel.style.display = 'none';
+  srcTxt.style.display = 'none';
+  hint.style.display   = 'none';
+  loading.style.display = '';
+
+  try {
+    var m = await apiFetch(
+      'snapshots/manifest?snap_name=' + encodeURIComponent(snap.snap_name) +
+      '&mapping_id=' + encodeURIComponent(snap.mapping_id)
+    );
+    var vmids   = m.vmids    || [];
+    var vmNames = m.vm_names || {};
+    loading.style.display = 'none';
+
+    if (m.manifest_snap_name && m.manifest_snap_name !== snap.snap_name) {
+      hint.textContent = 'Manifest from “' + m.manifest_snap_name + '” used (most recent NaSnap snapshot in this ONTAP snapshot).';
+      hint.style.display = '';
+    }
+
+    if (vmids.length) {
+      srcSel.innerHTML = vmids.map(function(v) {
+        var n = vmNames[String(v)];
+        return '<option value="' + v + '">' + v + (n ? ' – ' + esc(n) : '') + '</option>';
+      }).join('');
+      srcSel.style.display = '';
+    } else {
+      if (!hint.textContent) hint.textContent = 'No manifest found — enter source VM ID manually.';
+      hint.style.display = '';
+      srcTxt.style.display = '';
+    }
+  } catch(e) {
+    loading.style.display = 'none';
+    hint.textContent = 'Could not read manifest — enter VM ID manually.';
+    hint.style.display = '';
+    srcTxt.style.display = '';
+  }
+}
+
+async function ncmLoadNodes(pveClusterId) {
+  var sel = document.getElementById('ncm_target_node');
+  sel.innerHTML = '<option value="">Auto (any host in cluster)</option>';
+  if (!pveClusterId) return;
+  try {
+    var d = await apiFetch('clone/nodes?pve_cluster_id=' + encodeURIComponent(pveClusterId));
+    (d.nodes || []).forEach(function(n) {
+      var o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+function closeNativeCloneModal() {
+  document.getElementById('ncModal').style.display = 'none';
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
+  _ncmSnap = null;
+}
+
+async function doNativeClone() {
+  if (!_ncmSnap) return;
+  var srcSelVisible = document.getElementById('ncm_src_sel').style.display !== 'none';
+  var src_vmid = srcSelVisible
+    ? parseInt(document.getElementById('ncm_src_sel').value, 10)
+    : parseInt(document.getElementById('ncm_src_txt').value, 10);
+  var new_vmid         = parseInt(document.getElementById('ncm_new_vmid').value, 10);
+  var new_name         = document.getElementById('ncm_new_name').value.trim();
+  var target_node      = document.getElementById('ncm_target_node').value;
+  var network_isolated = document.getElementById('ncm_net_iso').checked;
+  var start_after      = document.getElementById('ncm_start_after').checked;
+
+  if (!src_vmid || isNaN(src_vmid)) { toast('Source VM ID required', 'error'); return; }
+  if (!new_vmid || isNaN(new_vmid)) { toast('New VM ID required', 'error'); return; }
+
+  var btn = document.getElementById('ncm_submit');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    var r = await apiPost('clone/start', {
+      native: true,
+      mapping_id: _ncmSnap.mapping_id,
+      snap_name: _ncmSnap.snap_name,
+      src_vmid: src_vmid,
+      new_vmid: new_vmid,
+      new_name: new_name || undefined,
+      target_node: target_node || undefined,
+      network_isolated: network_isolated,
+      start_after: start_after
+    });
+    closeNativeCloneModal();
+    toast('Clone started — Job ' + (r.job_id || ''), 'success');
+    setTimeout(function() {
+      var jt = document.querySelector('[data-tab="jobs"]');
+      if (jt) { jt.click(); setTimeout(loadAllJobs, 800); }
+    }, 300);
+  } catch(e) {
+    toast(e.message, 'error', e.detail);
+    btn.disabled = false; btn.textContent = 'Start Clone';
   }
 }
 
@@ -9864,6 +9929,77 @@ loadSnapshots();
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ═══════════════════════ Native ONTAP Clone Modal ═══════════════════════ -->
+<div id="ncModal" role="dialog" aria-modal="true" aria-label="Clone from ONTAP Snapshot"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2100;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
+  <div style="max-width:560px;width:100%;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="font-weight:700;font-size:15px">Clone from ONTAP Snapshot</div>
+      <button onclick="closeNativeCloneModal()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">&#x2715;</button>
+    </div>
+
+    <div style="margin:16px 20px 0;padding:10px 14px;background:rgba(240,173,78,.12);border:1px solid rgba(240,173,78,.35);border-radius:6px;font-size:12px;color:var(--warning,#e09600);display:flex;gap:8px;align-items:flex-start">
+      <span style="font-size:15px;line-height:1.5;flex-shrink:0">&#x26A0;&#xFE0F;</span>
+      <span>This snapshot was <strong>not created by NaSnap</strong>. VM metadata is read from the snapmanifest and may be incomplete or outdated. Disk data is intact and fully usable.</span>
+    </div>
+
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">
+
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 14px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;text-transform:uppercase">Snapshot</div>
+        <div id="ncm_snap_name" style="font-family:var(--mono,monospace);font-size:13px"></div>
+        <div id="ncm_snap_ds"   style="font-size:12px;color:var(--muted);margin-top:2px"></div>
+      </div>
+
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">Source VM <span style="font-size:11px;font-weight:400;color:var(--muted)">(config template for clone)</span></label>
+        <div id="ncm_src_loading" style="display:none;color:var(--muted);font-size:12px;padding:6px 0">Loading manifest&hellip;</div>
+        <select id="ncm_src_sel" class="form-input" style="display:none"></select>
+        <input type="number" id="ncm_src_txt" class="form-input" style="display:none" placeholder="VM ID (manual)">
+        <div id="ncm_manifest_hint" class="hint" style="display:none;margin-top:4px"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">New VM ID <span style="color:#d9534f">*</span></label>
+          <input type="number" id="ncm_new_vmid" class="form-input" placeholder="e.g. 200" min="100" max="999999999">
+        </div>
+        <div class="form-group">
+          <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">New Name <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="text" id="ncm_new_name" class="form-input" placeholder="auto">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">Target Host</label>
+        <select id="ncm_target_node" class="form-input">
+          <option value="">Auto (any host in cluster)</option>
+        </select>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+          <input type="checkbox" id="ncm_net_iso" checked style="width:15px;height:15px;margin-top:2px;flex-shrink:0">
+          <span>
+            <strong>Disconnect from network after clone</strong><br>
+            <span style="font-size:11px;opacity:.7">Sets link_down=1 on all NICs &mdash; prevents IP conflicts</span>
+          </span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="ncm_start_after" style="width:15px;height:15px">
+          Start VM after clone
+        </label>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg)">
+      <button class="btn btn-ghost" onclick="closeNativeCloneModal()">Cancel</button>
+      <button id="ncm_submit" class="btn btn-primary" onclick="doNativeClone()">Start Clone</button>
+    </div>
   </div>
 </div>
 
