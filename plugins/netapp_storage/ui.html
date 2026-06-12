@@ -2246,31 +2246,58 @@ async function importSelectedPveNodes() {
   var sp  = document.getElementById('pveImportSpinner');
   var res = document.getElementById('pveImportResult');
   sp.style.display = '';
-  res.textContent  = '';
+  res.innerHTML = '<span style="color:var(--muted)">Generating SSH key…</span>';
 
-  var ok = 0, fail = [];
+  // Ensure SSH key exists before looping
+  try { await apiFetch('setup/ssh-pubkey'); } catch(e) { /* non-fatal */ }
+
+  var lines = [];
+  var importedCount = 0, failCount = 0;
+
   for (var i = 0; i < checked.length; i++) {
     var idx    = checked[i].dataset.idx;
     var nameEl = checked[i].closest('div').querySelector('span[style*="font-weight:600"]');
-    var name   = nameEl ? nameEl.textContent : 'node'+idx;
+    var name   = nameEl ? nameEl.textContent.trim() : 'node'+idx;
     var host   = document.getElementById('pve-disc-host-'+idx).value.trim();
     var nfs_ip = document.getElementById('pve-disc-nfs-'+idx).value.trim();
-    if (!host) { fail.push(name + ': Host is empty'); continue; }
+    if (!host) { lines.push('❌ '+esc(name)+': Host is empty'); failCount++; continue; }
+
+    res.innerHTML = '<span style="color:var(--muted)">Importing '+esc(name)+'…</span>';
+
+    // 1. Add host to DB
+    var hostId;
     try {
-      await apiPost('pve-hosts/add', {name, host, port, username, password, ssl_verify, nfs_ip});
-      ok++;
+      var r = await apiPost('pve-hosts/add', {name, host, port, username, password, ssl_verify, nfs_ip});
+      hostId = r.id;
+      importedCount++;
     } catch(e) {
-      fail.push(name + ': ' + e.message);
+      lines.push('❌ '+esc(name)+': '+esc(e.message));
+      failCount++;
+      continue;
+    }
+
+    // 2. Push SSH key (non-fatal if it fails)
+    try {
+      var sk = await apiPost('setup/push-ssh-key', {host_id: hostId, password: password});
+      if (sk.ok) {
+        lines.push('✓ '+esc(name)+' — added &amp; SSH key pushed');
+      } else {
+        lines.push('✓ '+esc(name)+' — added, SSH key failed: '+esc(sk.error||'unknown'));
+      }
+    } catch(e) {
+      lines.push('✓ '+esc(name)+' — added, SSH key failed: '+esc(e.message));
     }
   }
 
   sp.style.display = 'none';
-  if (fail.length) {
-    res.innerHTML = '<span style="color:var(--danger)">❌ '+ok+' imported, '+fail.length+' failed:<br>'+fail.map(esc).join('<br>')+'</span>';
-  } else {
-    toast('✓ '+ok+' PVE node'+(ok!==1?'s':'')+' imported.', 'success');
-    hideForm('addPveHostForm');
+  var color = failCount > 0 ? 'var(--danger)' : 'var(--success)';
+  res.innerHTML = '<div style="font-size:12px;color:'+color+';line-height:1.7">'+lines.join('<br>')+'</div>';
+
+  if (importedCount > 0) {
     loadPveHosts();
+    if (failCount === 0) {
+      setTimeout(function(){ hideForm('addPveHostForm'); }, 1800);
+    }
   }
 }
 
