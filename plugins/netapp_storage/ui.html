@@ -2138,9 +2138,13 @@ function showAddPveHostForm() {
   document.body.style.overflow = 'hidden';
 }
 
+var _pveHostCache = {};
+
 async function loadPveHosts() {
   try {
     var rows = await apiFetch('pve-hosts');
+    _pveHostCache = {};
+    rows.forEach(function(h){ _pveHostCache[h.id] = h; });
     var tbody = document.getElementById('pveHostsBody');
     if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="empty">'+t('empty_pve')+'</td></tr>';
@@ -2156,6 +2160,7 @@ async function loadPveHosts() {
         '<td>'+(h.ssl_verify ? '<span class="badge badge-green">'+t('opt_ssl_yes_s')+'</span>' : '<span class="badge badge-orange">'+t('opt_ssl_no')+'</span>')+'</td>' +
         '<td><div class="row-actions">' +
           '<button class="btn btn-ghost btn-sm" onclick="testPveHost(\''+h.id+'\',\''+esc(h.name)+'\')">'+t('btn_test')+'</button>' +
+          '<button class="btn btn-ghost btn-sm" onclick="showEditPveHostForm(\''+h.id+'\')">'+t('act_edit')+'</button>' +
           '<button class="btn btn-danger btn-sm" onclick="deletePveHost(\''+h.id+'\',\''+esc(h.name)+'\')">'+t('act_delete')+'</button>' +
         '</div></td></tr>';
     }).join('');
@@ -2177,6 +2182,71 @@ async function addPveHost() {
     hideForm('addPveHostForm');
     loadPveHosts();
   } catch(e) { toast(e.message,'error'); }
+}
+
+function showEditPveHostForm(id) {
+  var h = _pveHostCache[id];
+  if (!h) { toast('Host not found','error'); return; }
+  document.getElementById('edit_pve_id').value      = h.id;
+  document.getElementById('edit_pve_name').value    = h.name     || '';
+  document.getElementById('edit_pve_host').value    = h.host     || '';
+  document.getElementById('edit_pve_port').value    = h.port     || 8006;
+  document.getElementById('edit_pve_user').value    = h.username || '';
+  document.getElementById('edit_pve_pass').value    = '';
+  document.getElementById('edit_pve_nfs_ip').value  = h.nfs_ip   || '';
+  document.getElementById('edit_pve_ssl').checked   = !!h.ssl_verify;
+  document.getElementById('editPveResult').textContent   = '';
+  document.getElementById('editPveSshResult').textContent = '';
+  document.getElementById('edit_pve_ssh_pass').value = '';
+  document.getElementById('editPveHostForm').style.display = '';
+  document.body.style.overflow = 'hidden';
+}
+
+async function saveEditPveHost() {
+  var id        = document.getElementById('edit_pve_id').value;
+  var name      = document.getElementById('edit_pve_name').value.trim();
+  var host      = document.getElementById('edit_pve_host').value.trim();
+  var port      = parseInt(document.getElementById('edit_pve_port').value) || 8006;
+  var username  = document.getElementById('edit_pve_user').value.trim();
+  var password  = document.getElementById('edit_pve_pass').value;
+  var nfs_ip    = document.getElementById('edit_pve_nfs_ip').value.trim();
+  var ssl_verify = document.getElementById('edit_pve_ssl').checked;
+  if (!name || !host || !username) { toast('Name, Host and Username are required.','error'); return; }
+  var sp  = document.getElementById('editPveSpinner');
+  var res = document.getElementById('editPveResult');
+  sp.style.display = '';
+  res.textContent  = '';
+  try {
+    await apiPost('pve-hosts/update', {id, name, host, port, username, password, ssl_verify, nfs_ip});
+    sp.style.display = 'none';
+    toast('PVE host saved.', 'success');
+    hideForm('editPveHostForm');
+    loadPveHosts();
+  } catch(e) {
+    sp.style.display = 'none';
+    res.innerHTML = '<span style="color:var(--danger)">❌ '+esc(e.message)+'</span>';
+  }
+}
+
+async function pushSshKeyFromEdit() {
+  var id   = document.getElementById('edit_pve_id').value;
+  var pass = document.getElementById('edit_pve_ssh_pass').value;
+  if (!pass) { toast('Enter the root password to push the SSH key.','error'); return; }
+  var sp  = document.getElementById('editPveSshSpinner');
+  var res = document.getElementById('editPveSshResult');
+  sp.style.display = '';
+  res.textContent  = '';
+  try {
+    // Ensure key exists (auto-generates if not present)
+    await apiFetch('setup/ssh-pubkey');
+    var d = await apiPost('setup/push-ssh-key', {host_id: id, password: pass});
+    sp.style.display = 'none';
+    if (d.ok) res.innerHTML = '<span style="color:var(--success)">✓ '+esc(d.message||'SSH key pushed successfully.')+'</span>';
+    else res.innerHTML = '<span style="color:var(--danger)">❌ '+esc(d.error||'Failed')+'</span>';
+  } catch(e) {
+    sp.style.display = 'none';
+    res.innerHTML = '<span style="color:var(--danger)">❌ '+esc(e.message)+'</span>';
+  }
 }
 
 async function testPveHost(id, name) {
@@ -3717,6 +3787,7 @@ var _schedSortCol    = 'name';
 var _schedSortDir    = 1;
 var _schedWizStep    = 1;
 var _schedWizHasSM   = false;
+var _schedWizIsEdit  = false;
 
 async function loadSchedules() {
   try {
@@ -4200,6 +4271,7 @@ async function showAddScheduleForm() {
   document.getElementById('sched_time').value = '02:00';
   document.getElementById('schedWizSaveBtn').textContent = t('sched_save');
   updateSchedCron();
+  _schedWizIsEdit = false;
   document.getElementById('addScheduleForm').style.display = '';
   document.body.style.overflow = 'hidden';
   schedWizShowStep(1);
@@ -4245,6 +4317,7 @@ async function showEditScheduleForm(s) {
   }
   parseCronToForm(s.cron_expr);
   document.getElementById('schedWizSaveBtn').textContent = t('sched_update');
+  _schedWizIsEdit = true;
   document.getElementById('addScheduleForm').style.display = '';
   document.body.style.overflow = 'hidden';
   schedWizShowStep(1);
@@ -4345,7 +4418,7 @@ function schedWizShowStep(n) {
     if (pill) {
       pill.classList.remove('active', 'done');
       if (i === n) pill.classList.add('active');
-      else if (i < n) pill.classList.add('done');
+      else if (i < n || _schedWizIsEdit) pill.classList.add('done');
     }
   }
   if (n === 2) schedUpdateNextRuns();
@@ -4355,9 +4428,9 @@ function schedWizShowStep(n) {
 
 function schedWizGoStep(n) {
   if (n === 4 && !_schedWizHasSM) return;
-  // Pills only navigate backward (already-visited steps).
-  // Forward navigation goes through schedWizNext() which validates each step.
-  if (n > _schedWizStep) return;
+  // In edit mode all tabs are freely navigable. In create mode, only allow
+  // backward navigation — forward navigation goes through schedWizNext() for validation.
+  if (!_schedWizIsEdit && n > _schedWizStep) return;
   schedWizShowStep(n);
 }
 
@@ -6514,6 +6587,8 @@ document.addEventListener('keydown', function(e) {
   else if (document.getElementById('addScheduleForm').style.display !== 'none') { hideForm('addScheduleForm'); }
   else if (document.getElementById('addEndpointForm').style.display !== 'none') { hideForm('addEndpointForm'); }
   else if (document.getElementById('addPveHostForm').style.display !== 'none') { hideForm('addPveHostForm'); }
+  else if (document.getElementById('editPveHostForm').style.display !== 'none') { hideForm('editPveHostForm'); }
+  else if (document.getElementById('editEndpointForm').style.display !== 'none') { hideForm('editEndpointForm'); }
   else if (typeof _drModalIds !== 'undefined') {
     var openDr = _drModalIds.find(function(id) { var el = document.getElementById(id + 'Modal'); return el && el.style.display !== 'none'; });
     if (openDr) drHideModal(openDr);
@@ -6593,7 +6668,7 @@ async function wizStep2Load() {
   }
 
   if (!hosts.length) {
-    el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:12px 0">No PVE hosts found — make sure PegaProx clusters are configured.</div>';
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:12px 0">No PVE hosts configured yet — use the <strong>+ Add PVE Host</strong> button in the PVE Hosts tab first.</div>';
     if (sp) sp.style.display = 'none';
     return;
   }
@@ -7828,7 +7903,7 @@ loadSnapshots();
         <!-- Main view: host table -->
         <div id="wizHostMainView">
           <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
-            Hosts are imported from PegaProx automatically. SSH and packages are checked on every host — use the Fix button to resolve any issues.
+            Add PVE hosts using the <strong>+ Add PVE Host</strong> button in the PVE Hosts tab. This wizard checks SSH connectivity and required packages — use <strong>Fix</strong> to push the SSH key or install missing packages.
           </p>
           <div id="wizHostTable" style="margin-bottom:12px">
             <span style="color:var(--muted);font-size:13px">Loading…</span>
@@ -7879,7 +7954,7 @@ loadSnapshots();
             <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">Push Key via Password</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <input class="form-control" id="wizFixHostPass" type="password" placeholder="root password" style="max-width:180px">
-              <button class="btn btn-secondary" onclick="wizPushHostKey()">
+              <button class="btn btn-ghost" onclick="wizPushHostKey()">
                 Push Key
                 <span id="wizFixPushSpinner" class="spinner" style="display:none;margin-left:4px"></span>
               </button>
@@ -7895,7 +7970,7 @@ loadSnapshots();
         <div class="card-title">③ NetApp ONTAP Systems</div>
         <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
           Enter the cluster management IP and your admin credentials. The wizard will
-          create a dedicated <code>pegaprox</code> account on ONTAP and register
+          create a dedicated <code>nasnap</code> service account on ONTAP and register
           the system — the admin password is only used here and never stored.
           Add as many systems as you need (primary, secondary, DR cluster).
         </p>
@@ -7927,11 +8002,11 @@ loadSnapshots();
               <input class="form-control" id="wiz_ep_admin_pass" type="password" placeholder="admin password">
             </div>
           </div>
-          <div style="margin:10px 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Plugin account to create on ONTAP</div>
+          <div style="margin:10px 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Service account to create on ONTAP</div>
           <div class="form-grid">
             <div class="form-group">
               <label>Username</label>
-              <input class="form-control" id="wiz_ep_user" value="pegaprox">
+              <input class="form-control" id="wiz_ep_user" value="nasnap">
             </div>
             <div class="form-group">
               <label>Password</label>
@@ -7997,7 +8072,7 @@ loadSnapshots();
 <div id="provWizModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center" onclick="provWizBackdropClick(event)">
   <div style="max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
-      <div style="font-size:16px;font-weight:700">📦 Provision New Datastore</div>
+      <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>Provision New Datastore</div>
       <button class="btn btn-ghost btn-sm" onclick="hideProvWizard()" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
     </div>
     <div style="padding:20px">
@@ -8367,7 +8442,7 @@ loadSnapshots();
 <div id="vmImportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="vmImportBackdropClick(event)">
   <div style="max-width:860px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
-      <div style="font-size:16px;font-weight:700">📥 Import VMs from Datastore</div>
+      <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Import VMs from Datastore</div>
       <button class="btn btn-ghost btn-sm" onclick="hideVmImportModal()" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
     </div>
     <div style="padding:20px">
@@ -8927,6 +9002,76 @@ loadSnapshots();
     </div>
   </div>
 </div><!-- /editEndpointForm -->
+
+<!-- ── Edit PVE Host Modal ────────────────────────────────────────── -->
+<div id="editPveHostForm" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="if(event.target===this)hideForm('editPveHostForm')">
+  <div style="max-width:560px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit PVE Host</div>
+      <button class="btn btn-ghost btn-sm" onclick="hideForm('editPveHostForm')" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
+    </div>
+    <div style="padding:20px">
+      <input type="hidden" id="edit_pve_id">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Name <span style="font-weight:400;color:var(--muted)">(friendly label)</span></label>
+          <input class="form-control" id="edit_pve_name">
+        </div>
+        <div class="form-group">
+          <label>Host / IP</label>
+          <input class="form-control" id="edit_pve_host">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Port</label>
+          <input class="form-control" id="edit_pve_port" type="number" value="8006">
+        </div>
+        <div class="form-group">
+          <label>NFS IP <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input class="form-control" id="edit_pve_nfs_ip" placeholder="storage network IP">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Username</label>
+          <input class="form-control" id="edit_pve_user">
+        </div>
+        <div class="form-group">
+          <label>Password <span style="font-weight:400;color:var(--muted)">(leave blank to keep existing)</span></label>
+          <input class="form-control" id="edit_pve_pass" type="password" placeholder="unchanged">
+        </div>
+      </div>
+      <div style="margin:8px 0 18px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="edit_pve_ssl"> Verify SSL certificate
+        </label>
+      </div>
+      <div id="editPveResult" style="font-size:12px;margin-bottom:10px"></div>
+      <div class="form-actions" style="margin-bottom:24px">
+        <button class="btn btn-primary" onclick="saveEditPveHost()">
+          Save Changes <span id="editPveSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+        </button>
+        <button class="btn btn-ghost" onclick="hideForm('editPveHostForm')">Cancel</button>
+      </div>
+
+      <!-- SSH Key Push -->
+      <div style="border-top:1px solid var(--border);padding-top:16px">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">Push SSH Key</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">
+          Enter the root password once to push NaSnap's SSH public key — password-less SSH for all future operations.
+        </p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input class="form-control" id="edit_pve_ssh_pass" type="password" placeholder="root password" style="max-width:200px">
+          <button class="btn btn-ghost" onclick="pushSshKeyFromEdit()">
+            Push Key <span id="editPveSshSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+          </button>
+        </div>
+        <div id="editPveSshResult" style="font-size:12px;margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+</div><!-- /editPveHostForm -->
 
 <!-- ── Add PVE Host Modal ─────────────────────────────────────────── -->
 <div id="addPveHostForm" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="addPveHostBackdropClick(event)">

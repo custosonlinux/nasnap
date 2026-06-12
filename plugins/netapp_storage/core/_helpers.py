@@ -83,11 +83,7 @@ def build_pve_client(db, pve_host_id):
 
 
 class PluginPveSession:
-    """Lightweight PVE REST client using plugin-managed credentials.
-
-    Implements the same interface as PegaProx ClusterManager so that
-    snapshot_engine and restore_engine work without modification.
-    """
+    """Lightweight PVE REST client using plugin-managed credentials."""
 
     def __init__(self, pve_host):
         self.host   = pve_host["host"]
@@ -170,7 +166,6 @@ def get_ssh_creds(mgr):
     """Returns (user, password, key_material) from a ClusterManager or PluginPveSession."""
     if isinstance(mgr, PluginPveSession):
         return mgr.ssh_user, mgr.ssh_password, mgr.ssh_key
-    # PegaProx ClusterManager
     user = getattr(mgr.config, "ssh_user", None) or "root"
     key_material = getattr(mgr.config, "ssh_key", None) or ""
     password = mgr.config.pass_ if not key_material else ""
@@ -233,10 +228,10 @@ def ssh_run(host, user, password, cmd, capture=False, stdin_data=None, timeout=6
                 # sshpass braucht BatchMode=no
                 no_batch = [c if c != "BatchMode=yes" else "BatchMode=no" for c in base_ssh]
                 ssh_cmd = no_batch + [f"{user}@{host}", cmd]
-                try:
-                    subprocess.run(["sshpass", "--version"], capture_output=True, check=True)
+                import shutil as _shutil
+                if _shutil.which("sshpass"):
                     final_cmd = ["sshpass", "-p", password] + ssh_cmd
-                except (FileNotFoundError, subprocess.CalledProcessError):
+                else:
                     log.warning("[netapp_storage] sshpass not found")
                     final_cmd = ssh_cmd
         else:

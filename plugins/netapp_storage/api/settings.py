@@ -282,7 +282,7 @@ def _build_notification_email(subject, schedule_name, snap_name, job_status, log
   <!-- Status banner -->
   <div style="background:{cfg['banner']};border-radius:8px 8px 0 0;padding:22px 28px;color:#fff">
     <div style="font-size:22px;font-weight:700">{cfg['icon']}&nbsp; {cfg['label']}</div>
-    <div style="font-size:13px;opacity:.85;margin-top:4px">NetApp ONTAP Storage Plugin · PegaProx</div>
+    <div style="font-size:13px;opacity:.85;margin-top:4px">NaSnap — NetApp ONTAP Snapshot Management for Proxmox</div>
   </div>
 
   <!-- Summary card -->
@@ -304,7 +304,7 @@ def _build_notification_email(subject, schedule_name, snap_name, job_status, log
 
   <!-- Footer -->
   <div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:14px">
-    PegaProx NetApp ONTAP Plugin
+    NaSnap — NetApp ONTAP Snapshot Management for Proxmox
   </div>
 
 </div>
@@ -374,7 +374,7 @@ def send_job_notification(schedule_name, job_status, snap_name,
             return
 
         status_str = 'Success' if job_status == 'done' else job_status.capitalize()
-        subject    = f"[PegaProx] Snapshot {status_str}: {schedule_name} — {snap_name}"
+        subject    = f"[NaSnap] Snapshot {status_str}: {schedule_name} — {snap_name}"
 
         # Build SnapMirror extra row for the summary card
         extra_rows = []
@@ -468,7 +468,7 @@ def _notify_test():
     recipients = [r.strip() for r in recipients_csv.split(',') if r.strip()]
     now_str = datetime.now(timezone.utc).isoformat()
 
-    subject = '[PegaProx] Test notification — NetApp ONTAP plugin'
+    subject = '[NaSnap] Test notification — NetApp ONTAP Snapshot Management'
     fake_log = [
         {"ts": now_str, "msg": "SMTP connection test initiated"},
         {"ts": now_str, "msg": "If you received this email, notifications are configured correctly."},
@@ -736,7 +736,7 @@ def _update_apply():
             'files_updated': len(copied),
             'message':       (
                 f'Plugin updated from branch \'{branch}\'. '
-                'Please restart PegaProx to activate the new version.'
+                'Please restart NaSnap to activate the new version.'
             ),
         })
 

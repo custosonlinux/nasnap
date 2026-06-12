@@ -43,7 +43,11 @@ def create_app():
     class NaSnapRequest(_FlaskRequest):
         @property
         def session(self):
-            return getattr(g, '_nasnap_session', {})
+            sess = getattr(g, '_nasnap_session', {}) or {}
+            # Plugin uses "user" key; NaSnap session stores "username"
+            if 'username' in sess and 'user' not in sess:
+                sess = dict(sess, user=sess['username'])
+            return sess
 
     app.request_class = NaSnapRequest
 

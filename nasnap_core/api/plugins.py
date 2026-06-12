@@ -1,5 +1,5 @@
 import logging
-from flask import jsonify
+from flask import jsonify, Response
 
 _routes: dict[str, dict] = {}
 
@@ -22,6 +22,11 @@ def make_view(handler):
             return jsonify({'error': str(e)}), 500
         if isinstance(result, tuple):
             body, status = result[0], result[1]
+            if isinstance(body, Response):
+                body.status_code = status
+                return body
             return jsonify(body), status
+        if isinstance(result, Response):
+            return result
         return jsonify(result)
     return view

@@ -1,5 +1,5 @@
 """
-NetApp ONTAP Plugin — Recovery API  (v1.1)
+NaSnap — Recovery API  (v1.1)
 
 Endpoints for the "Bind Volume + Restore VMs" wizard:
 

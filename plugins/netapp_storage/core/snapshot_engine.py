@@ -95,7 +95,7 @@ def _run_snapshot(job_id, params, username):
     schedule_id  = params.get("schedule_id", "")
 
     cfg = load_plugin_config()
-    snap_prefix = cfg.get("snapshot_prefix", "NPP_")
+    snap_prefix = cfg.get("snapshot_prefix", "NaSnap_")
 
     if snap_name_input:
         # Manual snapshot: NPP_{user_name}
@@ -370,7 +370,7 @@ def _run_snapshot(job_id, params, username):
                 retention_count  = int(params.get("retention_count") or 7)
                 sched_name_safe  = params.get("snap_name_suffix", "")
                 _cfg             = load_plugin_config()
-                snap_prefix_cfg  = _cfg.get("snapshot_prefix", "NPP_")
+                snap_prefix_cfg  = _cfg.get("snapshot_prefix", "NaSnap_")
                 deleted = _apply_schedule_retention(
                     db, schedule_id, retention_count,
                     client, mapping["volume_uuid"],
@@ -691,14 +691,14 @@ def _run_hook(pve_host, pve_user, pve_pass, pve_key,
     """Runs a pre- or post-script via SSH on the PVE node.
 
     Environment variables for the script:
-      PEGAPROX_VMIDS  – space-separated VMID list
-      PEGAPROX_SNAP   – name of the ONTAP snapshot
-      PEGAPROX_NODE   – PVE node name
+      NASNAP_VMIDS  – space-separated VMID list
+      NASNAP_SNAP   – name of the ONTAP snapshot
+      NASNAP_NODE   – PVE node name
     """
     env = (
-        f"export PEGAPROX_VMIDS={shlex.quote(' '.join(str(v) for v in vmids))}; "
-        f"export PEGAPROX_SNAP={shlex.quote(snap_name)}; "
-        f"export PEGAPROX_NODE={shlex.quote(node)}; "
+        f"export NASNAP_VMIDS={shlex.quote(' '.join(str(v) for v in vmids))}; "
+        f"export NASNAP_SNAP={shlex.quote(snap_name)}; "
+        f"export NASNAP_NODE={shlex.quote(node)}; "
     )
     try:
         ssh_run(pve_host, pve_user, pve_pass,

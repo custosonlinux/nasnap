@@ -1660,7 +1660,7 @@ def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_k
 
     # Search for most recent manifest in .snapshot directory.
     # Useful for ONTAP-native snapshots (hourly.0, daily.0 etc.) that contain
-    # all PegaProx manifests present at that time.
+    # all NaSnap manifests present at that time.
     snap_manifest_dir = os.path.dirname(os.path.dirname(manifest_path))
     if "/.snapshot/" in snap_manifest_dir:
         try:

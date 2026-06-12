@@ -1,10 +1,10 @@
 {
     "default_consistency": "crash",
     "default_restore_method": "sfsr",
-    "snapshot_prefix": "NPP_",
+    "snapshot_prefix": "NaSnap_",
     "job_poll_interval_s": 3,
     "job_poll_timeout_s": 300,
-    "flexclone_mount_base": "/mnt/pegaprox-clone",
+    "flexclone_mount_base": "/mnt/nasnap-clone",
     "manifest_subdir": ".netapp-snapmanifest",
     "san_volume_multiplier": 2.5
 }

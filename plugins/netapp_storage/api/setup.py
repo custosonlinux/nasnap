@@ -43,7 +43,7 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-# ── Step 1: PegaProx system status ───────────────────────────────────────────
+# ── Step 1: System status ─────────────────────────────────────────────────────
 
 def _setup_status():
     """Returns an overview of current wizard state — fast, no external connections."""
@@ -286,7 +286,7 @@ def _get_ssh_pubkey():
             username = grp_name = "nasnap"
         suggested_home = f"/home/{username}"
         hint = (
-            f"Run as root on the PegaProx server:\n"
+            f"Run as root on the NaSnap server:\n"
             f"  mkdir -p {suggested_home}\n"
             f"  chown {username}:{grp_name} {suggested_home}\n"
             f"  usermod -d {suggested_home} {username}\n"
@@ -315,7 +315,7 @@ def _get_ssh_pubkey():
         log.warning(f"[setup] ssh-keygen failed: {stderr}")
         return jsonify({
             "error": f"ssh-keygen failed: {stderr}",
-            "hint":  "Make sure openssh-client is installed on the PegaProx host.",
+            "hint":  "Make sure openssh-client is installed on the NaSnap host.",
         }), 500
     except Exception as exc:
         log.warning(f"[setup] ssh-pubkey generation failed: {exc}")
@@ -365,7 +365,7 @@ def _push_ssh_key():
 
     if not shutil.which("sshpass"):
         return jsonify({
-            "error": "sshpass is not installed on PegaProx. Install it with: apt-get install sshpass",
+            "error": "sshpass is not installed. Install it with: apt-get install sshpass",
         }), 400
 
     # Use ssh-copy-id via sshpass to push the key
@@ -551,14 +551,14 @@ def _run_pkg_install(job_id, host_row, packages):
         )
 
 
-# ── PegaProx cluster import ───────────────────────────────────────────────────
+# ── PVE cluster import ────────────────────────────────────────────────────────
 
 def _get_pve_clusters():
-    """Returns PegaProx-managed Proxmox clusters with live node lists.
+    """Returns Proxmox clusters with live node lists.
 
-    Reads the ``clusters`` table (PegaProx core), decrypts credentials,
-    then fetches ``GET /api2/json/nodes`` from each cluster so the wizard
-    can show the exact nodes the user already has in PegaProx.
+    Reads the ``clusters`` table, decrypts credentials, then fetches
+    ``GET /api2/json/nodes`` from each cluster so the wizard can show
+    the exact nodes the user already has configured.
     """
     import requests as _req
 
@@ -624,7 +624,7 @@ def _get_pve_clusters():
 
 
 def _import_pve_nodes():
-    """Imports selected PVE nodes from a PegaProx cluster into netapp_pve_hosts.
+    """Imports selected PVE nodes from a cluster into netapp_pve_hosts.
 
     Body:
       cluster_id  — id from the clusters table
@@ -683,7 +683,7 @@ def _import_pve_nodes():
         has_sshpass = shutil.which("sshpass") is not None
 
         if not pubkey:
-            ssh_failed = [{"node": n, "error": "No SSH public key found on PegaProx"} for n in imported]
+            ssh_failed = [{"node": n, "error": "No SSH public key found on the NaSnap server"} for n in imported]
         elif not has_sshpass:
             ssh_failed = [{"node": n, "error": "sshpass not installed (apt install sshpass)"} for n in imported]
         else:

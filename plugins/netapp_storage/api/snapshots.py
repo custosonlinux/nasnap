@@ -230,6 +230,34 @@ def _add_pve_host():
     return {"success": True, "id": hid}
 
 
+def _update_pve_host():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    hid = data.get("id")
+    if not hid:
+        return {"error": "id required"}, 400
+    for field in ("name", "host", "username"):
+        if not data.get(field):
+            return {"error": f"Required field missing: {field}"}, 400
+    db = get_db()
+    row = db.query_one("SELECT password_encrypted FROM netapp_pve_hosts WHERE id=?", (hid,))
+    if not row:
+        return {"error": "PVE host not found"}, 404
+    password = data.get("password", "").strip()
+    enc = db._encrypt(password) if password else row["password_encrypted"]
+    db.execute(
+        "UPDATE netapp_pve_hosts SET name=?, host=?, port=?, username=?, "
+        "password_encrypted=?, ssl_verify=?, nfs_ip=? WHERE id=?",
+        (data["name"], data["host"], int(data.get("port", 8006)),
+         data["username"], enc,
+         1 if data.get("ssl_verify", False) else 0,
+         data.get("nfs_ip", "").strip(), hid),
+    )
+    return {"success": True}
+
+
 def _delete_pve_host():
     err = _require_admin()
     if err:
@@ -645,7 +673,7 @@ def _snapshot_manifest():
         except Exception:
             pve_host = mgr.host
 
-        # 1. Exact path: snap_name as subdirectory (PegaProx snapshot)
+        # 1. Exact path: snap_name as subdirectory
         exact = (f"{mapping['nfs_mount_path']}/.snapshot/{snap_name}"
                  f"/{manifest_subdir}/{snap_name}/manifest.json")
         manifest = None
@@ -931,6 +959,7 @@ def register_routes():
 
     register_plugin_route(PLUGIN_ID, "pve-hosts", _list_pve_hosts)
     register_plugin_route(PLUGIN_ID, "pve-hosts/add", _add_pve_host)
+    register_plugin_route(PLUGIN_ID, "pve-hosts/update", _update_pve_host)
     register_plugin_route(PLUGIN_ID, "pve-hosts/delete", _delete_pve_host)
     register_plugin_route(PLUGIN_ID, "pve-hosts/test", _test_pve_host)
 

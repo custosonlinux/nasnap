@@ -1,5 +1,5 @@
 """
-NetApp ONTAP Plugin — DR Recovery Engine  (v1.1)
+NaSnap — DR Recovery Engine  (v1.1)
 
 Volume bind (adopt existing ONTAP volumes into a fresh PVE cluster):
   - NFS    — export policy check → pvesm add nfs → volume_mapping

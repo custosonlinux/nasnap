@@ -1,5 +1,5 @@
 """
-NetApp ONTAP Snapshot / Restore Plugin for PegaProx
+NaSnap — NetApp ONTAP Snapshot Management for Proxmox
 
 Registers all API routes, initialises the DB tables, and mounts a
 management UI under /netapp-snapshots inside the Flask app.
@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_NAME = "NetApp Storage"
 PLUGIN_DIR  = os.path.dirname(os.path.abspath(__file__))
-# Must match the directory name — PegaProx uses the folder name as the plugin ID.
+# Must match the directory name — used as the plugin ID.
 PLUGIN_ID   = os.path.basename(PLUGIN_DIR)
 
 
@@ -166,7 +166,7 @@ def _add_column_if_missing(db, table, column, col_def):
 
 
 def register(app):
-    """Called by PegaProx when the plugin is activated."""
+    """Called by NaSnap when the plugin is activated."""
     _init_db()
 
     from .api.snapshots import register_routes as reg_snap
