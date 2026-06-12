@@ -1833,6 +1833,7 @@ async function api(method, path, body) {
 // confirm() and alert() are blocked in iframe context — use inline modals instead.
 var _uiDialogDepth = 0;
 function _uiOverlayShow(overlay) {
+  overlay.dataset.uiOverlay = '1';
   if (_uiDialogDepth++ === 0) {
     document.documentElement.style.overflow = 'visible';
     document.body.style.overflow = 'visible';
@@ -1846,6 +1847,30 @@ function _uiOverlayHide(overlay) {
     document.body.style.overflow = '';
   }
 }
+
+// BFCache fix: when the browser restores this page from its back/forward cache,
+// close any forms or dialogs that were open when the user navigated away.
+window.addEventListener('pageshow', function(evt) {
+  if (!evt.persisted) return;
+  var forms = [
+    'createSnapshotForm','addScheduleForm','addEndpointForm','editEndpointForm',
+    'editPveHostForm','addPveHostForm','setupWizardModal','provWizModal',
+    'bindWizModal','vmImportModal','drAddPlanModal','drAddEntryModal',
+    'drAddGroupModal','drAddVmModal','drRoleModal','drPeerConfigModal',
+    'drFailoverModal','drEditEntryModal','restoreConfirmModal',
+    'deleteConfirmModal','logViewModal','rwModal','cwModal'
+  ];
+  forms.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && el.style.display !== 'none') el.style.display = 'none';
+  });
+  document.querySelectorAll('[data-ui-overlay]').forEach(function(el) {
+    if (el.parentNode === document.body) document.body.removeChild(el);
+  });
+  _uiDialogDepth = 0;
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
+});
 function uiConfirm(msg, okLabel, okClass) {
   return new Promise(function(resolve) {
     var overlay = document.createElement('div');

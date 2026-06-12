@@ -703,6 +703,14 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// BFCache fix: close any open modals when the browser restores this page from cache.
+window.addEventListener('pageshow', function(evt) {
+  if (!evt.persisted) return;
+  document.querySelectorAll('.modal-overlay.open').forEach(function(m) {
+    m.classList.remove('open');
+  });
+});
+
 // ── Password show/hide ────────────────────────────────────────────────────────
 
 function togglePw(inputId, btn) {
