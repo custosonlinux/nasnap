@@ -44,7 +44,9 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Storage Resize | ✅ grow & shrink | 🟡 Beta grow only | 🟡 Beta grow only |
 | Job cancellation | ✅ | 🟡 Beta | 🟡 Beta |
 | Import VMs from Datastore (adopt existing volumes with VMs) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
-| Full DR Scenario — Failover, Test-DR, Failback | 🔵 In Development | 🔵 In Development | 🔵 In Development |
+| Full DR Failover (planned & emergency) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
+| DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
+| DR Failback | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | Built-in Auth (admin / viewer, Argon2id) | ✅ | ✅ | ✅ |
 | AES-256-GCM credential encryption at rest | ✅ | ✅ | ✅ |
 | DB Export / Import (full config backup) | ✅ | ✅ | ✅ |
@@ -167,7 +169,7 @@ After logging in, open **Settings → Initial Setup** to walk through ONTAP conn
 | `NASNAP_ADMIN_PASSWORD` | `admin` | Password for the default `admin` account (applied on first start only) |
 | `SECRET_KEY` | *(random)* | HMAC key for session tokens — **always set a stable value in production** |
 | `SESSION_HOURS` | `8` | Session lifetime in hours |
-| `WORKERS` | `2` | Gunicorn worker processes |
+| `WORKERS` | `1` | Gunicorn worker processes — keep at 1; the background scheduler thread is single-instance and must not run in multiple workers |
 | `PORT` | `5000` | Listening port |
 | `NASNAP_DATA` | `/data` | Persistent data directory (DB + AES key) |
 | `DEBUG` | — | Set to `1` for Flask debug mode and the `/dev/autologin` shortcut |
@@ -435,10 +437,10 @@ dd if=<src_lv> of=<dst_lv> bs=512M iflag=direct oflag=direct conv=fsync
 
 | Type | Pattern | Example |
 |---|---|---|
-| Manual snapshot | `{prefix}{user_input}` | `NPP_before_update` |
-| Scheduled snapshot | `{prefix}{YYYYMMDD}_{HHMM}[_{schedule_name}]` | `NPP_20260507_1400_nightly` |
+| Manual snapshot | `{prefix}{user_input}` | `NaSnap_before_update` |
+| Scheduled snapshot | `{prefix}{YYYYMMDD}_{HHMM}[_{schedule_name}]` | `NaSnap_20260507_1400_nightly` |
 
-`prefix` defaults to `NPP_` and is configurable via `snapshot_prefix` in `config.json`.
+`prefix` defaults to `NaSnap_` and is configurable via `snapshot_prefix` in `config.json`.
 
 ### Temporary ONTAP objects
 
@@ -627,6 +629,38 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | POST | `provisioning/recovery/restore-vms` | Import VM configs from a bound datastore |
 | GET | `provisioning/recovery/used-vmids` | List VMIDs in use on the target cluster |
 
+### Disaster Recovery
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `dr/role` | Current DR role (PRIMARY / SECONDARY / STANDALONE) + peer status |
+| POST | `dr/role/set` | Set DR role |
+| GET | `dr/peer/status` | Peer configuration + live connectivity |
+| POST | `dr/peer/configure` | Store peer URL, credentials, and sync token |
+| POST | `dr/peer/remove` | Remove peer |
+| POST | `dr/peer/sync/push` | Trigger immediate config sync to peer |
+| GET | `dr/plans` | List DR plans |
+| POST | `dr/plans/create` | Create DR plan |
+| GET | `dr/plans/detail` | DR plan details (`?plan_id=`) |
+| POST | `dr/plans/update` | Update DR plan |
+| POST | `dr/plans/delete` | Delete DR plan |
+| POST | `dr/plans/entries/add` | Add datastore entry to plan |
+| POST | `dr/plans/entries/update` | Update datastore entry |
+| POST | `dr/plans/entries/delete` | Remove datastore entry |
+| POST | `dr/plans/auto-detect` | Auto-detect SnapMirror entries for a plan |
+| POST | `dr/plans/groups/create` | Create VM boot group |
+| POST | `dr/plans/groups/update` | Update VM boot group |
+| POST | `dr/plans/groups/delete` | Delete VM boot group |
+| POST | `dr/plans/groups/reorder` | Reorder VM boot groups |
+| POST | `dr/plans/groups/vms/add` | Assign VM to boot group |
+| POST | `dr/plans/groups/vms/delete` | Remove VM from boot group |
+| POST | `dr/plans/groups/vms/update` | Update VM assignment |
+| GET | `dr/plans/status` | Current plan state + SnapMirror health |
+| GET | `dr/plans/precheck` | Pre-failover checks (SnapMirror lag, secondary health) |
+| POST | `dr/plans/failover` | Start failover (`failover_type`: `planned` or `emergency`) |
+| GET | `dr/plans/failover-jobs` | List failover job history for a plan |
+| GET | `dr/plans/snapshots` | List replicated snapshots available for failover |
+
 ### Settings
 
 | Method | Path | Description |
@@ -666,10 +700,7 @@ nasnap/
 
 ### How theme injection works
 
-`ui.html` ships with an orange dark theme. `app.py` patches two layers before serving it:
-
-1. **Static CSS** — direct string replacement of `:root` CSS variable values (`_THEME_SUBS`)
-2. **JS runtime** — the plugin's theme switcher default is redirected from `proxmoxDark` to `enterpriseBlue`
+`ui.html` ships with the Enterprise Blue theme baked in. When serving `ui.html`, `app.py` applies `_UI_PATCHES` (string replacements) to hide PegaProx-specific sections (Deploy Wizard, Plugin Update card) and inject NaSnap-specific copy (labels, default account names, export description). Additionally, `_AUTH_GUARD` (redirect-on-401 fetch interceptor + username display) and `_LOGOUT_BTN` (sign-out button + admin/settings links) are injected at serve time.
 
 ### How plugin routes work
 
@@ -693,9 +724,10 @@ DEBUG=1 .venv/bin/python app.py
 
 ## Roadmap
 
-### v1.1 — DR Completion *(In Development)*
+### v1.1 — DR Completion *(Beta)*
 
-- **Full DR Failover** — orchestrated failover from the DR-side NaSnap instance: SnapMirror break → mount volumes on DR PVE → restore VM configs from snapmanifest → start VMs in group order (planned / emergency modes).
+Peer-to-peer DR between two NaSnap instances with PRIMARY/SECONDARY roles, background heartbeat, config sync, DR plans with ordered VM boot groups, precheck, and planned/emergency failover are fully implemented. Still planned:
+
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
 

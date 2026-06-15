@@ -19,4 +19,4 @@ EXPOSE 5000
 ENV NASNAP_DATA=/data \
     PORT=5000
 
-CMD ["sh", "-c", "mkdir -p /root/.ssh && chmod 700 /root/.ssh && gunicorn -w ${WORKERS:-2} -b 0.0.0.0:${PORT:-5000} --timeout 120 --access-logfile - 'app:create_app()'"]
+CMD ["sh", "-c", "mkdir -p /root/.ssh && chmod 700 /root/.ssh && gunicorn -w ${WORKERS:-1} -b 0.0.0.0:${PORT:-5000} --timeout 120 --access-logfile - 'app:create_app()'"]
