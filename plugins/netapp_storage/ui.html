@@ -1557,6 +1557,23 @@ function applyI18n() {
         </div>
       </div>
 
+      <!-- ═══════════════ UI FEATURES ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>UI Features</span>
+      </div>
+      <div class="card">
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:4px 0">
+          <div>
+            <div style="font-weight:500;font-size:13px">Disaster Recovery Module</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Zeigt den Disaster Recovery Tab. Deaktivieren für Umgebungen ohne DR-Standort.</div>
+          </div>
+          <div id="drToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleDrEnabled()">
+            <div id="drToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
+            <div id="drToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
+          </div>
+        </label>
+      </div>
+
       <!-- ═══════════════ DATA BACKUP / RESTORE ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>Data Backup / Restore</span>
@@ -1890,7 +1907,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -8110,8 +8127,51 @@ async function drStartFailover() {
 }
 
 
+// ── UI Settings (DR tab toggle etc.) ─────────────────────────────────────
+var _uiSettings = { dr_enabled: true };
+
+function _applyUiSettings(s) {
+  _uiSettings = s;
+  var drBtn   = document.querySelector('.subtab[data-tab="dr"]');
+  var drPanel = document.getElementById('tab-dr');
+  if (drBtn)   drBtn.style.display   = s.dr_enabled ? '' : 'none';
+  if (drPanel && !s.dr_enabled) {
+    drPanel.style.display = 'none';
+    // If the DR tab was active, switch to Snapshots
+    if (drBtn && drBtn.classList.contains('active')) {
+      document.querySelector('.subtab[data-tab="snapshots"]').click();
+    }
+  }
+  // Sync toggle in Settings tab
+  var track = document.getElementById('drToggleTrack');
+  var thumb = document.getElementById('drToggleThumb');
+  if (track) track.style.background = s.dr_enabled ? 'var(--primary)' : 'var(--border)';
+  if (thumb) thumb.style.transform  = s.dr_enabled ? 'translateX(20px)' : '';
+}
+
+async function loadUiSettings() {
+  try {
+    var r = await fetch('/api/ui-settings', {credentials: 'include'});
+    if (r.ok) _applyUiSettings(await r.json());
+  } catch(e) {}
+}
+
+async function toggleDrEnabled() {
+  var next = !_uiSettings.dr_enabled;
+  try {
+    await fetch('/api/ui-settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({dr_enabled: next}),
+    });
+    _applyUiSettings(Object.assign({}, _uiSettings, {dr_enabled: next}));
+  } catch(e) { toast('Failed to save setting', 'error'); }
+}
+
 // Initial load
 applyI18n();
+loadUiSettings();
 loadSnapshots();
 </script>
 <!-- ═══════════════════════ DEPLOY WIZARD MODAL ═══════════════════════ -->

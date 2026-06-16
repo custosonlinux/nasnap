@@ -237,6 +237,26 @@ def create_app():
             'dev':     {'error': 'Update check not available in this deployment'},
         })
 
+    @app.route('/api/ui-settings', methods=['GET'])
+    @require_auth
+    def _ns_ui_settings_get():
+        rows = {r['key']: r['value'] for r in get_db().query("SELECT key, value FROM np_settings")}
+        return jsonify({
+            'dr_enabled': rows.get('dr_enabled', '1') != '0',
+        })
+
+    @app.route('/api/ui-settings', methods=['POST'])
+    @require_admin
+    def _ns_ui_settings_post():
+        data = request.get_json(force=True) or {}
+        db = get_db()
+        if 'dr_enabled' in data:
+            db.execute(
+                "INSERT OR REPLACE INTO np_settings (key, value) VALUES ('dr_enabled', ?)",
+                ('0' if not data['dr_enabled'] else '1',),
+            )
+        return jsonify({'ok': True})
+
     from nasnap_core.api.plugins import get_all_routes, make_view
     for path, handler in get_all_routes('netapp_storage').items():
         if path in _NS_ROUTE_SKIP:

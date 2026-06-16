@@ -94,6 +94,10 @@ class NaSnapDB:
                 username   TEXT NOT NULL,
                 expires_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS np_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            );
         """)
         # Plugin tables
         if os.path.exists(_PLUGIN_SCHEMA):
