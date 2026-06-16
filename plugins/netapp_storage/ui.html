@@ -1685,12 +1685,7 @@ let _selectedRestoreSnap = null;  // active snapshot in the restore form
 // ── Toast ──────────────────────────────────────────────────────────────────
 let _toastTimer;
 function _toastHide() {
-  var el = document.getElementById('toast');
-  el.style.display = 'none';
-  if (_uiDialogDepth === 0) {
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-  }
+  document.getElementById('toast').style.display = 'none';
 }
 function toast(msg, type, detail) {
   type = type || 'info';
@@ -1743,18 +1738,12 @@ async function api(method, path, body) {
 var _uiDialogDepth = 0;
 function _uiOverlayShow(overlay) {
   overlay.dataset.uiOverlay = '1';
-  if (_uiDialogDepth++ === 0) {
-    document.documentElement.style.overflow = 'visible';
-    document.body.style.overflow = 'visible';
-  }
+  _uiDialogDepth++;
   document.body.appendChild(overlay);
 }
 function _uiOverlayHide(overlay) {
   document.body.removeChild(overlay);
-  if (--_uiDialogDepth === 0) {
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-  }
+  _uiDialogDepth--;
 }
 
 // BFCache fix: when the browser restores this page from its back/forward cache,

@@ -228,6 +228,15 @@ def create_app():
         'settings/update/apply',
     }
 
+    @app.route('/api/plugins/netapp_storage/api/settings/update/info')
+    @require_admin
+    def _ns_update_info():
+        return jsonify({
+            'current_version': 'nasnap',
+            'release': {'error': 'Update check not available in this deployment'},
+            'dev':     {'error': 'Update check not available in this deployment'},
+        })
+
     from nasnap_core.api.plugins import get_all_routes, make_view
     for path, handler in get_all_routes('netapp_storage').items():
         if path in _NS_ROUTE_SKIP:

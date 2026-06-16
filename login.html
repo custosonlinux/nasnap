@@ -57,17 +57,11 @@
 
   /* Product icon */
   .logo-icon {
-    width: 72px;
-    height: 72px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary2) 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    width: 64px;
+    height: 64px;
     margin-bottom: 16px;
-    box-shadow: 0 8px 32px rgba(0,94,184,0.35);
   }
-  .logo-icon svg { width: 38px; height: 38px; color: #fff; }
+  .logo-icon svg { width:64px; height:64px; color:var(--primary); }
 
   .logo-title {
     font-size: 26px;
@@ -210,11 +204,13 @@
 <div class="wrap">
   <!-- Logo -->
   <div class="logo-icon">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <ellipse cx="12" cy="5" rx="9" ry="3"/>
-      <path d="M3 5v4c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
-      <path d="M3 9v4c0 1.657 4.03 3 9 3s9-1.343 9-3V9"/>
-      <path d="M3 13v4c0 1.657 4.03 3 9 3s9-1.343 9-3v-4"/>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0118.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+      <g stroke-width="1">
+        <ellipse cx="12" cy="12" rx="3" ry="0.9"/>
+        <path d="M9 12v4a3 0.9 0 0 1 6 0v-4"/>
+        <path d="M9 14a3 0.9 0 0 1 6 0"/>
+      </g>
     </svg>
   </div>
   <div class="logo-title">NaSnap</div>
