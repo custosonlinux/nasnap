@@ -1477,6 +1477,46 @@ function applyI18n() {
     <!-- ════════════════════════ SETTINGS ════════════════════════ -->
     <div id="tab-settings" class="tab-panel" style="display:none">
 
+      <!-- ═══════════════ SERVER / NETWORK ═══════════════ -->
+      <div class="sub-header">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>Server / Network</span>
+      </div>
+      <div class="card">
+        <div class="form-grid" style="gap:16px 24px">
+          <div class="form-group" style="max-width:160px">
+            <label>Port</label>
+            <input id="srv_port" type="number" min="1" max="65535" value="5000" style="width:120px">
+          </div>
+          <div class="form-group">
+            <label>TLS / Encryption</label>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+              <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:normal;font-size:13px;text-transform:none;letter-spacing:0">
+                <input type="radio" name="srvTls" value="http" style="margin-top:2px">
+                <div>
+                  <div>HTTP — behind a reverse proxy</div>
+                  <div style="font-size:11px;color:var(--muted)">Plain HTTP. Let your proxy (nginx, Traefik, …) handle TLS termination.</div>
+                </div>
+              </label>
+              <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:normal;font-size:13px;text-transform:none;letter-spacing:0">
+                <input type="radio" name="srvTls" value="self-signed" style="margin-top:2px">
+                <div>
+                  <div>HTTPS — self-signed certificate (auto-generated)</div>
+                  <div style="font-size:11px;color:var(--muted)">NaSnap generates a certificate on first start and stores it in <code>/data/tls/</code>.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveServerSettings()">Save</button>
+          <span id="srvSaveStatus" style="font-size:13px;color:var(--muted)"></span>
+        </div>
+        <div style="margin-top:12px;padding:10px 12px;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);border-radius:6px;font-size:12px;color:#ca8a04">
+          <strong>Restart required.</strong> Changes take effect after the next container restart.
+          With <code>network_mode: host</code> (default compose config) port changes are picked up automatically — no changes to <code>docker-compose.yml</code> needed.
+        </div>
+      </div>
+
       <!-- ═══════════════════════ DEPLOY WIZARD ═══════════════════════ -->
       <div class="sub-header">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>Deploy Wizard</span>
@@ -1907,7 +1947,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); loadServerSettings(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -8126,6 +8166,42 @@ async function drStartFailover() {
   } catch(e){ toast(e.message,'error'); }
 }
 
+
+// ── Server settings (port + TLS) ─────────────────────────────────────────
+async function loadServerSettings() {
+  try {
+    var r = await fetch('/api/server-settings', {credentials: 'include'});
+    if (!r.ok) return;
+    var d = await r.json();
+    var portEl = document.getElementById('srv_port');
+    if (portEl) portEl.value = d.port || 5000;
+    var radio = document.querySelector('input[name="srvTls"][value="' + (d.tls || 'http') + '"]');
+    if (radio) radio.checked = true;
+  } catch(e) {}
+}
+
+async function saveServerSettings() {
+  var portEl  = document.getElementById('srv_port');
+  var radioEl = document.querySelector('input[name="srvTls"]:checked');
+  var status  = document.getElementById('srvSaveStatus');
+  if (!portEl || !radioEl) return;
+  var port = parseInt(portEl.value, 10);
+  if (!port || port < 1 || port > 65535) { toast('Invalid port number', 'error'); return; }
+  try {
+    var r = await fetch('/api/server-settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({port: port, tls: radioEl.value}),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || 'Save failed');
+    status.textContent = 'Saved — restart container to apply.';
+    status.style.color = 'var(--success)';
+    setTimeout(function(){ status.textContent = ''; }, 5000);
+  } catch(e) {
+    toast(e.message, 'error');
+  }
+}
 
 // ── UI Settings (DR tab toggle etc.) ─────────────────────────────────────
 var _uiSettings = { dr_enabled: true };

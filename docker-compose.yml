@@ -2,23 +2,23 @@ services:
   nasnap:
     build: .
     image: nasnap:latest
-    ports:
-      - "5000:5000"
+    # network_mode: host — the container binds directly to the host network.
+    # This means the port configured in Settings → Server takes effect immediately
+    # after a restart, without changing this file.
+    # DNS is inherited from the host; add your internal DNS servers to
+    # /etc/resolv.conf on the host if NetApp SVM resolution requires them.
+    network_mode: host
     volumes:
-      - ./data:/data
-      - ./ssh:/root/.ssh
+      - /docker/nasnap/data:/data
+      - /docker/nasnap/ssh:/root/.ssh
     environment:
       NASNAP_ADMIN_PASSWORD: "${NASNAP_ADMIN_PASSWORD:-admin}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
       SESSION_HOURS: "8"
       # DEBUG: "1"
-    dns:
-      - 10.230.3.151
-      - 10.230.3.152
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]
+      test: ["CMD", "python3", "/healthcheck.py"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-

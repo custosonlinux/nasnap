@@ -257,6 +257,38 @@ def create_app():
             )
         return jsonify({'ok': True})
 
+    _SERVER_CONF = os.path.join(os.environ.get('NASNAP_DATA', '/data'), 'server.json')
+
+    def _read_server_conf():
+        if os.path.exists(_SERVER_CONF):
+            with open(_SERVER_CONF) as f:
+                return _json.load(f)
+        return {'port': 5000, 'tls': 'http'}
+
+    @app.route('/api/server-settings', methods=['GET'])
+    @require_auth
+    def _ns_server_settings_get():
+        return jsonify(_read_server_conf())
+
+    @app.route('/api/server-settings', methods=['POST'])
+    @require_admin
+    def _ns_server_settings_post():
+        data = request.get_json(force=True) or {}
+        conf = _read_server_conf()
+        if 'port' in data:
+            port = int(data['port'])
+            if not (1 <= port <= 65535):
+                return jsonify({'error': 'Invalid port'}), 400
+            conf['port'] = port
+        if 'tls' in data:
+            if data['tls'] not in ('http', 'self-signed'):
+                return jsonify({'error': 'Invalid tls value'}), 400
+            conf['tls'] = data['tls']
+        os.makedirs(os.path.dirname(_SERVER_CONF), exist_ok=True)
+        with open(_SERVER_CONF, 'w') as f:
+            _json.dump(conf, f, indent=2)
+        return jsonify({'ok': True})
+
     from nasnap_core.api.plugins import get_all_routes, make_view
     for path, handler in get_all_routes('netapp_storage').items():
         if path in _NS_ROUTE_SKIP:
