@@ -1,16 +1,32 @@
 #!/bin/bash
-# NaSnap entrypoint — reads /data/server.json and starts Gunicorn accordingly.
+# NaSnap entrypoint — reads server settings from nasnap.db (primary) or server.json (fallback).
 set -e
 
 DATA_DIR="${NASNAP_DATA:-/data}"
-CONF="$DATA_DIR/server.json"
 
 PORT=5000
 TLS=http
 
-if [ -f "$CONF" ]; then
-    PORT=$(python3 -c "import json; c=json.load(open('$CONF')); print(c.get('port', 5000))")
-    TLS=$(python3  -c "import json; c=json.load(open('$CONF')); print(c.get('tls',  'http'))")
+# Read port + TLS from the database (primary — always in sync with the UI)
+if [ -f "$DATA_DIR/nasnap.db" ]; then
+    read -r PORT TLS < <(python3 - <<PYEOF
+import sqlite3, sys
+try:
+    rows = dict(sqlite3.connect('$DATA_DIR/nasnap.db').execute(
+        "SELECT key, value FROM np_settings WHERE key IN ('server_port','server_tls')"
+    ).fetchall())
+    print(rows.get('server_port', '5000'), rows.get('server_tls', 'http'))
+except Exception:
+    print('5000 http')
+PYEOF
+    ) || true
+fi
+
+# Fall back to server.json if DB had no entries yet
+CONF="$DATA_DIR/server.json"
+if [ "${PORT}" = "5000" ] && [ -f "$CONF" ]; then
+    _PORT=$(python3 -c "import json; c=json.load(open('$CONF')); print(c.get('port', 5000))" 2>/dev/null) && PORT=$_PORT || true
+    _TLS=$(python3  -c "import json; c=json.load(open('$CONF')); print(c.get('tls',  'http'))" 2>/dev/null) && TLS=$_TLS   || true
 fi
 
 mkdir -p /root/.ssh && chmod 700 /root/.ssh

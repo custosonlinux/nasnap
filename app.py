@@ -260,10 +260,27 @@ def create_app():
     _SERVER_CONF = os.path.join(os.environ.get('NASNAP_DATA', '/data'), 'server.json')
 
     def _read_server_conf():
-        if os.path.exists(_SERVER_CONF):
-            with open(_SERVER_CONF) as f:
-                return _json.load(f)
-        return {'port': 5000, 'tls': 'http'}
+        rows = {r['key']: r['value'] for r in get_db().query(
+            "SELECT key, value FROM np_settings WHERE key IN ('server_port', 'server_tls')"
+        )}
+        try:
+            port = int(rows['server_port'])
+        except (KeyError, ValueError):
+            port = 5000
+        tls = rows.get('server_tls', 'http')
+        return {'port': port, 'tls': tls}
+
+    def _write_server_conf(conf):
+        db = get_db()
+        db.execute("INSERT OR REPLACE INTO np_settings (key, value) VALUES ('server_port', ?)", (str(conf['port']),))
+        db.execute("INSERT OR REPLACE INTO np_settings (key, value) VALUES ('server_tls', ?)",  (conf['tls'],))
+        # Also keep server.json in sync so entrypoint.sh can read it
+        try:
+            os.makedirs(os.path.dirname(_SERVER_CONF), exist_ok=True)
+            with open(_SERVER_CONF, 'w') as f:
+                _json.dump(conf, f, indent=2)
+        except OSError:
+            pass
 
     @app.route('/api/server-settings', methods=['GET'])
     @require_auth
@@ -284,9 +301,7 @@ def create_app():
             if data['tls'] not in ('http', 'self-signed'):
                 return jsonify({'error': 'Invalid tls value'}), 400
             conf['tls'] = data['tls']
-        os.makedirs(os.path.dirname(_SERVER_CONF), exist_ok=True)
-        with open(_SERVER_CONF, 'w') as f:
-            _json.dump(conf, f, indent=2)
+        _write_server_conf(conf)
         return jsonify({'ok': True})
 
     from nasnap_core.api.plugins import get_all_routes, make_view
