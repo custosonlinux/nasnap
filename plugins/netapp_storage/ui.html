@@ -9799,9 +9799,24 @@ loadSnapshots();
   </div>
 </div>
 
-<footer style="margin-top:2rem;padding:0.75rem 1rem;border-top:1px solid var(--border);color:var(--muted);font-size:0.7rem;line-height:1.5">
-  NetApp&#174;, ONTAP&#174;, SnapMirror&#174;, SnapVault&#174;, SnapRestore&#174;, and FlexClone&#174; are registered trademarks of NetApp, Inc.
-  This plugin is an independent community project and is not affiliated with, endorsed by, or sponsored by NetApp, Inc.
+<footer style="margin-top:2rem;padding:0.9rem 1.25rem;border-top:1px solid var(--border);color:var(--muted);font-size:0.7rem;line-height:1.5;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+  <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;color:var(--accent)">
+      <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+      <g stroke-width="1">
+        <ellipse cx="12" cy="12" rx="3" ry="0.9"/>
+        <path d="M9 12v4a3 0.9 0 0 1 6 0v-4"/>
+        <path d="M9 14a3 0.9 0 0 1 6 0"/>
+      </g>
+    </svg>
+    <span style="font-weight:600;font-size:0.8rem;color:var(--text)">NaSnap</span>
+    <span style="color:var(--border)">·</span>
+    <span>NetApp ONTAP Snapshot Manager for Proxmox VE</span>
+  </div>
+  <div style="flex:1;min-width:0">
+    NetApp&#174;, ONTAP&#174;, SnapMirror&#174;, SnapVault&#174;, SnapRestore&#174;, and FlexClone&#174; are registered trademarks of NetApp, Inc.
+    This is an independent open-source project and is not affiliated with, endorsed by, or sponsored by NetApp, Inc.
+  </div>
 </footer>
 
 <!-- ── Log Viewer Modal ── -->

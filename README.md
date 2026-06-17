@@ -2,7 +2,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments — **without requiring PegaProx or any external framework**. Runs as a single Docker container with built-in authentication, SQLite database, and Enterprise Blue UI.
 
-**Current stable: 1.0.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.1.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -170,9 +170,10 @@ After logging in, open **Settings → Initial Setup** to walk through ONTAP conn
 | `SECRET_KEY` | *(random)* | HMAC key for session tokens — **always set a stable value in production** |
 | `SESSION_HOURS` | `8` | Session lifetime in hours |
 | `WORKERS` | `1` | Gunicorn worker processes — keep at 1; the background scheduler thread is single-instance and must not run in multiple workers |
-| `PORT` | `5000` | Listening port |
 | `NASNAP_DATA` | `/data` | Persistent data directory (DB + AES key) |
 | `DEBUG` | — | Set to `1` for Flask debug mode and the `/dev/autologin` shortcut |
+
+> **Port and TLS** are configured via **Settings → Server/Network** in the UI and persisted in `/data/server.json`. The container uses `network_mode: host` so port changes take effect on the next restart without modifying `docker-compose.yml`.
 
 ### Minimal `.env` for production
 
@@ -191,6 +192,8 @@ Everything lives in `NASNAP_DATA` (Docker volume `nasnap_data` → `/data`):
 |---|---|
 | `nasnap.db` | SQLite — users, sessions, snapshots, schedules, endpoints, DR config |
 | `.nasnap_aes256.key` | AES-256-GCM key used to encrypt ONTAP passwords at rest |
+| `server.json` | Port and TLS mode (set via Settings → Server/Network) |
+| `tls/cert.pem`, `tls/key.pem` | Auto-generated self-signed TLS certificate (created on first start when HTTPS is selected) |
 
 > **Important:** back up the entire `/data` directory before upgrading. The AES key and the database must stay together — the key is not recoverable, and without it all stored ONTAP passwords become unreadable.
 
@@ -671,6 +674,10 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | POST | `settings/notify-test` | Send a test notification email |
 | GET | `/api/plugins/netapp_storage/api/settings/export` | Export all plugin config as JSON |
 | POST | `/api/plugins/netapp_storage/api/settings/import` | Restore plugin config from JSON |
+| GET | `/api/ui-settings` | Load NaSnap UI settings (DR tab visibility) |
+| POST | `/api/ui-settings` | Save NaSnap UI settings |
+| GET | `/api/server-settings` | Load server settings (port, TLS mode) |
+| POST | `/api/server-settings` | Save server settings — takes effect on next container restart |
 
 ---
 
@@ -724,9 +731,11 @@ DEBUG=1 .venv/bin/python app.py
 
 ## Roadmap
 
-### v1.1 — DR Completion *(Beta)*
+### v1.1 — Released
 
-Peer-to-peer DR between two NaSnap instances with PRIMARY/SECONDARY roles, background heartbeat, config sync, DR plans with ordered VM boot groups, precheck, and planned/emergency failover are fully implemented. Still planned:
+- **Configurable port + TLS** — set the listening port and HTTP/HTTPS mode in Settings → Server/Network. Self-signed certificates are auto-generated in `/data/tls/`. The container uses `network_mode: host` so port changes take effect on restart without editing `docker-compose.yml`.
+- **DR tab toggle** — Settings → UI Features lets you disable (hide) the Disaster Recovery tab for environments without a DR site.
+- **DR Completion *(Beta)*** — Peer-to-peer DR between two NaSnap instances with PRIMARY/SECONDARY roles, background heartbeat, config sync, DR plans with ordered VM boot groups, precheck, and planned/emergency failover are fully implemented. Still planned:
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
