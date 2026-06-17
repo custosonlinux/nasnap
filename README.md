@@ -1,6 +1,6 @@
 # NaSnap — NetApp® ONTAP® Snapshot Manager for Proxmox VE
 
-A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments — **without requiring PegaProx or any external framework**. Runs as a single Docker container with built-in authentication, SQLite database, and Enterprise Blue UI.
+A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI.
 
 **Current stable: 1.1.0** · [Changelog](CHANGELOG.md)
 
@@ -707,7 +707,7 @@ nasnap/
 
 ### How theme injection works
 
-`ui.html` ships with the Enterprise Blue theme baked in. When serving `ui.html`, `app.py` applies `_UI_PATCHES` (string replacements) to hide PegaProx-specific sections (Deploy Wizard, Plugin Update card) and inject NaSnap-specific copy (labels, default account names, export description). Additionally, `_AUTH_GUARD` (redirect-on-401 fetch interceptor + username display) and `_LOGOUT_BTN` (sign-out button + admin/settings links) are injected at serve time.
+`ui.html` is the full plugin UI. When serving it, `app.py` applies `_UI_PATCHES` (string replacements) to hide sections not relevant to the standalone deployment (Deploy Wizard, Plugin Update card) and inject NaSnap-specific copy (labels, default account names, export description). Additionally, `_AUTH_GUARD` (redirect-on-401 fetch interceptor + username display) and `_LOGOUT_BTN` (sign-out button + admin/settings links) are injected at serve time.
 
 ### How plugin routes work
 

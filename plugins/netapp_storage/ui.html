@@ -3837,7 +3837,7 @@ async function _fillCloneForm(snap) {
       vmids = m.vmids || [];
       vmNames = m.vm_names || {};
       if (m.manifest_snap_name && m.manifest_snap_name !== snap.snap_name) {
-        hint.textContent = 'Manifest from "'+esc(m.manifest_snap_name)+'" used (most recent PegaProx snapshot in this ONTAP snapshot).';
+        hint.textContent = 'Manifest from "'+esc(m.manifest_snap_name)+'" used (most recent NaSnap snapshot in this ONTAP snapshot).';
         hint.style.display = '';
       }
     } catch(e) {
@@ -4927,7 +4927,7 @@ async function updateRestoreVmList() {
         return '<option value="'+v+'">'+v+(n?' – '+esc(n):'')+'</option>';
       }).join('');
       if (m.manifest_snap_name && m.manifest_snap_name !== snap.snap_name) {
-        hint.textContent = 'Manifest from "'+esc(m.manifest_snap_name)+'" used (most recent PegaProx snapshot in this ONTAP snapshot).';
+        hint.textContent = 'Manifest from "'+esc(m.manifest_snap_name)+'" used (most recent NaSnap snapshot in this ONTAP snapshot).';
         hint.style.display = '';
       }
     } else {
@@ -8258,11 +8258,11 @@ loadSnapshots();
         <div class="setup-step-pill" id="spill4" onclick="setupShowStep(4)">④ Ready</div>
       </div>
 
-      <!-- ── Step 1: PegaProx System Check ── -->
+      <!-- ── Step 1: System Check ── -->
       <div class="card setup-step-card" id="setupStep1">
-        <div class="card-title">① PegaProx System Check</div>
+        <div class="card-title">① System Check</div>
         <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
-          Checks that all required tools are available on the PegaProx host.
+          Checks that all required tools are available on the NaSnap host.
         </p>
         <div id="setupDepsResult" style="margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -9642,7 +9642,7 @@ loadSnapshots();
     </div>
     <div style="padding:20px;display:grid;gap:.75rem">
       <div class="alert alert-info" style="font-size:.82rem">
-        Enter the other PegaProx instance URL and an admin account. Both sides must use the <strong>same Sync Token</strong>.
+        Enter the other NaSnap instance URL and an admin account. Both sides must use the <strong>same Sync Token</strong>.
         Generate it on one side, copy it to the other.
       </div>
       <div id="drPeerConfigError" style="display:none;padding:.4rem .6rem;background:var(--error-bg,#2d1b1b);border:1px solid var(--error,#f85149);border-radius:4px;font-size:.8rem;color:var(--error,#f85149);word-break:break-word"></div>
