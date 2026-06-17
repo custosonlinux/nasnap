@@ -753,8 +753,6 @@ DEBUG=1 .venv/bin/python app.py
 
 GNU Affero General Public License v3.0 (AGPL-3.0)
 
-Copyright © 2024–2026 Custon Online GmbH
-
 See [LICENSE](LICENSE) for full terms.
 
 ---
