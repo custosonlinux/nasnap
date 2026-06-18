@@ -183,6 +183,7 @@ def register(app):
     from .api.recovery import register_routes as reg_recovery
     from .api.setup import register_routes as reg_setup
     from .api.dr import register_routes as reg_dr
+    from .api.dashboard import register_routes as reg_dashboard
 
     reg_snap()
     reg_restore()
@@ -194,6 +195,7 @@ def register(app):
     reg_recovery()
     reg_setup()
     reg_dr()
+    reg_dashboard()
     start_scheduler()
 
     log.info(f"[PLUGINS] {PLUGIN_NAME} registriert (UI: /api/plugins/netapp_storage/api/ui)")

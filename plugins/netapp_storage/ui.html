@@ -213,9 +213,10 @@
   th.sortable.sort-active { color: var(--text); }
   th.sortable.sort-active .si { opacity: 1; color: var(--primary); }
   td {
-    padding: 9px 12px;
+    padding: 10px 14px;
     border-bottom: 1px solid rgba(48,54,61,.45);
     vertical-align: middle;
+    font-size: 13px;
   }
   tr:last-child td { border-bottom: none; }
   tbody tr:hover td { background: var(--hover); }
@@ -368,29 +369,34 @@
   /* ── Dashboard ───────────────────────────────────────────────── */
   .db-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 12px;
     margin-bottom: 16px;
   }
   .db-stat {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 12px 12px;
+    border-radius: 12px;
+    padding: 16px 14px 14px;
     text-align: center;
   }
   .db-stat-value {
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 700;
     line-height: 1;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
   }
   .db-stat-label {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: .06em;
     font-weight: 600;
+  }
+  .db-stat-sub {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 3px;
   }
   .db-two-col {
     display: grid;
@@ -402,12 +408,14 @@
   .db-alert {
     background: rgba(231,76,60,.08);
     border: 1px solid rgba(231,76,60,.28);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 12px;
+    border-radius: 10px;
+    padding: 11px 16px;
+    font-size: 13px;
     color: var(--error);
     margin-bottom: 14px;
   }
+  .db-stale { opacity: 0.55; transition: opacity .3s; }
+  .db-stat-value.db-stale, .db-stat.db-stale { opacity: 0.55; transition: opacity .3s; }
 </style>
 </head>
 <body>
@@ -530,7 +538,7 @@ de:{
   db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Zeitpläne aktiv',
   db_storage:'Storage-Übersicht',db_recent_jobs:'Letzte Jobs',db_no_ds:'Keine Datastores konfiguriert.',
   db_no_jobs:'Noch keine Jobs.',db_protected_badge:'Zeitplan aktiv',db_unprotected_badge:'Kein Zeitplan',
-  db_all_ok:'Alle Systeme in Ordnung.',db_issues:'Probleme erkannt',
+  db_all_ok:'Alle Systeme in Ordnung.',db_issues:'Probleme erkannt',db_systems:'Storage Systems',
   sect_smtp:'E-Mail-Benachrichtigungen (SMTP)',
   lbl_smtp_host:'SMTP-Server',lbl_smtp_port:'Port',lbl_smtp_user:'Benutzername',
   lbl_smtp_pass:'Passwort',lbl_smtp_from:'Absender (Von)',lbl_smtp_encryption:'Verschlüsselung',
@@ -650,7 +658,7 @@ en:{
   db_ds_overview:'Datastores',db_protected:'Protected',db_schedules_active:'Active Schedules',
   db_storage:'Storage Overview',db_recent_jobs:'Recent Jobs',db_no_ds:'No datastores configured.',
   db_no_jobs:'No jobs yet.',db_protected_badge:'Schedule active',db_unprotected_badge:'No schedule',
-  db_all_ok:'All systems operational.',db_issues:'Issues detected',
+  db_all_ok:'All systems operational.',db_issues:'Issues detected',db_systems:'Storage Systems',
   sect_smtp:'Email Notifications (SMTP)',
   lbl_smtp_host:'SMTP Server',lbl_smtp_port:'Port',lbl_smtp_user:'Username',
   lbl_smtp_pass:'Password',lbl_smtp_from:'Sender (From)',lbl_smtp_encryption:'Encryption',
@@ -1288,32 +1296,32 @@ function applyI18n() {
         <div class="db-stat">
           <div class="db-stat-value" id="db_snap_total">–</div>
           <div class="db-stat-label">Snapshots</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px">total</div>
+          <div class="db-stat-sub">total</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#56d364" id="db_snap_done">–</div>
           <div class="db-stat-label">Successful</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px">Snapshots</div>
+          <div class="db-stat-sub">Snapshots</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#f08080" id="db_snap_failed">–</div>
           <div class="db-stat-label">Failed</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px">Snapshots</div>
+          <div class="db-stat-sub">Snapshots</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#79c0ff" id="db_prot_ds">–</div>
           <div class="db-stat-label" data-i18n="db_protected">Protected</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px">Datastores</div>
+          <div class="db-stat-sub">Datastores</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#c4b5fd" id="db_active_scheds">–</div>
           <div class="db-stat-label" data-i18n="db_schedules_active">Active Schedules</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px">&nbsp;</div>
+          <div class="db-stat-sub">&nbsp;</div>
         </div>
         <div class="db-stat" id="db_sm_card" style="display:none">
           <div class="db-stat-value" id="db_sm_healthy" style="color:#56d364">–</div>
           <div class="db-stat-label">SnapMirror</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px" id="db_sm_sub">healthy</div>
+          <div class="db-stat-sub" id="db_sm_sub">healthy</div>
         </div>
       </div>
 
@@ -1328,7 +1336,8 @@ function applyI18n() {
           <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
             <span data-i18n="db_storage">Storage Overview</span>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-ghost btn-sm" onclick="loadDashboard()" title="Refresh">↻</button>
+              <button class="btn btn-ghost btn-sm" onclick="loadDashboard()" title="Refresh" id="db_refresh_btn">↻</button>
+              <span id="db_ts" style="font-size:10px;color:var(--muted)"></span>
               <a href="#" onclick="document.querySelector('[data-tab=\'storage\']').click();return false" style="font-size:11px;color:var(--primary)">→ Storage</a>
             </div>
           </div>
@@ -1348,27 +1357,48 @@ function applyI18n() {
           </div>
         </div>
 
-        <!-- Recent jobs -->
-        <div class="card" style="padding:0">
-          <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
-            <span data-i18n="db_recent_jobs">Recent Jobs</span>
-            <a href="#" onclick="document.querySelector('[data-tab=\'jobs\']').click();return false" style="font-size:11px;color:var(--primary)">→ All Jobs</a>
+        <!-- Right column: Recent Jobs + Storage Systems stacked -->
+        <div style="display:flex;flex-direction:column;gap:14px">
+
+          <!-- Recent jobs -->
+          <div class="card" style="padding:0">
+            <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
+              <span data-i18n="db_recent_jobs">Recent Jobs</span>
+              <a href="#" onclick="document.querySelector('[data-tab=\'jobs\']').click();return false" style="font-size:11px;color:var(--primary)">→ All Jobs</a>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead><tr>
+                  <th>Job</th>
+                  <th>Status</th>
+                  <th>Time</th>
+                </tr></thead>
+                <tbody id="dbJobsTbody">
+                  <tr><td colspan="3" class="empty"><span class="spinner"></span></td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div class="table-scroll">
-            <table>
-              <thead><tr>
-                <th>Job</th>
-                <th>Status</th>
-                <th>Time</th>
-              </tr></thead>
-              <tbody id="dbJobsTbody">
-                <tr><td colspan="3" class="empty"><span class="spinner"></span></td></tr>
-              </tbody>
-            </table>
+
+          <!-- Storage Systems -->
+          <div class="card" style="padding:0">
+            <div class="card-title" style="padding:12px 16px" data-i18n="db_systems">Storage Systems</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
+              <div style="padding:4px 16px 16px;border-right:1px solid var(--border)">
+                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">NetApp ONTAP</div>
+                <div id="dbSystemsNetapp"><span class="spinner" style="margin-top:8px;display:block"></span></div>
+              </div>
+              <div style="padding:4px 16px 16px">
+                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">Proxmox VE</div>
+                <div id="dbSystemsPve"><span class="spinner" style="margin-top:8px;display:block"></span></div>
+              </div>
+            </div>
           </div>
-        </div>
+
+        </div><!-- /right column -->
 
       </div>
+
     </div>
 
     <!-- ════════════════════════ SNAPSHOTS ════════════════════════ -->
@@ -5867,112 +5897,282 @@ async function loadStorageUnified() {
 // kept for any remaining internal callers
 function loadProvDatastores() { loadStorageUnified(); }
 
-async function loadDashboard() {
-  try {
-    var [summary, storageData, jobsData, capData] = await Promise.all([
-      apiFetch('snapshots/protection-summary').catch(function(){ return {}; }),
-      apiFetch('storage/unified').catch(function(){ return {items:[]}; }),
-      apiFetch('jobs/status').catch(function(){ return []; }),
-      apiFetch('storage/capacity').catch(function(){ return {stats:{}}; })
-    ]);
-    var capStats = (capData && capData.stats) || {};
+var _DB_CACHE_KEY = 'nasnap_db_cache';
 
-    // Stat cards
-    var s = summary || {};
-    document.getElementById('db_snap_total').textContent    = s.snap_total          ?? '–';
-    document.getElementById('db_snap_done').textContent     = s.snap_done           ?? '–';
-    document.getElementById('db_snap_failed').textContent   = s.snap_failed         ?? '–';
-    document.getElementById('db_prot_ds').textContent       = s.protected_datastores ?? '–';
-    document.getElementById('db_active_scheds').textContent = s.active_schedules    ?? '–';
-    // SnapMirror card — only show if relationships exist
-    var smCard = document.getElementById('db_sm_card');
-    if (s.sm_total > 0) {
-      smCard.style.display = '';
-      document.getElementById('db_sm_healthy').textContent = s.sm_healthy ?? '–';
-      document.getElementById('db_sm_sub').textContent = (s.sm_healthy ?? 0) + ' / ' + (s.sm_total ?? 0) + ' healthy';
-      document.getElementById('db_sm_healthy').style.color = s.sm_healthy === s.sm_total ? '#56d364' : '#f08080';
-    } else {
-      smCard.style.display = 'none';
+// ── Shared dashboard UI helpers ───────────────────────────────────────────────
+function _dbPill(text, bg, textColor) {
+  return '<span style="display:inline-block;background:' + (bg || 'rgba(139,148,158,.14)') + ';'
+    + 'color:' + (textColor || 'var(--fg)') + ';font-size:10px;font-weight:600;'
+    + 'padding:2px 9px;border-radius:20px;white-space:nowrap;letter-spacing:.02em">'
+    + text + '</span>';
+}
+function _dbBar(pct) {
+  var color = pct >= 90 ? '#f08080' : pct >= 70 ? '#f0a040' : '#56d364';
+  return '<span style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle">'
+    + '<span style="display:inline-block;width:52px;height:5px;background:rgba(139,148,158,.18);'
+    + 'border-radius:3px;overflow:hidden;flex-shrink:0">'
+    + '<span style="display:block;width:' + Math.min(pct, 100) + '%;height:100%;background:' + color + ';border-radius:3px"></span>'
+    + '</span>'
+    + '<span style="font-size:11px;color:' + color + ';font-weight:600;min-width:32px">' + pct + '%</span>'
+    + '</span>';
+}
+
+function _dbRenderSummary(summary, stale) {
+  var s = summary || {};
+  var ids = ['db_snap_total','db_snap_done','db_snap_failed','db_prot_ds','db_active_scheds'];
+  ids.forEach(function(id){ var el=document.getElementById(id); if(el) el.classList.toggle('db-stale',!!stale); });
+  document.getElementById('db_snap_total').textContent    = s.snap_total          ?? '–';
+  document.getElementById('db_snap_done').textContent     = s.snap_done           ?? '–';
+  document.getElementById('db_snap_failed').textContent   = s.snap_failed         ?? '–';
+  document.getElementById('db_prot_ds').textContent       = s.protected_datastores ?? '–';
+  document.getElementById('db_active_scheds').textContent = s.active_schedules    ?? '–';
+  var smCard = document.getElementById('db_sm_card');
+  if (s.sm_total > 0) {
+    smCard.style.display = '';
+    smCard.classList.toggle('db-stale', !!stale);
+    document.getElementById('db_sm_healthy').textContent = s.sm_healthy ?? '–';
+    document.getElementById('db_sm_sub').textContent = (s.sm_healthy ?? 0) + ' / ' + (s.sm_total ?? 0) + ' healthy';
+    document.getElementById('db_sm_healthy').style.color = s.sm_healthy === s.sm_total ? '#56d364' : '#f08080';
+  } else {
+    smCard.style.display = 'none';
+  }
+}
+
+function _dbRenderStorage(storageData, capData, stale) {
+  var capStats = (capData && capData.stats) || {};
+  var items = (storageData && storageData.items) || [];
+  var stbody = document.getElementById('dbStorageTbody');
+  stbody.classList.toggle('db-stale', !!stale);
+  if (!items.length) {
+    stbody.innerHTML = '<tr><td colspan="5" class="empty">'+t('db_no_ds')+'</td></tr>';
+  } else {
+    var statusCfg = {
+      active:       ['rgba(63,185,80,.15)',  '#56d364'],
+      provisioning: ['rgba(229,112,0,.15)',  '#f0a040'],
+      error:        ['rgba(248,81,73,.15)',  '#f08080'],
+      removing:     ['rgba(229,112,0,.15)',  '#f0a040'],
+    };
+    var smCfg = {
+      snapmirrored: ['rgba(63,185,80,.15)',  '#56d364'],
+      broken_off:   ['rgba(248,81,73,.15)',  '#f08080'],
+    };
+    stbody.innerHTML = items.map(function(ds) {
+      var sc = statusCfg[ds.status] || ['rgba(139,148,158,.12)', 'var(--muted)'];
+      var statusPill = _dbPill(esc(ds.status), sc[0], sc[1]);
+
+      var smPill = ds.snapmirror
+        ? (function(){ var c = smCfg[ds.snapmirror.state] || ['rgba(139,148,158,.12)', 'var(--muted)']; return _dbPill(esc(ds.snapmirror.state || '–'), c[0], c[1]); })()
+        : '<span style="color:var(--muted)">—</span>';
+
+      var cap = capStats[ds.pve_storage_id] || capStats[ds.name] || null;
+      var usageCell;
+      if (cap && cap.total_bytes > 0) {
+        var pct = Math.round(cap.used_bytes / cap.total_bytes * 100);
+        usageCell = _dbBar(pct)
+          + '<div style="font-size:10px;color:var(--muted);margin-top:3px">'
+          + fmtBytes(cap.used_bytes) + ' / ' + fmtBytes(cap.total_bytes) + '</div>';
+      } else if (ds.size_bytes) {
+        usageCell = '<span style="color:var(--muted);font-size:12px">'+fmtBytes(ds.size_bytes)+'</span>';
+      } else {
+        usageCell = '<span style="color:var(--muted)">—</span>';
+      }
+      var vmCount = cap && cap.vm_count > 0
+        ? '<span style="font-weight:700">'+cap.vm_count+'</span>'
+        : '<span style="color:var(--muted)">—</span>';
+      return '<tr>'
+        + '<td style="font-weight:700">'+esc(ds.name)
+          + (ds.error_message ? '<div style="color:var(--error);font-size:10px;font-weight:400;margin-top:2px">'
+             + esc(ds.error_message.slice(0, 60)) + '</div>' : '')
+          + '</td>'
+        + '<td>'+statusPill+'</td>'
+        + '<td>'+usageCell+'</td>'
+        + '<td>'+vmCount+'</td>'
+        + '<td>'+smPill+'</td>'
+        + '</tr>';
+    }).join('');
+  }
+  var errDs = items.filter(function(ds){ return ds.status === 'error'; });
+  var alertDiv = document.getElementById('db_alert_banner');
+  if (errDs.length) {
+    alertDiv.style.display = '';
+    alertDiv.innerHTML = '<div class="db-alert"><strong>⚠ '
+      + errDs.length + ' Datastore'+(errDs.length>1?'s':'')+' '+t('db_issues')+':</strong> '
+      + errDs.map(function(ds){ return esc(ds.name); }).join(', ')
+      + '</div>';
+  } else {
+    alertDiv.style.display = 'none';
+  }
+}
+
+function _dbRenderJobs(jobsData, stale) {
+  var jobs = Array.isArray(jobsData) ? jobsData.slice(0, 8) : [];
+  var jbody = document.getElementById('dbJobsTbody');
+  jbody.classList.toggle('db-stale', !!stale);
+  if (!jobs.length) {
+    jbody.innerHTML = '<tr><td colspan="3" class="empty">'+t('db_no_jobs')+'</td></tr>';
+  } else {
+    var jsCfg = {
+      done:      ['rgba(63,185,80,.15)',  '#56d364'],
+      running:   ['rgba(88,166,255,.15)', '#79c0ff'],
+      failed:    ['rgba(248,81,73,.15)',  '#f08080'],
+      error:     ['rgba(248,81,73,.15)',  '#f08080'],
+      pending:   ['rgba(139,148,158,.12)', 'var(--muted)'],
+      cancelled: ['rgba(139,148,158,.12)', 'var(--muted)'],
+    };
+    var jsLabels = {
+      done: t('badge_done'), running: t('badge_running'), failed: t('badge_failed'),
+      error: t('badge_failed'), pending: t('badge_pending'), cancelled: t('badge_cancelled'),
+    };
+    jbody.innerHTML = jobs.map(function(j) {
+      var sc = jsCfg[j.status] || ['rgba(139,148,158,.12)', 'var(--muted)'];
+      var lbl = jsLabels[j.status] || esc(j.status || '–');
+      return '<tr>'
+        + '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          + esc(j.label || j.job_type || '–') + '</td>'
+        + '<td>'+_dbPill(lbl, sc[0], sc[1])+'</td>'
+        + '<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+esc(fmtDate(j.created_at||''))+'</td>'
+        + '</tr>';
+    }).join('');
+  }
+}
+
+var _DB_SYSTEMS_CACHE_KEY = 'nasnap_db_systems_cache';
+
+function _dbRenderSystems(data, stale) {
+  var naDiv = document.getElementById('dbSystemsNetapp');
+  var pvDiv = document.getElementById('dbSystemsPve');
+  if (!naDiv || !pvDiv) return;
+  naDiv.classList.toggle('db-stale', !!stale);
+  pvDiv.classList.toggle('db-stale', !!stale);
+
+  function fmtGB(b) { return (b / 1073741824).toFixed(1) + ' GB'; }
+
+  function ontapRow(sys) {
+    var dot = sys.ok ? '#56d364' : '#f08080';
+    var displayName = (sys.cluster_name && sys.cluster_name !== sys.name) ? sys.cluster_name : sys.name;
+    var subLabel = (sys.cluster_name && sys.cluster_name !== sys.name)
+      ? '<span style="font-size:11px;color:var(--muted);font-weight:400"> (' + esc(sys.name) + ')</span>' : '';
+    var pills = '';
+    if (sys.ok) {
+      if (sys.models && sys.models.length) pills += _dbPill(esc(sys.models.join(' / '))) + ' ';
+      if (sys.version) pills += _dbPill('ONTAP ' + esc(sys.version), 'rgba(121,192,255,.15)');
     }
+    return '<div style="padding:10px 0;border-bottom:1px solid rgba(139,148,158,.08);display:flex;align-items:flex-start;gap:10px">'
+      + '<span style="width:9px;height:9px;border-radius:50%;background:' + dot + ';flex-shrink:0;margin-top:4px"></span>'
+      + '<div style="min-width:0">'
+      + '<div style="font-size:13px;font-weight:700;margin-bottom:5px">' + esc(displayName) + subLabel + '</div>'
+      + (sys.ok
+          ? '<div style="display:flex;flex-wrap:wrap;gap:4px">' + pills + '</div>'
+          : '<div style="font-size:11px;color:var(--error)" title="' + esc(sys.error || '') + '">Offline</div>')
+      + '</div></div>';
+  }
 
-    // Storage overview
-    var items = (storageData && storageData.items) || [];
-    var stbody = document.getElementById('dbStorageTbody');
-    if (!items.length) {
-      stbody.innerHTML = '<tr><td colspan="5" class="empty">'+t('db_no_ds')+'</td></tr>';
-    } else {
-      stbody.innerHTML = items.map(function(ds) {
-        var sc = {active:'badge-green', provisioning:'badge-orange', error:'badge-red',
-                  removing:'badge-orange'}[ds.status] || 'badge-gray';
-        var smBadge = ds.snapmirror
-          ? '<span class="badge badge-'+(ds.snapmirror.state==='snapmirrored'?'green'
-            :(ds.snapmirror.state==='broken_off'?'red':'gray'))+'">'+esc(ds.snapmirror.state||'–')+'</span>'
-          : '<span style="color:var(--muted)">—</span>';
-        // Fill level
-        var cap = capStats[ds.pve_storage_id] || capStats[ds.name] || null;
-        var usageCell;
-        if (cap && cap.total_bytes > 0) {
-          var pct = Math.round(cap.used_bytes / cap.total_bytes * 100);
-          var barColor = pct >= 90 ? '#f08080' : pct >= 70 ? '#f0a040' : '#56d364';
-          usageCell = '<div style="display:flex;align-items:center;gap:5px;min-width:90px">'
-            + '<div style="flex:1;height:5px;background:rgba(139,148,158,.2);border-radius:3px;overflow:hidden">'
-            + '<div style="width:'+pct+'%;height:100%;background:'+barColor+';border-radius:3px"></div></div>'
-            + '<span style="font-size:11px;color:var(--muted);white-space:nowrap">'+pct+'%</span>'
-            + '</div>'
-            + '<div style="font-size:10px;color:var(--muted)">'
-            + fmtBytes(cap.used_bytes)+' / '+fmtBytes(cap.total_bytes)+'</div>';
-        } else if (ds.size_bytes) {
-          usageCell = '<span style="color:var(--muted);font-size:11px">'+fmtBytes(ds.size_bytes)+'</span>';
-        } else {
-          usageCell = '<span style="color:var(--muted)">—</span>';
-        }
-        // VM count
-        var vmCount = cap && cap.vm_count > 0
-          ? '<span style="font-weight:600">'+cap.vm_count+'</span>'
-          : '<span style="color:var(--muted)">—</span>';
-        return '<tr>'
-          + '<td><strong>'+esc(ds.name)+'</strong>'
-            + (ds.error_message ? '<br><span style="color:var(--error);font-size:10px">'
-               +esc(ds.error_message.slice(0,60))+'</span>' : '')
-            + '</td>'
-          + '<td><span class="badge '+sc+'">'+esc(ds.status)+'</span></td>'
-          + '<td>'+usageCell+'</td>'
-          + '<td>'+vmCount+'</td>'
-          + '<td>'+smBadge+'</td>'
-          + '</tr>';
-      }).join('');
-    }
-
-    // Recent jobs (last 8)
-    var jobs = Array.isArray(jobsData) ? jobsData.slice(0, 8) : [];
-    var jbody = document.getElementById('dbJobsTbody');
-    if (!jobs.length) {
-      jbody.innerHTML = '<tr><td colspan="3" class="empty">'+t('db_no_jobs')+'</td></tr>';
-    } else {
-      jbody.innerHTML = jobs.map(function(j) {
-        return '<tr>'
-          + '<td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
-            + esc(j.label || j.job_type || '–') + '</td>'
-          + '<td>'+statusBadge(j.status)+'</td>'
-          + '<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+esc(fmtDate(j.created_at||''))+'</td>'
-          + '</tr>';
-      }).join('');
-    }
-
-    // Alert banner — datastores in error state
-    var errDs = items.filter(function(ds){ return ds.status === 'error'; });
-    var alertDiv = document.getElementById('db_alert_banner');
-    if (errDs.length) {
-      alertDiv.style.display = '';
-      alertDiv.innerHTML = '<div class="db-alert"><strong>⚠ '
-        + errDs.length + ' Datastore'+(errDs.length>1?'s':'')+' '+t('db_issues')+':</strong> '
-        + errDs.map(function(ds){ return esc(ds.name); }).join(', ')
+  function pveRow(sys) {
+    var dot = sys.ok ? '#56d364' : '#f08080';
+    var cpuPct = (sys.cpu_pct !== null && sys.cpu_pct !== undefined) ? sys.cpu_pct : null;
+    var ramPct = (sys.mem_total > 0) ? Math.round(sys.mem_used / sys.mem_total * 100) : null;
+    function usageLine(label, pct, extra) {
+      return '<div style="display:flex;align-items:center;gap:6px;margin-top:5px">'
+        + '<span style="font-size:11px;color:var(--muted);width:28px;flex-shrink:0">' + label + '</span>'
+        + _dbBar(pct)
+        + (extra ? '<span style="font-size:11px;color:var(--muted)">' + extra + '</span>' : '')
         + '</div>';
-    } else {
-      alertDiv.style.display = 'none';
     }
+    return '<div style="padding:10px 0;border-bottom:1px solid rgba(139,148,158,.08);display:flex;align-items:flex-start;gap:10px">'
+      + '<span style="width:9px;height:9px;border-radius:50%;background:' + dot + ';flex-shrink:0;margin-top:4px"></span>'
+      + '<div style="min-width:0;flex:1">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">'
+      + '<span style="font-size:13px;font-weight:700">' + esc(sys.name) + '</span>'
+      + (sys.version ? _dbPill('PVE ' + esc(sys.version), 'rgba(196,181,253,.18)') : '')
+      + '</div>'
+      + (sys.ok && cpuPct !== null
+          ? usageLine('CPU', cpuPct, '')
+            + (ramPct !== null ? usageLine('RAM', ramPct, fmtGB(sys.mem_used) + ' / ' + fmtGB(sys.mem_total)) : '')
+          : (!sys.ok ? '<div style="font-size:11px;color:var(--error)" title="' + esc(sys.error || '') + '">Offline</div>' : ''))
+      + '</div></div>';
+  }
 
+  naDiv.innerHTML = (data.netapp && data.netapp.length)
+    ? data.netapp.map(ontapRow).join('')
+    : '<div style="font-size:13px;color:var(--muted);padding:10px 0">Keine Endpoints konfiguriert</div>';
+  pvDiv.innerHTML = (data.pve && data.pve.length)
+    ? data.pve.map(pveRow).join('')
+    : '<div style="font-size:13px;color:var(--muted);padding:10px 0">Keine PVE-Hosts konfiguriert</div>';
+}
+
+function _dbLoadSystems() {
+  // Show cached version immediately
+  try {
+    var cached = JSON.parse(localStorage.getItem(_DB_SYSTEMS_CACHE_KEY) || 'null');
+    if (cached) _dbRenderSystems(cached, true);
+  } catch(_) {}
+  // Fetch live (this is slow — independent of the main dashboard sections)
+  apiFetch('dashboard/systems').then(function(data) {
+    _dbRenderSystems(data, false);
+    try { localStorage.setItem(_DB_SYSTEMS_CACHE_KEY, JSON.stringify(data)); } catch(_) {}
+  }).catch(function(e) { console.error('[dashboard/systems]', e); });
+}
+
+function _dbSetTimestamp(ts, stale) {
+  var el = document.getElementById('db_ts');
+  if (!el) return;
+  if (!ts) { el.textContent = ''; return; }
+  var d = new Date(ts);
+  var hhmm = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  el.textContent = stale ? ('Stand: ' + hhmm) : ('aktuell ' + hhmm);
+  el.title = stale ? 'Gecachte Daten – wird aktualisiert…' : 'Zuletzt aktualisiert: ' + d.toLocaleTimeString();
+}
+
+var _dbLoading = false;
+async function loadDashboard() {
+  if (_dbLoading) return;
+  _dbLoading = true;
+  var btn = document.getElementById('db_refresh_btn');
+  if (btn) btn.disabled = true;
+
+  // Render cached data immediately so the user sees something right away
+  try {
+    var cached = JSON.parse(localStorage.getItem(_DB_CACHE_KEY) || 'null');
+    if (cached) {
+      _dbRenderSummary(cached.summary, true);
+      _dbRenderStorage(cached.storageData, cached.capData, true);
+      _dbRenderJobs(cached.jobsData, true);
+      _dbSetTimestamp(cached.ts, true);
+    }
+  } catch(_) {}
+
+  try {
+    // Fire all fetches in parallel but update each section independently as it arrives
+    var summaryP    = apiFetch('snapshots/protection-summary').catch(function(){ return {}; });
+    var storageP    = apiFetch('storage/unified').catch(function(){ return {items:[]}; });
+    var jobsP       = apiFetch('jobs/status').catch(function(){ return []; });
+    var capP        = apiFetch('storage/capacity').catch(function(){ return {stats:{}}; });
+
+    // Update stat cards as soon as protection-summary arrives (usually fast)
+    summaryP.then(function(s){ _dbRenderSummary(s, false); });
+
+    // Update jobs as soon as jobs/status arrives (usually fast)
+    jobsP.then(function(j){ _dbRenderJobs(j, false); });
+
+    // Storage table needs both storage list and capacity — wait for both
+    Promise.all([storageP, capP]).then(function(res){ _dbRenderStorage(res[0], res[1], false); });
+
+    // Wait for everything to finish, then cache and update timestamp
+    var results = await Promise.all([summaryP, storageP, jobsP, capP]);
+    var ts = Date.now();
+    _dbSetTimestamp(ts, false);
+    try {
+      localStorage.setItem(_DB_CACHE_KEY, JSON.stringify({
+        summary: results[0], storageData: results[1], jobsData: results[2], capData: results[3], ts: ts
+      }));
+    } catch(_) {}
   } catch(e) { console.error('[dashboard]', e); }
+
+  _dbLoading = false;
+  if (btn) btn.disabled = false;
+
+  // Systems widget fires independently — it's slow (live ONTAP + PVE calls) and should not block
+  _dbLoadSystems();
 }
 
 function showProvWizard() {
