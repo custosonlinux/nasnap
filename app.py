@@ -472,8 +472,41 @@ def create_app():
       .finally(function () { window.location.replace('/login'); });
   };
 
+  /* ── Light / dark theme toggle ── */
+  var _THEME_KEY = 'nasnap-theme';
+  /* Apply immediately (in <head>) to avoid flash-of-dark on reload */
+  if (localStorage.getItem(_THEME_KEY) === 'light') {
+    document.documentElement.classList.add('light-theme-pre');
+  }
+  function _applyTheme(theme) {
+    document.documentElement.classList.remove('light-theme-pre');
+    if (theme === 'light') {
+      document.body.classList.add('light-theme');
+    } else {
+      document.body.classList.remove('light-theme');
+    }
+    var btn = document.getElementById('ns-theme-btn');
+    if (btn) btn.title = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
+    var icon = document.getElementById('ns-theme-icon');
+    if (icon) {
+      if (theme === 'light') {
+        icon.innerHTML = '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
+      } else {
+        icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+      }
+    }
+  }
+  window.nasnapToggleTheme = function () {
+    var current = localStorage.getItem(_THEME_KEY) || 'dark';
+    var next = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(_THEME_KEY, next);
+    _applyTheme(next);
+  };
+
   /* populate username in topbar; show admin link for admin role */
   document.addEventListener('DOMContentLoaded', function () {
+    _applyTheme(localStorage.getItem(_THEME_KEY) || 'dark');
+
     fetch('/api/auth/me', { credentials: 'include' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -484,7 +517,6 @@ def create_app():
           if (lnk) lnk.style.display = 'flex';
         }
       });
-
   });
 })();
 </script>
@@ -496,6 +528,21 @@ def create_app():
         'gap:8px;padding-bottom:4px;">'
         '<span id="ns-username" style="font-size:11px;color:var(--muted);'
         'white-space:nowrap;padding:0 4px;"></span>'
+        # Theme toggle button
+        '<button id="ns-theme-btn" onclick="nasnapToggleTheme()" title="Switch to light theme" '
+        'style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;'
+        'background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;'
+        'color:var(--muted);transition:color .15s,border-color .15s,background .15s;" '
+        'onmouseover="this.style.color=\'var(--text)\';this.style.borderColor=\'var(--text)\';this.style.background=\'var(--hover)\'" '
+        'onmouseout="this.style.color=\'var(--muted)\';this.style.borderColor=\'var(--border)\';this.style.background=\'none\'">'
+        '<svg id="ns-theme-icon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="12" cy="12" r="5"/>'
+        '<line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>'
+        '<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>'
+        '<line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>'
+        '<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
+        '</svg>'
+        '</button>'
         # Settings link (all authenticated users)
         '<a href="/settings" title="Settings" '
         'style="display:flex;align-items:center;gap:5px;padding:5px 10px;'

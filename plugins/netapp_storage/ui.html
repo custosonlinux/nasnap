@@ -24,6 +24,25 @@
     --mono:    'JetBrains Mono', 'Fira Code', monospace;
   }
 
+  /* ── Light theme ─────────────────────────────────────────────── */
+  /* Pre-applied on <html> by inline script to avoid dark flash on reload */
+  html.light-theme-pre { background: #F0F4F8; }
+
+  body.light-theme {
+    --bg:     #F0F4F8;
+    --card:   #FFFFFF;
+    --border: #CBD5E0;
+    --hover:  #E2EAF3;
+    --text:   #1A2536;
+    --muted:  #64748B;
+  }
+  body.light-theme .jtc        { box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+  body.light-theme .toast      { box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+  body.light-theme .subtab.active { color: #fff; }
+  body.light-theme input, body.light-theme select, body.light-theme textarea {
+    color: var(--text);
+  }
+
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   html, body {
