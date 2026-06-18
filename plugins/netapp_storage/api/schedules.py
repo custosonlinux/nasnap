@@ -212,10 +212,12 @@ def _execute_schedule(schedule):
             "schedule_name":     schedule.get("name", ""),
             "snap_name_suffix":  sched_name_safe,
             "retention_count":   int(schedule.get("retention_count") or 7),
-            "snapmirror_update": bool(schedule.get("snapmirror_update", 0)),
-            "notify_enabled":    bool(schedule.get("notify_enabled", 0)),
-            "notify_on":         schedule.get("notify_on", "all") or "all",
-            "notify_recipients": schedule.get("notify_recipients", "") or "",
+            "snapmirror_update":   bool(schedule.get("snapmirror_update", 0)),
+            "notify_enabled":      bool(schedule.get("notify_enabled", 0)),
+            "notify_on":           schedule.get("notify_on", "all") or "all",
+            "notify_recipients":   schedule.get("notify_recipients", "") or "",
+            "tamperproof_enabled": bool(schedule.get("tamperproof_enabled", 0)),
+            "tamperproof_days":    int(schedule.get("tamperproof_days") or 0),
         }
         try:
             start_snapshot_job(job_id, data, f"schedule:{schedule['name']}")
@@ -341,8 +343,9 @@ def _add_schedule():
         "INSERT INTO netapp_snapshot_schedules "
         "(id, name, mapping_id, vmids_json, cron_expr, retention_count, "
         "consistency, label, pre_script, post_script, snapmirror_update, "
-        "notify_enabled, notify_on, notify_recipients, sync_vmids, enabled, created_by, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "notify_enabled, notify_on, notify_recipients, sync_vmids, "
+        "tamperproof_enabled, tamperproof_days, enabled, created_by, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (sid, data["name"], data["mapping_id"], json.dumps(vmids),
          data["cron_expr"], int(data.get("retention_count", 7)),
          data.get("consistency", "crash"), data.get("label", ""),
@@ -352,6 +355,8 @@ def _add_schedule():
          data.get("notify_on", "all"),
          data.get("notify_recipients", ""),
          1 if data.get("sync_vmids") else 0,
+         1 if data.get("tamperproof_enabled") else 0,
+         int(data.get("tamperproof_days") or 0),
          1, username, now),
     )
     return {"success": True, "id": sid}
@@ -382,13 +387,15 @@ def _update_schedule():
         ("notify_on",         data.get("notify_on")),
         ("notify_recipients", data.get("notify_recipients")),
         ("sync_vmids",        1 if data.get("sync_vmids") else (0 if "sync_vmids" in data else None)),
+        ("tamperproof_enabled", 1 if data.get("tamperproof_enabled") else (0 if "tamperproof_enabled" in data else None)),
+        ("tamperproof_days",  data.get("tamperproof_days")),
         ("enabled", data.get("enabled")),
         ("vmids_json", json.dumps(data["vmids"]) if "vmids" in data else None),
         ("mapping_id", data.get("mapping_id")),
     ]:
         if val is not None:
             fields.append(f"{col}=?")
-            values.append(int(val) if col in ("retention_count", "enabled") else val)
+            values.append(int(val) if col in ("retention_count", "enabled", "tamperproof_days") else val)
 
     if not fields:
         return {"error": "No changes"}, 400

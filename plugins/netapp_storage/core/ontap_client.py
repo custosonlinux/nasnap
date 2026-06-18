@@ -176,19 +176,25 @@ class OntapClient:
                          params={"fields": "uuid,name,create_time,comment,snapmirror_label"})
         return data.get("records", [])
 
-    def create_snapshot(self, volume_uuid, snap_name, comment="", snapmirror_label=""):
+    def create_snapshot(self, volume_uuid, snap_name, comment="", snapmirror_label="", expiry_time=""):
         """Creates a volume snapshot. Returns job UUID (or '' on synchronous success).
 
         Fallback chain for ASA systems that do not support POST to volume-snapshots:
           1. storage/volumes/{uuid}/snapshots  (standard FAS/AFF/AFF-C)
           2. application/consistency-groups → CG snapshot  (ASA with CGs)
           3. private/cli/snapshot  (ASA CLI bridge)
+
+        expiry_time: ISO-8601 UTC timestamp (e.g. "2027-01-01T00:00:00Z").
+          When set ONTAP refuses deletion until that time (tamperproof/WORM lock).
+          Requires ONTAP 9.12.1+. Ignored on older releases.
         """
         body = {"name": snap_name}
         if comment:
             body["comment"] = comment
         if snapmirror_label:
             body["snapmirror_label"] = snapmirror_label
+        if expiry_time:
+            body["expiry_time"] = expiry_time
         try:
             resp = self._post(f"storage/volumes/{volume_uuid}/snapshots",
                               body=body, params={"return_timeout": 0})

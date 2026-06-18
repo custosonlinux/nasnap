@@ -4248,7 +4248,7 @@ function _renderSchedules() {
       '<td>'+vmDisplay+'</td>' +
       '<td>'+esc(cronHuman(s.cron_expr))+'</td>' +
       '<td>'+(s.label?'<span class="corp-badge corp-badge-ha">'+esc(s.label)+'</span>':'<span style="color:var(--muted)">–</span>')+'</td>' +
-      '<td>'+s.retention_count+'×</td>' +
+      '<td>'+s.retention_count+'× '+(s.tamperproof_enabled ? _dbPill('Lock '+s.tamperproof_days+'d','rgba(86,131,210,.15)','var(--primary)') : '')+'</td>' +
       '<td>'+(s.enabled?'<span class="corp-badge corp-badge-online">'+t('badge_active')+'</span>':'<span class="corp-badge corp-badge-stopped">'+t('badge_inactive')+'</span>')+'</td>' +
       '<td style="color:var(--muted)">'+lastRun+'</td>' +
       '<td>'+schedSmBadge(s.snapmirror)+'</td>' +
@@ -4317,6 +4317,7 @@ function updateSchedCron() {
   document.getElementById('sched_cron').value = cron;
   document.getElementById('sched_cron_human').textContent = cronHuman(cron);
   schedUpdateNextRuns();
+  schedTamperproofUpdate();
 }
 
 function _computeNextRunsFromCron(cron, count) {
@@ -4398,6 +4399,7 @@ function schedRetentionWarn() {
   } else {
     warnDiv.style.display = 'none';
   }
+  schedTamperproofUpdate();
 }
 
 // ── Timeline Ribbon ────────────────────────────────────────────────────────
@@ -4653,6 +4655,11 @@ async function showAddScheduleForm() {
     document.getElementById('sched_notify_recipients').value = '';
     document.getElementById('sched_notify_fields').style.display = 'none';
   }
+  if (document.getElementById('sched_tamperproof')) {
+    document.getElementById('sched_tamperproof').checked = false;
+    document.getElementById('sched_tamperproof_opts').style.display = 'none';
+    document.getElementById('sched_tamperproof_days').value = 7;
+  }
   document.getElementById('sched_freq').value = 'daily';
   document.getElementById('sched_time').value = '02:00';
   document.getElementById('schedWizSaveBtn').textContent = t('sched_save');
@@ -4700,6 +4707,12 @@ async function showEditScheduleForm(s) {
     document.getElementById('sched_notify_on').value           = s.notify_on || 'all';
     document.getElementById('sched_notify_recipients').value   = s.notify_recipients || '';
     document.getElementById('sched_notify_fields').style.display = notifyOn ? 'flex' : 'none';
+  }
+  if (document.getElementById('sched_tamperproof')) {
+    var tpEnabled = !!s.tamperproof_enabled;
+    document.getElementById('sched_tamperproof').checked = tpEnabled;
+    document.getElementById('sched_tamperproof_days').value = s.tamperproof_days || 7;
+    document.getElementById('sched_tamperproof_opts').style.display = tpEnabled ? '' : 'none';
   }
   parseCronToForm(s.cron_expr);
   document.getElementById('schedWizSaveBtn').textContent = t('sched_update');
@@ -4775,6 +4788,83 @@ function _schedNotifyPayload() {
 function toggleNotifyFields() {
   var on = document.getElementById('sched_notify_enabled').checked;
   document.getElementById('sched_notify_fields').style.display = on ? 'flex' : 'none';
+}
+
+function _schedTamperproofMax() {
+  // The lock must expire BEFORE retention tries to delete the snapshot.
+  // Deletion attempt happens at: creation_time + retention_count × interval.
+  // Therefore: lock_duration < retention_count × interval.
+  // Safe maximum (whole days): floor((retention_count - 1) × interval_days).
+  var retention = parseInt((document.getElementById('sched_retention') || {value:'7'}).value) || 1;
+  var freq = (document.getElementById('sched_freq') || {value:'daily'}).value;
+  var intervalDays = 1;
+  if      (freq === 'hourly')   intervalDays = 1/24;
+  else if (freq === 'weekly')   intervalDays = 7;
+  else if (freq === 'monthly')  intervalDays = 30;
+  else if (freq === 'interval') {
+    var iv = parseInt((document.getElementById('sched_interval_val') || {value:'1'}).value) || 1;
+    intervalDays = iv / 24;
+  }
+  return Math.max(0, Math.floor((retention - 1) * intervalDays));
+}
+
+function _schedTamperproofPayload() {
+  var chk  = document.getElementById('sched_tamperproof');
+  var days = parseInt((document.getElementById('sched_tamperproof_days') || {value:'0'}).value) || 0;
+  var enabled = !!(chk && chk.checked);
+  return { tamperproof_enabled: enabled, tamperproof_days: enabled ? Math.max(1, days) : 0 };
+}
+
+function schedTamperproofToggle() {
+  var chk  = document.getElementById('sched_tamperproof');
+  var opts = document.getElementById('sched_tamperproof_opts');
+  if (!opts) return;
+  opts.style.display = chk.checked ? '' : 'none';
+  if (chk.checked) {
+    var max = _schedTamperproofMax();
+    var daysEl = document.getElementById('sched_tamperproof_days');
+    // Default to max (= longest lock that still allows rotation)
+    if (daysEl && max >= 1) daysEl.value = max;
+    schedTamperproofUpdate();
+  }
+}
+
+function schedTamperproofUpdate() {
+  var chk = document.getElementById('sched_tamperproof');
+  if (!chk || !chk.checked) return;
+  var max = _schedTamperproofMax();
+  var el = document.getElementById('sched_tamperproof_suggest');
+  if (el) {
+    if (max < 1) {
+      el.textContent = 'Not practical: increase retention count or use a less frequent schedule.';
+      el.style.color = '#f08080';
+    } else {
+      el.textContent = 'Maximum: ' + max + ' day' + (max !== 1 ? 's' : '') + ' (= (retention − 1) × interval)';
+      el.style.color = '';
+    }
+  }
+  schedTamperproofWarn();
+}
+
+function schedTamperproofWarn() {
+  var chk  = document.getElementById('sched_tamperproof');
+  var warn = document.getElementById('sched_tamperproof_warn');
+  if (!warn) return;
+  if (!chk || !chk.checked) { warn.style.display = 'none'; return; }
+  var max  = _schedTamperproofMax();
+  var days = parseInt((document.getElementById('sched_tamperproof_days') || {value:'0'}).value) || 0;
+  if (max < 1) {
+    warn.style.display = '';
+    warn.textContent = 'With this frequency and retention count the rotation window is less than 1 day, '
+      + 'so day-level tamperproof locking is not practical — a 1-day lock would already outlast the retention window. '
+      + 'Increase the retention count or use a less frequent schedule.';
+  } else if (days > max) {
+    warn.style.display = '';
+    warn.textContent = 'Lock duration (' + days + 'd) exceeds the maximum (' + max + 'd = (retention − 1) × interval). '
+      + 'Snapshots will still be locked when retention tries to delete them and will accumulate beyond the configured count.';
+  } else {
+    warn.style.display = 'none';
+  }
 }
 
 // ── Schedule Wizard ───────────────────────────────────────────────────────────
@@ -4888,6 +4978,17 @@ function schedWizUpdateSummary() {
   } else {
     html += row('Notifications', '<span style="opacity:.5">Disabled</span>');
   }
+  var tpChk = document.getElementById('sched_tamperproof');
+  var tpEnabled = !!(tpChk && tpChk.checked);
+  var tpDays = parseInt((document.getElementById('sched_tamperproof_days') || {value:'0'}).value) || 0;
+  var tpMax  = _schedTamperproofMax();
+  if (tpEnabled) {
+    var tpValHtml = '<span style="color:var(--primary);font-weight:600">Enabled</span> — lock duration: <strong>' + esc(String(tpDays)) + ' days</strong>';
+    if (tpDays > tpMax) tpValHtml += ' <span style="color:#f08080;font-size:11px">⚠ exceeds max (' + tpMax + 'd)</span>';
+    html += row('Tamperproof', tpValHtml);
+  } else {
+    html += row('Tamperproof', '<span style="opacity:.5">Disabled</span>');
+  }
   html += '</table>';
   document.getElementById('schedWizSummary').innerHTML = html;
 }
@@ -4923,7 +5024,7 @@ async function updateSchedule(id) {
   var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
   if (_sbtn) _sbtn.disabled = true;
   try {
-    await apiPost('schedules/update', Object.assign({id,name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload()));
+    await apiPost('schedules/update', Object.assign({id,name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload()));
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
@@ -4949,7 +5050,7 @@ async function addSchedule() {
   var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
   if (_sbtn) _sbtn.disabled = true;
   try {
-    await apiPost('schedules/add', Object.assign({name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload()));
+    await apiPost('schedules/add', Object.assign({name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload()));
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
@@ -5807,19 +5908,19 @@ async function testSmtp() {
 var _provPveHosts = [];
 var _provOntapRes = {volumes:[], luns:[], igroups:[]};
 
-async function loadStorageUnified() {
-  try {
-    var d = await apiFetch('storage/unified');
-    var items = d.items || [];
-    var tbody = document.getElementById('storageTbody');
-    var empty = document.getElementById('storageEmpty');
-    if (!items.length) {
-      tbody.innerHTML = '';
-      empty.style.display = 'block';
-      return;
-    }
-    empty.style.display = 'none';
-    tbody.innerHTML = items.map(function(ds) {
+var _STORAGE_UNIFIED_CACHE_KEY = 'nasnap_storage_unified_cache';
+
+function _renderStorageItems(items) {
+  var tbody = document.getElementById('storageTbody');
+  var empty = document.getElementById('storageEmpty');
+  if (!tbody) return;
+  if (!items.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  tbody.innerHTML = items.map(function(ds) {
       var _protoBg = {nfs:'#0ea5e9', iscsi:'#f97316', nvme:'#a855f7'}[ds.protocol];
       var _protoBadge = '<span class="badge" style="background:'+(_protoBg||'#888')+';color:#fff">'
         + esc((ds.protocol||'').toUpperCase()) + '</span>';
@@ -5891,7 +5992,22 @@ async function loadStorageUnified() {
         + '<td><div class="row-actions">'+actions+'</div></td>'
         + '</tr>';
     }).join('');
-  } catch(e) { toast(e.message,'error'); }
+}
+
+async function loadStorageUnified() {
+  // Show stale cache immediately so the tab feels instant
+  try {
+    var cached = JSON.parse(localStorage.getItem(_STORAGE_UNIFIED_CACHE_KEY) || 'null');
+    if (cached && Array.isArray(cached.items)) _renderStorageItems(cached.items);
+  } catch (_) {}
+
+  // Fetch fresh data and update
+  try {
+    var d = await apiFetch('storage/unified');
+    var items = d.items || [];
+    _renderStorageItems(items);
+    try { localStorage.setItem(_STORAGE_UNIFIED_CACHE_KEY, JSON.stringify({items: items, ts: Date.now()})); } catch (_) {}
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // kept for any remaining internal callers
@@ -9738,6 +9854,29 @@ loadDashboard();
               <span id="sched_retention_warn_msg"></span>
             </div>
           </div>
+          <!-- Tamperproof Snapshots -->
+          <div style="padding-top:4px;border-top:1px solid var(--border)">
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+              <input type="checkbox" id="sched_tamperproof" style="margin-top:3px;flex-shrink:0" onchange="schedTamperproofToggle()">
+              <div>
+                <div style="font-weight:600;font-size:13px">Tamperproof Snapshots
+                  <span style="font-size:10px;font-weight:600;background:rgba(139,148,158,.14);color:var(--fg);padding:2px 7px;border-radius:10px;margin-left:6px;vertical-align:middle">ONTAP 9.12.1+</span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">Lock snapshots with an expiry date — ONTAP will refuse deletion until the lock expires, even by administrators.</div>
+              </div>
+            </label>
+            <div id="sched_tamperproof_opts" style="display:none;margin-top:12px;margin-left:26px">
+              <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+                <div class="form-group" style="margin:0">
+                  <label style="font-size:12px">Lock duration (days)</label>
+                  <input type="number" id="sched_tamperproof_days" min="1" max="36500" value="7" style="width:90px" oninput="schedTamperproofWarn()">
+                </div>
+                <div id="sched_tamperproof_suggest" style="font-size:12px;color:var(--muted);padding-bottom:6px"></div>
+              </div>
+              <div id="sched_tamperproof_warn" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(240,160,64,.1);border:1px solid rgba(240,160,64,.35);border-radius:6px;font-size:12px;color:#f0a040"></div>
+            </div>
+          </div>
+
           <!-- Next-run preview -->
           <div>
             <div style="margin-bottom:8px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Next 10 runs</div>

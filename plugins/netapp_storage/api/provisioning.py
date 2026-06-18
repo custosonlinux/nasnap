@@ -9,6 +9,8 @@ All mutating operations run as background jobs (same pattern as restore/clone).
 
 import json
 import shlex
+import threading
+import time
 import uuid as _uuid
 import logging
 from datetime import datetime, timezone
@@ -729,14 +731,38 @@ def _storage_unified():
     return {"items": items}
 
 
-def _storage_capacity():
-    """
-    Returns PVE-reported used/total bytes and VM count per storage_id.
-    Calls cluster/resources once per PVE host (cheap).
-    """
+# ── Capacity cache ────────────────────────────────────────────────────────────
+# storage/capacity calls PVE over the network and is slow (seconds per host).
+# With WORKERS=1 this blocks every other request queued behind it.
+# Solution: serve the last known result immediately; refresh in a background
+# thread when the cached value is older than _CAP_TTL seconds.
+_cap_cache: dict   = {"stats": {}}
+_cap_ts:    float  = 0.0
+_cap_lock          = threading.Lock()
+_cap_loading       = False
+_CAP_TTL           = 60  # seconds
+
+
+def _fetch_capacity_bg():
+    """Runs in a background thread; refreshes the capacity cache."""
+    global _cap_cache, _cap_ts, _cap_loading
+    try:
+        result = _do_fetch_capacity()
+        with _cap_lock:
+            _cap_cache = result
+            _cap_ts    = time.monotonic()
+    except Exception as exc:
+        log.debug(f"[netapp_storage] capacity background refresh failed: {exc}")
+    finally:
+        with _cap_lock:
+            _cap_loading = False
+
+
+def _do_fetch_capacity() -> dict:
+    """Blocking fetch — never call from a request handler directly."""
     db = get_db()
-    cap: dict = {}   # storage_id → {used_bytes, total_bytes, vm_count}
-    vm_by_node: dict = {}  # node → list of vmids
+    cap: dict = {}
+    vm_by_node: dict = {}
 
     host_rows = db.query("SELECT * FROM netapp_pve_hosts")
     for hr in (host_rows or []):
@@ -744,24 +770,20 @@ def _storage_capacity():
             from ..core._helpers import build_pve_client
             pve = build_pve_client(db, dict(hr)["id"])
 
-            # Storage capacity
             r = pve._api_get(f"{pve._base}/cluster/resources?type=storage")
             if r.ok:
                 for st in r.json().get("data", []):
                     sid   = st.get("storage")
-                    node  = st.get("node", "")
                     used  = int(st.get("disk", 0))
                     total = int(st.get("maxdisk", 0))
                     if not sid or total == 0:
                         continue
                     if sid not in cap:
                         cap[sid] = {"used_bytes": used, "total_bytes": total, "vm_count": 0}
-                    # Aggregate: take the node with most data (active node)
                     elif used > cap[sid]["used_bytes"]:
                         cap[sid]["used_bytes"] = used
                         cap[sid]["total_bytes"] = total
 
-            # VM count per storage via storage content listing
             r2 = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
             if r2.ok:
                 for vm in r2.json().get("data", []):
@@ -771,9 +793,8 @@ def _storage_capacity():
                         vm_by_node.setdefault(node, set()).add(vmid)
 
         except Exception as exc:
-            log.debug(f"[netapp_storage] storage/capacity: {exc}")
+            log.debug(f"[netapp_storage] storage/capacity host: {exc}")
 
-    # VM count per storage — query storage content per node for our known datastores
     known_ids = set(cap.keys())
     if known_ids and vm_by_node:
         for hr in (host_rows or []):
@@ -802,6 +823,29 @@ def _storage_capacity():
                 pass
 
     return {"stats": cap}
+
+
+def _storage_capacity():
+    """
+    Returns PVE-reported used/total bytes and VM count per storage_id.
+
+    Always returns immediately from cache. A background thread refreshes the
+    cache when it's older than _CAP_TTL seconds. With WORKERS=1 this ensures
+    the slow PVE network calls never block other request handlers.
+    """
+    global _cap_loading
+    now = time.monotonic()
+    with _cap_lock:
+        age       = now - _cap_ts
+        loading   = _cap_loading
+        cached    = _cap_cache
+
+    if age > _CAP_TTL and not loading:
+        with _cap_lock:
+            _cap_loading = True
+        threading.Thread(target=_fetch_capacity_bg, daemon=True).start()
+
+    return cached
 
 
 def register_routes():

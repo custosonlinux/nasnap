@@ -17,7 +17,7 @@ import uuid
 import logging
 import threading
 import shlex
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from nasnap_core.core.db import get_db
 from nasnap_core.constants import PEGAPROX_VERSION
@@ -300,10 +300,16 @@ def _run_snapshot(job_id, params, username):
 
             # ── 7. Create ONTAP snapshot ───────────────────────────────
             jlog.log(f"Creating ONTAP snapshot '{snap_name}' …")
+            expiry_time = ""
+            if params.get("tamperproof_enabled") and int(params.get("tamperproof_days") or 0) > 0:
+                _expiry = datetime.now(timezone.utc) + timedelta(days=int(params["tamperproof_days"]))
+                expiry_time = _expiry.strftime('%Y-%m-%dT%H:%M:%SZ')
+                jlog.log(f"Tamperproof: snapshot locked until {expiry_time}.")
             job_uuid = client.create_snapshot(
                 mapping["volume_uuid"], snap_name,
                 comment=f"nasnap cluster={cluster_id} vms={','.join(str(v) for v in vmids)}",
                 snapmirror_label=snap_label,
+                expiry_time=expiry_time,
             )
 
             # ── 8. Poll job ───────────────────────────────────────────
@@ -532,10 +538,17 @@ def _apply_schedule_retention(db, schedule_id, retention_count,
                 )
                 continue
         except Exception as exc:
-            log.warning(
-                f"[netapp_storage] Retention: ONTAP delete '{snap_nm}' failed: {exc} "
-                "— keeping DB entry."
-            )
+            exc_str = str(exc)
+            if any(k in exc_str.lower() for k in ("locked", "expir", "tamperproof", "worm")):
+                log.info(
+                    f"[netapp_storage] Retention: snapshot '{snap_nm}' is tamperproof-locked — "
+                    "will be deleted after its expiry date."
+                )
+            else:
+                log.warning(
+                    f"[netapp_storage] Retention: ONTAP delete '{snap_nm}' failed: {exc} "
+                    "— keeping DB entry."
+                )
             continue   # don't touch DB if ONTAP delete failed
         # Remove DB entry for the deleted snapshot
         try:
