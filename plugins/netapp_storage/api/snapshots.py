@@ -776,10 +776,12 @@ def _protection_summary():
         except Exception as exc:
             log.debug(f"[netapp_storage] protection-summary: {dict(hr).get('host','?')}: {exc}")
 
-    # Snapshot counts (fast DB-only queries)
-    snap_total   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots") or {}).get("c", 0)
-    snap_done    = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status='done'") or {}).get("c", 0)
-    snap_failed  = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status IN ('failed','error')") or {}).get("c", 0)
+    # Snapshot counts — rolling 7-day window (fast DB-only queries)
+    from datetime import timedelta
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    snap_7d        = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE created_at >= ?", (seven_days_ago,)) or {}).get("c", 0)
+    snap_7d_done   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status='done' AND created_at >= ?", (seven_days_ago,)) or {}).get("c", 0)
+    snap_7d_failed = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status IN ('failed','error') AND created_at >= ?", (seven_days_ago,)) or {}).get("c", 0)
 
     # SnapMirror health
     sm_total   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapmirror_relationships") or {}).get("c", 0)
@@ -790,9 +792,9 @@ def _protection_summary():
         "total_datastores": total_datastores,
         "protected_datastores": protected_datastores,
         "active_schedules": int(active_schedules),
-        "snap_total": int(snap_total),
-        "snap_done": int(snap_done),
-        "snap_failed": int(snap_failed),
+        "snap_7d":        int(snap_7d),
+        "snap_7d_done":   int(snap_7d_done),
+        "snap_7d_failed": int(snap_7d_failed),
         "sm_total": int(sm_total),
         "sm_healthy": int(sm_healthy),
     }

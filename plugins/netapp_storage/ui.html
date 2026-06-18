@@ -1296,17 +1296,17 @@ function applyI18n() {
         <div class="db-stat">
           <div class="db-stat-value" id="db_snap_total">–</div>
           <div class="db-stat-label">Snapshots</div>
-          <div class="db-stat-sub">total</div>
+          <div class="db-stat-sub">last 7 days</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#56d364" id="db_snap_done">–</div>
-          <div class="db-stat-label">Successful</div>
-          <div class="db-stat-sub">Snapshots</div>
+          <div class="db-stat-label">Completed</div>
+          <div class="db-stat-sub">last 7 days</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#f08080" id="db_snap_failed">–</div>
           <div class="db-stat-label">Failed</div>
-          <div class="db-stat-sub">Snapshots</div>
+          <div class="db-stat-sub">last 7 days</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#79c0ff" id="db_prot_ds">–</div>
@@ -6037,9 +6037,9 @@ function _dbRenderSummary(summary, stale) {
   var s = summary || {};
   var ids = ['db_snap_total','db_snap_done','db_snap_failed','db_prot_ds','db_active_scheds'];
   ids.forEach(function(id){ var el=document.getElementById(id); if(el) el.classList.toggle('db-stale',!!stale); });
-  document.getElementById('db_snap_total').textContent    = s.snap_total          ?? '–';
-  document.getElementById('db_snap_done').textContent     = s.snap_done           ?? '–';
-  document.getElementById('db_snap_failed').textContent   = s.snap_failed         ?? '–';
+  document.getElementById('db_snap_total').textContent    = s.snap_7d        ?? '–';
+  document.getElementById('db_snap_done').textContent     = s.snap_7d_done   ?? '–';
+  document.getElementById('db_snap_failed').textContent   = s.snap_7d_failed ?? '–';
   document.getElementById('db_prot_ds').textContent       = s.protected_datastores ?? '–';
   document.getElementById('db_active_scheds').textContent = s.active_schedules    ?? '–';
   var smCard = document.getElementById('db_sm_card');
