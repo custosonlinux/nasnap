@@ -360,11 +360,18 @@ def _run_snapshot(job_id, params, username):
         # Optional SnapMirror® update after snapshot
         if params.get("snapmirror_update"):
             try:
-                from .snapmirror import trigger_update_for_volume
+                from .snapmirror import trigger_update_for_volume, lock_dest_snapshot
                 jlog.log("Triggering SnapMirror® update …")
                 n = trigger_update_for_volume(db, mapping["volume_uuid"], mapping["endpoint_id"], jlog)
                 if n == 0:
                     jlog.log("SnapMirror®: no relationships found (run scan first).")
+                elif expiry_time:
+                    # Lock the replicated snapshot on the destination volume too.
+                    # Polls until the snapshot appears after the transfer completes.
+                    lock_dest_snapshot(
+                        db, mapping["volume_uuid"], mapping["endpoint_id"],
+                        snap_name, expiry_time, jlog,
+                    )
             except Exception as sm_exc:
                 jlog.log(f"SnapMirror® update: {sm_exc} (non-critical)")
 

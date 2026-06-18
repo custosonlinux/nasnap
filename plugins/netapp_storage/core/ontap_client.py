@@ -260,6 +260,12 @@ class OntapClient:
     def get_snapshot(self, volume_uuid, snap_uuid):
         return self._get(f"storage/volumes/{volume_uuid}/snapshots/{snap_uuid}")
 
+    def patch_snapshot(self, volume_uuid, snap_uuid, fields: dict):
+        """Update snapshot fields in-place (e.g. set expiry_time for tamperproof locking).
+        Requires ONTAP 9.12.1+ when setting expiry_time on DP volumes.
+        """
+        self._patch(f"storage/volumes/{volume_uuid}/snapshots/{snap_uuid}", body=fields)
+
     def delete_snapshot(self, volume_uuid, snap_uuid, force=False, snap_name=""):
         """Deletes a snapshot. Returns job UUID.
 

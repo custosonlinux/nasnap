@@ -7,6 +7,7 @@ restore from the secondary system.
 SnapMirror® is a registered trademark of NetApp, Inc.
 """
 
+import time
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -213,6 +214,77 @@ def trigger_update_for_volume(db, volume_uuid, source_endpoint_id, jlog=None):
                 log.warning(f"[netapp_storage] {msg}")
 
     return started
+
+
+def lock_dest_snapshot(db, volume_uuid, source_endpoint_id, snap_name,
+                        expiry_time, jlog=None, timeout_s=300):
+    """Lock a snapshot on every SnapMirror destination volume for the given source.
+
+    Polls until snap_name appears on the destination (SnapMirror transfer may
+    still be in progress), then PATCHes expiry_time to apply the tamperproof lock.
+    Errors are non-fatal — logged but never re-raised.
+
+    Requires ONTAP 9.12.1+ on the destination cluster.
+    Requires dest_endpoint_id and dest_volume_uuid to be populated (run SM scan).
+    """
+    from ._helpers import get_endpoint, build_ontap_client
+
+    def _log(msg):
+        if jlog:
+            jlog.log(msg)
+        else:
+            log.info(f"[netapp_storage/snapmirror] {msg}")
+
+    rels = db.query(
+        "SELECT * FROM netapp_snapmirror_relationships "
+        "WHERE source_volume_uuid=? AND source_endpoint_id=? "
+        "AND dest_endpoint_id != '' AND dest_volume_uuid != ''",
+        (volume_uuid, source_endpoint_id),
+    )
+    if not rels:
+        _log("SnapMirror® dest lock: no relationships with known dest endpoint/volume — skipping.")
+        return
+
+    for rel in (dict(r) for r in rels):
+        dest_vol_uuid = rel.get("dest_volume_uuid", "")
+        dest_vol      = rel.get("dest_volume", "")
+        dest_ep_id    = rel.get("dest_endpoint_id", "")
+
+        try:
+            ep     = get_endpoint(db, dest_ep_id)
+            client = build_ontap_client(ep)
+        except Exception as exc:
+            _log(f"SnapMirror® dest lock: cannot connect to {dest_vol}: {exc}")
+            continue
+
+        # Poll until snap_name appears on destination (transfer may be in progress)
+        deadline  = time.monotonic() + timeout_s
+        snap_uuid = None
+        attempts  = 0
+        while time.monotonic() < deadline:
+            try:
+                snaps = client.list_snapshots(dest_vol_uuid)
+                match = next((s for s in snaps if s.get("name") == snap_name), None)
+                if match:
+                    snap_uuid = match.get("uuid", "")
+                    break
+            except Exception as exc:
+                _log(f"SnapMirror® dest lock: list error on {dest_vol}: {exc}")
+            attempts += 1
+            if attempts == 1:
+                _log(f"SnapMirror® dest lock: waiting for '{snap_name}' on {dest_vol} …")
+            time.sleep(10)
+
+        if not snap_uuid:
+            _log(f"SnapMirror® dest lock: '{snap_name}' did not appear on {dest_vol} "
+                 f"within {timeout_s}s — skipping lock.")
+            continue
+
+        try:
+            client.patch_snapshot(dest_vol_uuid, snap_uuid, {"expiry_time": expiry_time})
+            _log(f"SnapMirror® dest lock: '{snap_name}' on {dest_vol} locked until {expiry_time}.")
+        except Exception as exc:
+            _log(f"SnapMirror® dest lock: PATCH failed for '{snap_name}' on {dest_vol}: {exc} (non-fatal)")
 
 
 def get_secondary_snapshots(db, relationship_id):
