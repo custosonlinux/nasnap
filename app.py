@@ -383,8 +383,8 @@ def create_app():
             return resp
 
     # ── UI ────────────────────────────────────────────────────────────
-    # ── UI patches: hide PegaProx-specific sections ───────────────────
-    # Deploy Wizard  — only relevant when deploying into PegaProx
+    # ── UI patches: adapt plugin UI for standalone NaSnap deployment ──
+    # Deploy Wizard  — only relevant in the embedded PVE plugin context
     # Plugin Update  — updates happen via ./build-docker.sh in NaSnap
     _UI_PATCHES = [
         # Deploy Wizard: remove the sub-header block (5 lines, unique SVG path)
@@ -596,7 +596,7 @@ def create_app():
             return redirect('/login')
         with open(_UI_FILE, 'r', encoding='utf-8') as f:
             html = f.read()
-        # Hide PegaProx-specific UI sections (Deploy Wizard, Plugin Update)
+        # Adapt plugin UI for standalone NaSnap (Deploy Wizard, Plugin Update)
         for old, new in _UI_PATCHES:
             html = html.replace(old, new)
         # Auth guard before any other JS

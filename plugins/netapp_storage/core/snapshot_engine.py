@@ -98,10 +98,10 @@ def _run_snapshot(job_id, params, username):
     snap_prefix = cfg.get("snapshot_prefix", "NaSnap_")
 
     if snap_name_input:
-        # Manual snapshot: NPP_{user_name}
+        # Manual snapshot: {prefix}{user_name}
         snap_name = f"{snap_prefix}{snap_name_input}"
     else:
-        # Schedule: NPP_{YYYYMMDD}_{HHMMSS}_{schedule_name}
+        # Schedule: {prefix}{YYYYMMDD}_{HHMM}[_{schedule_name}]
         ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
         snap_name = f"{snap_prefix}{ts}"
         if snap_name_suffix:
@@ -497,7 +497,7 @@ def _apply_schedule_retention(db, schedule_id, retention_count,
     Returns the number of ONTAP snapshots actually deleted.
 
     Snapshot name pattern: {snap_prefix}{YYYYMMDD}_{HHMM}_{sched_name_safe}
-    e.g.  NPP_20260527_0200_nightly-backup
+    e.g.  NaSnap_20260527_0200_nightly-backup
 
     Why ONTAP as source of truth:
     - DB entries can become stale (past bugs, manual ONTAP ops, DB loss).

@@ -1,5 +1,5 @@
 -- NetApp ONTAP Plugin Schema
--- Runs in the central pegaprox.db (CREATE TABLE IF NOT EXISTS is idempotent).
+-- Runs in the central nasnap.db (CREATE TABLE IF NOT EXISTS is idempotent).
 
 CREATE TABLE IF NOT EXISTS netapp_endpoints (
     id              TEXT PRIMARY KEY,
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS netapp_endpoints (
 );
 
 -- PVE hosts: direct PVE credentials for auto-discovery.
--- Independent of PegaProx cluster_managers.
+-- Independent of PVE cluster configuration.
 CREATE TABLE IF NOT EXISTS netapp_pve_hosts (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,

@@ -1,6 +1,6 @@
 # NaSnap — NetApp® ONTAP® Snapshot Manager for Proxmox VE
 
-A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI.
+A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI (light theme available).
 
 **Current stable: 1.1.0** · [Changelog](CHANGELOG.md)
 
@@ -15,8 +15,9 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Clone** VMs from any snapshot to a new VMID with fresh MAC addresses.
 - **Schedule** automatic snapshots with retention policies, pre/post hooks, and email notifications.
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
+- **Lock snapshots** with ONTAP Snapshot Locking (WORM / tamperproof) — set an expiry time that prevents deletion even by ONTAP admins, protecting against ransomware and accidental removal. Independent locking for source and SnapMirror destination.
 - **Provision** new SAN datastores end-to-end (iSCSI and NVMe-oF): ONTAP volume + LUN/namespace + iGroup/subsystem creation, host-side iSCSI/NVMe setup, LVM VG creation, and PVE storage registration — in a single wizard.
-- **Import VMs from Datastore** *(Beta)* — adopt an existing ONTAP volume with live VMs without reprovisioning. Reads the snapmanifest from the volume, reconstructs VM inventory, reassigns VMIDs on conflicts, and registers the datastore.
+- **Import VMs from Datastore** *(Alpha)* — adopt an existing ONTAP volume with live VMs without reprovisioning. Reads the snapmanifest from the volume, reconstructs VM inventory, reassigns VMIDs on conflicts, and registers the datastore.
 - **Manage users** — built-in admin/viewer roles with Argon2id password hashing and AES-256-GCM encrypted ONTAP credentials.
 
 All operations run as background jobs with live log streaming. Every snapshot embeds a manifest (VM inventory + configs) that travels inside the ONTAP snapshot, making restores self-contained.
@@ -29,9 +30,13 @@ All operations run as background jobs with live log streaming. Every snapshot em
 |---|:---:|:---:|:---:|
 | Auto-Discovery | ✅ | ✅ | ✅ |
 | VM-consistent Snapshots (crash / app / suspend) | ✅ | ✅ | ✅ |
-| Scheduled Snapshots | ✅ | ✅ | ✅ |
-| Email notifications per schedule | ✅ | ✅ | ✅ |
+| Scheduled Snapshots with Retention | ✅ | ✅ | ✅ |
+| Pre/Post Snapshot Hooks (scripts per schedule) | ✅ | ✅ | ✅ |
+| SnapMirror Transfer Trigger per Schedule | ✅ | ✅ | ✅ |
+| Email Notifications per Schedule | ✅ | ✅ | ✅ |
 | Manifest (VM inventory, disk layout, configs) rides inside ONTAP snapshot | ✅ | ✅ | ✅ |
+| Tamperproof Snapshots (ONTAP Snapshot Locking / WORM, requires ONTAP 9.12.1+) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
+| SnapMirror Destination Tamperproof (independent lock duration) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Restore — SFSR (Single File / VM Disk, NFS only) | ✅ | ❌ n/a | ❌ n/a |
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
@@ -42,14 +47,16 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | SnapMirror® visibility & DR restore/clone | ✅ | 🟡 Beta | 🟡 Beta |
 | Storage Provisioning (auto-setup) | ✅ | 🟡 Beta | 🟡 Beta |
 | Storage Resize | ✅ grow & shrink | 🟡 Beta grow only | 🟡 Beta grow only |
-| Job cancellation | ✅ | 🟡 Beta | 🟡 Beta |
-| Import VMs from Datastore (adopt existing volumes with VMs) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
-| Full DR Failover (planned & emergency) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
+| Job Cancellation | ✅ | 🟡 Beta | 🟡 Beta |
+| Import VMs from Datastore (adopt existing volumes with VMs) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
+| Dashboard (7-day stats, timeline, protection overview, alerts) | ✅ | ✅ | ✅ |
+| Full DR Failover (planned & emergency) | 🔵 In Development | 🔵 In Development | 🔵 In Development |
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | DR Failback | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | Built-in Auth (admin / viewer, Argon2id) | ✅ | ✅ | ✅ |
-| AES-256-GCM credential encryption at rest | ✅ | ✅ | ✅ |
-| DB Export / Import (full config backup) | ✅ | ✅ | ✅ |
+| AES-256-GCM Credential Encryption at Rest | ✅ | ✅ | ✅ |
+| DB Export / Import (full config + user backup) | ✅ | ✅ | ✅ |
+| Light / Dark Theme | ✅ | ✅ | ✅ |
 
 Legend: ✅ Stable · 🟡 Beta · 🟠 Alpha · 🔵 In Development · 🔄 Planned · ❌ N/A
 
@@ -60,8 +67,8 @@ Legend: ✅ Stable · 🟡 Beta · 🟠 Alpha · 🔵 In Development · 🔄 Pla
 > **Maturity levels:**
 > - ✅ **Stable** — Tested in a lab environment and found to be reliable and stable under test conditions.
 > - 🟡 **Beta** — Implemented and partially tested. Occasional errors may still occur that require investigation. Use with caution.
-> - 🟠 **Alpha** — Implemented, but errors still occur regularly and may require manual intervention. Not suitable for routine use.
-> - 🔵 **In Development** — Feature is implemented in code but has not been fully tested yet.
+> - 🟠 **Alpha** — Implemented, but real-environment testing is still limited. Errors may require manual intervention. Not suitable for routine production use.
+> - 🔵 **In Development** — Feature is implemented in code but has not been fully tested yet or is still being refined.
 > - 🔄 **Planned** — Not yet implemented.
 > - ❌ **N/A** — Not applicable for this protocol.
 >
@@ -106,6 +113,7 @@ All features are included in **ONTAP One** (ONTAP 9.10.1+) at no extra cost:
 | Volume Snapshot Restore (revert) | SnapRestore® | ✓ |
 | FlexClone | FlexClone® | ✓ |
 | NVMe-oF / iSCSI | SAN | ✓ |
+| Snapshot Locking (Tamperproof / WORM) | Base | ✓ — requires ONTAP 9.12.1+ |
 
 **Tested platforms:** ONTAP 9.13+ (NFS/iSCSI), NetApp ASA (All-SAN Array) with NVMe/TCP on ONTAP 9.18.1, NetApp AFF with NVMe/TCP on ONTAP 9.16.1 — including end-to-end provisioning, snapshot, restore, clone, and SnapMirror DR restore/clone.
 
@@ -199,7 +207,7 @@ Everything lives in `NASNAP_DATA` (Docker volume `nasnap_data` → `/data`):
 
 ### DB Export / Import
 
-Open **Settings → Export** to download a complete JSON backup of all plugin configuration (endpoints, schedules, DR plans, volume mappings, SMTP — excluding user accounts for security). Use **Settings → Import** to restore.
+Open **Settings → Export** to download a complete JSON backup of all configuration (endpoints, schedules, DR plans, volume mappings, SMTP, and user accounts). Use **Settings → Import** to restore.
 
 ---
 
@@ -368,6 +376,30 @@ The Provisioning tab also handles **resize** (non-disruptive for running VMs) an
 
 ---
 
+## Tamperproof Snapshots (ONTAP Snapshot Locking)
+
+Tamperproof locking sets an `expiry_time` on ONTAP snapshots, making them undeletable until the expiry date passes — even by ONTAP cluster administrators. This protects against ransomware attacks that try to delete backups before encrypting data, and satisfies regulatory requirements (GDPR, BSI, etc.).
+
+**Requirements:** ONTAP 9.12.1 or later. Volume must have snapshot locking enabled (`volume modify -snapshot-locking-enabled true`). Requires ONTAP `admin` role.
+
+### Source locking
+
+Enable per schedule under **Schedules → Step 2 — Tamperproof Lock**. NaSnap calculates the maximum safe lock duration automatically:
+
+```
+max_lock_days = floor((retention_count - 1) × interval_days)
+```
+
+This ensures the lock expires before the retention policy would attempt to delete the snapshot. A warning is shown if you exceed the maximum.
+
+### SnapMirror destination locking
+
+Enable independently under **Schedules → Step 4 — SnapMirror → Destination Tamperproof**. After each SnapMirror transfer, NaSnap polls the destination volume until the replicated snapshot appears, then sets the expiry. Lock duration for the destination is configured separately from the source.
+
+The destination section is greyed out when "Trigger SnapMirror transfer" is not enabled.
+
+---
+
 ## Email notifications
 
 Each schedule can send email notifications on snapshot job completion. Configure SMTP under **Settings → SMTP**, then enable notifications per schedule.
@@ -447,7 +479,7 @@ dd if=<src_lv> of=<dst_lv> bs=512M iflag=direct oflag=direct conv=fsync
 
 ### Temporary ONTAP objects
 
-All temporary objects created during a clone or restore operation use the prefix **`pgxclone_`** and are deleted automatically when the job completes or fails.
+All temporary objects created during a clone or restore operation are deleted automatically when the job completes or fails.
 
 | Object | Pattern |
 |---|---|
@@ -522,7 +554,7 @@ Additionally, the manifest is stored in the NaSnap database as a fallback.
 
 | Key | Default | Description |
 |---|---|---|
-| `snapshot_prefix` | `"NPP_"` | Prefix added to all snapshot names |
+| `snapshot_prefix` | `"NaSnap_"` | Prefix added to all snapshot names |
 | `default_consistency` | `"crash"` | Default consistency level (`crash`, `app`, `suspend`) |
 | `default_restore_method` | `"sfsr"` | Default restore method (`sfsr`, `flexclone`, `san`) |
 | `job_poll_interval_s` | `3` | How often to poll ONTAP job status (seconds) |
@@ -697,7 +729,7 @@ nasnap/
 │   └── utils/              # auth, ssh_pool, permissions
 ├── plugins/
 │   └── netapp_storage/     # NetApp ONTAP plugin (full source, no external dependency)
-│       ├── ui.html         # Plugin UI — served at / with Enterprise Blue theme injected
+│       ├── ui.html         # Plugin UI — served at / with theme + auth injected at serve time
 │       ├── api/            # snapshots, restore, schedules, DR, provisioning, recovery …
 │       └── db/schema.sql
 ├── build-docker.sh         # Docker build via rsync — clean build context, no .venv/.env/DB
@@ -705,9 +737,9 @@ nasnap/
 └── docker-compose.yml
 ```
 
-### How theme injection works
+### How UI injection works
 
-`ui.html` is the full plugin UI. When serving it, `app.py` applies `_UI_PATCHES` (string replacements) to hide sections not relevant to the standalone deployment (Deploy Wizard, Plugin Update card) and inject NaSnap-specific copy (labels, default account names, export description). Additionally, `_AUTH_GUARD` (redirect-on-401 fetch interceptor + username display) and `_LOGOUT_BTN` (sign-out button + admin/settings links) are injected at serve time.
+`ui.html` is the full plugin UI. When serving it, `app.py` applies `_UI_PATCHES` (string replacements) to hide sections not relevant to the standalone deployment (Deploy Wizard, Plugin Update card) and inject NaSnap-specific copy. Additionally, `_AUTH_GUARD` (redirect-on-401 fetch interceptor + light/dark theme toggle logic + username display) and `_LOGOUT_BTN` (theme button + sign-out + admin/settings links) are injected into the subtabs bar at serve time.
 
 ### How plugin routes work
 
@@ -735,17 +767,18 @@ DEBUG=1 .venv/bin/python app.py
 
 - **Configurable port + TLS** — set the listening port and HTTP/HTTPS mode in Settings → Server/Network. Self-signed certificates are auto-generated in `/data/tls/`. The container uses `network_mode: host` so port changes take effect on restart without editing `docker-compose.yml`.
 - **DR tab toggle** — Settings → UI Features lets you disable (hide) the Disaster Recovery tab for environments without a DR site.
-- **DR Completion *(Beta)*** — Peer-to-peer DR between two NaSnap instances with PRIMARY/SECONDARY roles, background heartbeat, config sync, DR plans with ordered VM boot groups, precheck, and planned/emergency failover are fully implemented. Still planned:
+- **DR Failover *(In Development)*** — Peer-to-peer DR between two NaSnap instances with PRIMARY/SECONDARY roles, background heartbeat, config sync, DR plans with ordered VM boot groups, precheck, and planned/emergency failover are implemented. Still in active development and testing.
+- **Tamperproof Snapshots *(Alpha)*** — ONTAP Snapshot Locking (WORM) with configurable lock duration per schedule. Automatic harmonization ensures the lock expires before the retention policy would attempt to delete the snapshot. Independent locking for source volumes and SnapMirror destinations.
+- **Dashboard** — Live protection overview with 7-day rolling stats, snapshot timeline, SnapMirror health, and alert banners for failed snapshots and unhealthy relationships.
+- **Light / Dark theme** — One-click toggle in the top bar; preference persisted per browser.
+
+### v1.2 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
-
-### v1.2 — Hardening & Operations
-
-- **Login rate limiting** — brute-force protection for the `/api/auth/login` endpoint
-- **Health endpoint** — `/api/health` for external monitoring and load balancer probes
-- **Audit log export** — CSV/JSON download of the `netapp_audit_log` table
-- **Tamper-proof snapshots** — ONTAP Snapshot Locking (compliance / governance) for ransomware protection and regulatory requirements (GDPR, BSI); conflict validation between lock duration and schedule retention
+- **Login rate limiting** — brute-force protection for the `/api/auth/login` endpoint.
+- **Health endpoint** — `/api/health` for external monitoring and load balancer probes.
+- **Audit log export** — CSV/JSON download of the audit log.
 
 ---
 
