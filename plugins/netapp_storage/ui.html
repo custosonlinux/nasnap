@@ -47,7 +47,7 @@
     background: var(--bg);
     flex-shrink: 0;
     position: relative;
-    z-index: 1;
+    z-index: 10;
   }
   .subtab {
     padding: 7px 14px;
@@ -64,7 +64,7 @@
   .subtab.active { color: #fff; background: var(--primary); }
 
   /* ── Scrollable content ─────────────────────────────────────── */
-  .content { flex: 1; overflow-y: auto; padding: 16px 20px; }
+  .content { flex: 1; overflow-y: auto; padding: 16px 20px; position: relative; z-index: 0; }
 
   /* ── Cards ──────────────────────────────────────────────────── */
   .card {
@@ -241,6 +241,24 @@
   .badge-vm-1   { background: rgba(34,211,238,.15);  color: #67e8f9; }
   .badge-vm-2   { background: rgba(236,72,153,.15);  color: #f9a8d4; }
   .badge-vm-3   { background: rgba(245,158,11,.15);  color: #fcd34d; }
+  .badge-stat { display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600; }
+  .badge-stat-neutral { background:rgba(139,148,158,.12);color:var(--text); }
+  .badge-stat-green   { background:rgba(63,185,80,.15);  color:#56d364; }
+  .badge-stat-muted   { background:rgba(139,148,158,.1); color:var(--muted); }
+  .badge-stat-blue    { background:rgba(88,166,255,.15); color:#79c0ff; }
+
+  /* ── Job Tracker ───────────────────────────────────────────────── */
+  #jobTrackersContainer { position:fixed;bottom:20px;right:20px;z-index:8500;display:flex;flex-direction:column;gap:8px;max-width:340px;pointer-events:none; }
+  .jtc { background:var(--card);border:1px solid var(--border);border-radius:8px;padding:11px 14px 9px;box-shadow:0 4px 24px rgba(0,0,0,.45);pointer-events:all;min-width:280px;animation:jtcIn .2s ease; }
+  @keyframes jtcIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+  .jtc-title { display:flex;align-items:center;gap:7px;margin-bottom:7px; }
+  .jtc-icon  { font-size:13px;flex-shrink:0;line-height:1; }
+  .jtc-label { font-size:12px;font-weight:600;color:var(--text);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .jtc-x    { background:none;border:none;color:var(--muted);cursor:pointer;padding:0 2px;font-size:13px;flex-shrink:0;line-height:1; }
+  .jtc-track { height:3px;background:rgba(139,148,158,.2);border-radius:2px;margin-bottom:6px; }
+  .jtc-bar   { height:3px;border-radius:2px;transition:width .5s ease; }
+  .jtc-log   { font-size:11px;color:var(--muted);font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:14px;margin-bottom:5px; }
+  .jtc-foot  { display:flex;justify-content:flex-end; }
   .badge-vm-4   { background: rgba(99,102,241,.15);  color: #a5b4fc; }
   .badge-vm-5   { background: rgba(16,185,129,.15);  color: #6ee7b7; }
   .vm-bubble-box {
@@ -346,6 +364,50 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* ── Dashboard ───────────────────────────────────────────────── */
+  .db-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .db-stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 12px 12px;
+    text-align: center;
+  }
+  .db-stat-value {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 5px;
+  }
+  .db-stat-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-weight: 600;
+  }
+  .db-two-col {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  @media (max-width: 860px) { .db-two-col { grid-template-columns: 1fr; } }
+  .db-alert {
+    background: rgba(231,76,60,.08);
+    border: 1px solid rgba(231,76,60,.28);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--error);
+    margin-bottom: 14px;
+  }
 </style>
 </head>
 <body>
@@ -463,7 +525,12 @@ de:{
   sm_no_dest_ep:'Kein Sekundär-Endpoint — erst scannen',
   ct_dr_clone:'DR-Clone von Sekundärsystem',btn_start_dr_clone:'DR-Clone starten',
   sm_source_vol:'Quell-Volume',sm_dest_vol:'Ziel-Volume',sm_state:'Zustand',sm_lag:'Verzug',
-  tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_dashboard:'Dashboard',tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  db_vm_overview:'VM-Übersicht',db_total:'Gesamt',db_running:'Laufend',db_stopped:'Gestoppt',
+  db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Zeitpläne aktiv',
+  db_storage:'Storage-Übersicht',db_recent_jobs:'Letzte Jobs',db_no_ds:'Keine Datastores konfiguriert.',
+  db_no_jobs:'Noch keine Jobs.',db_protected_badge:'Zeitplan aktiv',db_unprotected_badge:'Kein Zeitplan',
+  db_all_ok:'Alle Systeme in Ordnung.',db_issues:'Probleme erkannt',
   sect_smtp:'E-Mail-Benachrichtigungen (SMTP)',
   lbl_smtp_host:'SMTP-Server',lbl_smtp_port:'Port',lbl_smtp_user:'Benutzername',
   lbl_smtp_pass:'Passwort',lbl_smtp_from:'Absender (Von)',lbl_smtp_encryption:'Verschlüsselung',
@@ -578,7 +645,12 @@ en:{
   sm_no_dest_ep:'No secondary endpoint configured — scan first',
   ct_dr_clone:'DR Clone from Secondary',btn_start_dr_clone:'Start DR Clone',
   sm_source_vol:'Source Volume',sm_dest_vol:'Destination Volume',sm_state:'State',sm_lag:'Lag',
-  tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_dashboard:'Dashboard',tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  db_vm_overview:'VM Overview',db_total:'Total',db_running:'Running',db_stopped:'Stopped',
+  db_ds_overview:'Datastores',db_protected:'Protected',db_schedules_active:'Active Schedules',
+  db_storage:'Storage Overview',db_recent_jobs:'Recent Jobs',db_no_ds:'No datastores configured.',
+  db_no_jobs:'No jobs yet.',db_protected_badge:'Schedule active',db_unprotected_badge:'No schedule',
+  db_all_ok:'All systems operational.',db_issues:'Issues detected',
   sect_smtp:'Email Notifications (SMTP)',
   lbl_smtp_host:'SMTP Server',lbl_smtp_port:'Port',lbl_smtp_user:'Username',
   lbl_smtp_pass:'Password',lbl_smtp_from:'Sender (From)',lbl_smtp_encryption:'Encryption',
@@ -1195,7 +1267,8 @@ function applyI18n() {
 
   <!-- Sub-tabs -->
   <div class="subtabs">
-    <div class="subtab active" data-tab="snapshots"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_snapshots">Snapshots</span></div>
+    <div class="subtab active" data-tab="dashboard"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg><span data-i18n="tab_dashboard">Dashboard</span></div>
+    <div class="subtab" data-tab="snapshots"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_snapshots">Snapshots</span></div>
     <div class="subtab" data-tab="schedules"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span data-i18n="tab_schedules">Schedules</span></div>
     <div class="subtab" data-tab="restore"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span data-i18n="tab_restore">Restore &amp; Clone</span></div>
     <div class="subtab" data-tab="storage"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg><span data-i18n="tab_storage">Storage</span></div>
@@ -1207,8 +1280,99 @@ function applyI18n() {
   <!-- Scrollable content -->
   <div class="content">
 
+    <!-- ════════════════════════ DASHBOARD ═══════════════════════ -->
+    <div id="tab-dashboard" class="tab-panel">
+
+      <!-- Stat cards -->
+      <div class="db-stats">
+        <div class="db-stat">
+          <div class="db-stat-value" id="db_snap_total">–</div>
+          <div class="db-stat-label">Snapshots</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">total</div>
+        </div>
+        <div class="db-stat">
+          <div class="db-stat-value" style="color:#56d364" id="db_snap_done">–</div>
+          <div class="db-stat-label">Successful</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Snapshots</div>
+        </div>
+        <div class="db-stat">
+          <div class="db-stat-value" style="color:#f08080" id="db_snap_failed">–</div>
+          <div class="db-stat-label">Failed</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Snapshots</div>
+        </div>
+        <div class="db-stat">
+          <div class="db-stat-value" style="color:#79c0ff" id="db_prot_ds">–</div>
+          <div class="db-stat-label" data-i18n="db_protected">Protected</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Datastores</div>
+        </div>
+        <div class="db-stat">
+          <div class="db-stat-value" style="color:#c4b5fd" id="db_active_scheds">–</div>
+          <div class="db-stat-label" data-i18n="db_schedules_active">Active Schedules</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">&nbsp;</div>
+        </div>
+        <div class="db-stat" id="db_sm_card" style="display:none">
+          <div class="db-stat-value" id="db_sm_healthy" style="color:#56d364">–</div>
+          <div class="db-stat-label">SnapMirror</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px" id="db_sm_sub">healthy</div>
+        </div>
+      </div>
+
+      <!-- Alert banner -->
+      <div id="db_alert_banner" style="display:none"></div>
+
+      <!-- Two-column content -->
+      <div class="db-two-col">
+
+        <!-- Storage overview -->
+        <div class="card" style="padding:0">
+          <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
+            <span data-i18n="db_storage">Storage Overview</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-ghost btn-sm" onclick="loadDashboard()" title="Refresh">↻</button>
+              <a href="#" onclick="document.querySelector('[data-tab=\'storage\']').click();return false" style="font-size:11px;color:var(--primary)">→ Storage</a>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Usage</th>
+                <th>VMs</th>
+                <th>SnapMirror</th>
+              </tr></thead>
+              <tbody id="dbStorageTbody">
+                <tr><td colspan="5" class="empty"><span class="spinner"></span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Recent jobs -->
+        <div class="card" style="padding:0">
+          <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
+            <span data-i18n="db_recent_jobs">Recent Jobs</span>
+            <a href="#" onclick="document.querySelector('[data-tab=\'jobs\']').click();return false" style="font-size:11px;color:var(--primary)">→ All Jobs</a>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>
+                <th>Job</th>
+                <th>Status</th>
+                <th>Time</th>
+              </tr></thead>
+              <tbody id="dbJobsTbody">
+                <tr><td colspan="3" class="empty"><span class="spinner"></span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ════════════════════════ SNAPSHOTS ════════════════════════ -->
-    <div id="tab-snapshots" class="tab-panel">
+    <div id="tab-snapshots" class="tab-panel" style="display:none">
       <div class="section-actions" style="gap:8px;align-items:center">
         <button class="btn btn-primary" onclick="showCreateSnapshotForm()" data-i18n="btn_create_snapshot">+ Create Snapshot</button>
         <button class="btn btn-ghost"   onclick="loadSnapshots()" data-i18n="btn_refresh">Refresh</button>
@@ -1233,6 +1397,7 @@ function applyI18n() {
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px">
           <span style="font-weight:600;font-size:13px;color:var(--text)">Timeline</span>
           <div style="display:flex;gap:4px" id="tl_zoom_btns">
+            <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('hour')" data-zoom="hour">Hour</button>
             <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('day')" data-zoom="day">Day</button>
             <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('week')" data-zoom="week">Week</button>
             <button class="btn btn-primary btn-sm" onclick="tlSetZoom('month')" data-zoom="month">Month</button>
@@ -1709,6 +1874,8 @@ function applyI18n() {
 
   </div><!-- /.content -->
 
+  <div id="jobTrackersContainer"></div>
+
   <footer style="padding:0.55rem 1.25rem;border-top:1px solid var(--border);color:var(--muted);font-size:0.7rem;line-height:1.5;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;flex-shrink:0">
     <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;color:var(--accent)">
@@ -1945,6 +2112,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
     t.classList.add('active');
     document.getElementById('tab-'+t.dataset.tab).style.display = 'block';
     var loaders = {
+      dashboard: loadDashboard,
       snapshots: loadSnapshots,
       schedules: loadSchedules,
       restore:   function(){ loadRcVmList(); },
@@ -2673,6 +2841,21 @@ function selectAllVms() {
   for (var i = 0; i < sel.options.length; i++) sel.options[i].selected = true;
 }
 
+async function loadProtectionSummary() {
+  var bar = document.getElementById('protSummaryBar');
+  if (!bar) return;
+  try {
+    var d = await apiFetch('snapshots/protection-summary');
+    var hasVms = d.total_vms > 0;
+    document.getElementById('psBadgeTotal').textContent   = d.total_vms + ' total';
+    document.getElementById('psBadgeRunning').textContent = '▶ ' + d.running_vms + ' running';
+    document.getElementById('psBadgeStopped').textContent = '■ ' + d.stopped_vms + ' stopped';
+    document.getElementById('psBadgeProt').textContent    = d.protected_datastores + ' / ' + d.total_datastores + ' protected';
+    document.getElementById('psBadgeScheds').textContent  = d.active_schedules + ' active schedule' + (d.active_schedules === 1 ? '' : 's');
+    bar.style.display = 'flex';
+  } catch(e) { /* silently skip if PVE unreachable */ }
+}
+
 async function loadSnapshots() {
   try {
     _allSnapshots = await apiFetch('snapshots');
@@ -2872,11 +3055,12 @@ async function createSnapshot() {
   var _btn = document.querySelector('#createSnapshotForm button.btn-primary');
   if (_btn) _btn.disabled = true;
   try {
-    await apiPost('snapshots/create', {mapping_id, vmids, consistency, label, name, snapmirror_update: sm_update});
+    var _sc = await apiPost('snapshots/create', {mapping_id, vmids, consistency, label, name, snapmirror_update: sm_update});
     hideForm('createSnapshotForm');
     document.getElementById('snap_name').value = '';
     setTimeout(loadSnapshots, 2500);
     toast(t('msg_snap_started'),'success');
+    if (_sc && _sc.job_id) trackJob(_sc.job_id, 'Snapshot: ' + (name || label || 'new'));
   } catch(e) {
     toast(e.message,'error');
   } finally {
@@ -3305,9 +3489,9 @@ async function doRestore() {
     }
     try {
       var r = await apiPost('restore/dr-start', { relationship_id:_rwState.relId, snap_name:_rwState.snapName, vmid:vmid, mapping_id:_rwState.mappingId });
-      toast('DR Restore started — Job '+r.job_id,'success');
+      toast('DR Restore started','success');
+      if (r.job_id) trackJob(r.job_id, 'DR Restore: ' + (_rwState.snapName || ''));
       closeRestoreWizard();
-      setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); setTimeout(loadAllJobs,800); },300);
     } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Restore'; }
     return;
   }
@@ -3331,9 +3515,9 @@ async function doRestore() {
     : {snapshot_id:snap.id,vmid:vmid,method:method,node:node||'',start_after:startA};
   try {
     var r = await apiPost('restore/start', payload);
-    toast('Restore started — Job '+r.job_id,'success');
+    toast('Restore started','success');
+    if (r.job_id) trackJob(r.job_id, 'Restore: ' + (_rwState.snapName || ''));
     closeRestoreWizard();
-    setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); setTimeout(loadAllJobs,800); },300);
   } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Restore'; }
 }
 
@@ -3484,9 +3668,9 @@ async function doClone() {
     try {
       var r = await apiPost('clone/dr-start', { relationship_id:_cwState.relId, snap_name:_cwState.snapName,
         src_vmid:srcVmid, new_vmid:newVmid, new_name:newName, mapping_id:_cwState.mappingId, start_after:startA });
-      toast('DR Clone started — Job '+r.job_id,'success');
+      toast('DR Clone started','success');
+      if (r.job_id) trackJob(r.job_id, 'DR Clone: VM ' + (newVmid || ''));
       closeCloneWizard();
-      setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); setTimeout(loadAllJobs,800); },300);
     } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Clone'; }
     return;
   }
@@ -3502,9 +3686,9 @@ async function doClone() {
        new_name:newName,start_after:startA,network_isolated:netIso};
   try {
     var r = await apiPost('clone/start', payload);
-    toast('Clone started — Job '+r.job_id,'success');
+    toast('Clone started','success');
+    if (r.job_id) trackJob(r.job_id, 'Clone: VM ' + (newVmid || ''));
     closeCloneWizard();
-    setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); setTimeout(loadAllJobs,800); },300);
   } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Clone'; }
 }
 
@@ -3606,8 +3790,8 @@ async function doRestoreConfirmed() {
   try {
     var d = await apiPost('restore/start', payload);
     hideRestoreConfirm();
-    toast(tf('msg_restore_started', d.job_id), 'success');
-    setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); }, 800);
+    toast(t('msg_restore_started').replace('%s',''), 'success');
+    if (d.job_id) trackJob(d.job_id, 'Restore: ' + (snap ? snap.snap_name : ''));
   } catch(e) {
     toast(e.message, 'error', e.detail);
     btn.disabled = false;
@@ -3944,11 +4128,9 @@ async function startClone() {
           src_vmid, new_vmid, target_node, new_name, start_after }
       : { snapshot_id: _cloneSnap.id, src_vmid, new_vmid, target_node, new_name, start_after };
     var d = await apiPost('clone/start', payload);
-    toast(tf('msg_clone_started', d.job_id), 'success');
+    toast(t('msg_clone_started').replace('%s',''), 'success');
+    if (d.job_id) trackJob(d.job_id, 'Clone: VM ' + new_vmid);
     _cloneSnap = null;
-    setTimeout(function(){
-      document.querySelector('[data-tab="jobs"]').click();
-    }, 800);
   } catch(e) { toast('Clone: ' + (e.message || e), 'error'); }
 }
 
@@ -4213,8 +4395,8 @@ function renderTimeline(filtered) {
   var plotW = W - padL - padR;
 
   var now = Date.now();
-  var zoomMs   = { day: 864e5,   week: 6048e5, month: 2592e6,  year: 31536e6  };
-  var futureMs = { day: 864e5/4, week: 864e5,  month: 864e5*7, year: 864e5*45 };
+  var zoomMs   = { hour: 4*3600e3, day: 864e5,    week: 6048e5, month: 2592e6,  year: 31536e6  };
+  var futureMs = { hour: 900e3,   day: 864e5/4,  week: 864e5,  month: 864e5*7, year: 864e5*45 };
   var tStart = now - (zoomMs[_tlZoom]   || 2592e6);
   var tEnd   = now + (futureMs[_tlZoom] || 864e5*7);
 
@@ -4226,7 +4408,7 @@ function renderTimeline(filtered) {
   svgParts.push('<line x1="'+padL+'" y1="'+axisY+'" x2="'+(padL+plotW)+'" y2="'+axisY+'" stroke="var(--border)" stroke-width="1"/>');
 
   // Tick marks + labels
-  var tickSteps = { day: 6*3600e3, week: 864e5, month: 5*864e5, year: 60*864e5 };
+  var tickSteps = { hour: 30*60e3, day: 6*3600e3, week: 864e5, month: 5*864e5, year: 60*864e5 };
   var tickStep  = tickSteps[_tlZoom] || 5*864e5;
   var firstTick = Math.ceil(tStart / tickStep) * tickStep;
   for (var tk = firstTick; tk <= tEnd; tk += tickStep) {
@@ -4234,7 +4416,7 @@ function renderTimeline(filtered) {
     if (tx < padL || tx > padL + plotW) continue;
     var txS = tx.toFixed(1);
     var td  = new Date(tk);
-    var lbl = _tlZoom === 'day'
+    var lbl = (_tlZoom === 'hour' || _tlZoom === 'day')
       ? td.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
       : td.toLocaleDateString([], {month:'short', day:'numeric'});
     svgParts.push('<line x1="'+txS+'" y1="'+axisY+'" x2="'+txS+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
@@ -5370,11 +5552,8 @@ async function doNativeClone() {
       start_after: start_after
     });
     closeNativeCloneModal();
-    toast('Clone started — Job ' + (r.job_id || ''), 'success');
-    setTimeout(function() {
-      var jt = document.querySelector('[data-tab="jobs"]');
-      if (jt) { jt.click(); setTimeout(loadAllJobs, 800); }
-    }, 300);
+    toast('Clone started', 'success');
+    if (r.job_id) trackJob(r.job_id, 'Clone (native): VM ' + new_vmid);
   } catch(e) {
     toast(e.message, 'error', e.detail);
     btn.disabled = false; btn.textContent = 'Start Clone';
@@ -5688,6 +5867,114 @@ async function loadStorageUnified() {
 // kept for any remaining internal callers
 function loadProvDatastores() { loadStorageUnified(); }
 
+async function loadDashboard() {
+  try {
+    var [summary, storageData, jobsData, capData] = await Promise.all([
+      apiFetch('snapshots/protection-summary').catch(function(){ return {}; }),
+      apiFetch('storage/unified').catch(function(){ return {items:[]}; }),
+      apiFetch('jobs/status').catch(function(){ return []; }),
+      apiFetch('storage/capacity').catch(function(){ return {stats:{}}; })
+    ]);
+    var capStats = (capData && capData.stats) || {};
+
+    // Stat cards
+    var s = summary || {};
+    document.getElementById('db_snap_total').textContent    = s.snap_total          ?? '–';
+    document.getElementById('db_snap_done').textContent     = s.snap_done           ?? '–';
+    document.getElementById('db_snap_failed').textContent   = s.snap_failed         ?? '–';
+    document.getElementById('db_prot_ds').textContent       = s.protected_datastores ?? '–';
+    document.getElementById('db_active_scheds').textContent = s.active_schedules    ?? '–';
+    // SnapMirror card — only show if relationships exist
+    var smCard = document.getElementById('db_sm_card');
+    if (s.sm_total > 0) {
+      smCard.style.display = '';
+      document.getElementById('db_sm_healthy').textContent = s.sm_healthy ?? '–';
+      document.getElementById('db_sm_sub').textContent = (s.sm_healthy ?? 0) + ' / ' + (s.sm_total ?? 0) + ' healthy';
+      document.getElementById('db_sm_healthy').style.color = s.sm_healthy === s.sm_total ? '#56d364' : '#f08080';
+    } else {
+      smCard.style.display = 'none';
+    }
+
+    // Storage overview
+    var items = (storageData && storageData.items) || [];
+    var stbody = document.getElementById('dbStorageTbody');
+    if (!items.length) {
+      stbody.innerHTML = '<tr><td colspan="5" class="empty">'+t('db_no_ds')+'</td></tr>';
+    } else {
+      stbody.innerHTML = items.map(function(ds) {
+        var sc = {active:'badge-green', provisioning:'badge-orange', error:'badge-red',
+                  removing:'badge-orange'}[ds.status] || 'badge-gray';
+        var smBadge = ds.snapmirror
+          ? '<span class="badge badge-'+(ds.snapmirror.state==='snapmirrored'?'green'
+            :(ds.snapmirror.state==='broken_off'?'red':'gray'))+'">'+esc(ds.snapmirror.state||'–')+'</span>'
+          : '<span style="color:var(--muted)">—</span>';
+        // Fill level
+        var cap = capStats[ds.pve_storage_id] || capStats[ds.name] || null;
+        var usageCell;
+        if (cap && cap.total_bytes > 0) {
+          var pct = Math.round(cap.used_bytes / cap.total_bytes * 100);
+          var barColor = pct >= 90 ? '#f08080' : pct >= 70 ? '#f0a040' : '#56d364';
+          usageCell = '<div style="display:flex;align-items:center;gap:5px;min-width:90px">'
+            + '<div style="flex:1;height:5px;background:rgba(139,148,158,.2);border-radius:3px;overflow:hidden">'
+            + '<div style="width:'+pct+'%;height:100%;background:'+barColor+';border-radius:3px"></div></div>'
+            + '<span style="font-size:11px;color:var(--muted);white-space:nowrap">'+pct+'%</span>'
+            + '</div>'
+            + '<div style="font-size:10px;color:var(--muted)">'
+            + fmtBytes(cap.used_bytes)+' / '+fmtBytes(cap.total_bytes)+'</div>';
+        } else if (ds.size_bytes) {
+          usageCell = '<span style="color:var(--muted);font-size:11px">'+fmtBytes(ds.size_bytes)+'</span>';
+        } else {
+          usageCell = '<span style="color:var(--muted)">—</span>';
+        }
+        // VM count
+        var vmCount = cap && cap.vm_count > 0
+          ? '<span style="font-weight:600">'+cap.vm_count+'</span>'
+          : '<span style="color:var(--muted)">—</span>';
+        return '<tr>'
+          + '<td><strong>'+esc(ds.name)+'</strong>'
+            + (ds.error_message ? '<br><span style="color:var(--error);font-size:10px">'
+               +esc(ds.error_message.slice(0,60))+'</span>' : '')
+            + '</td>'
+          + '<td><span class="badge '+sc+'">'+esc(ds.status)+'</span></td>'
+          + '<td>'+usageCell+'</td>'
+          + '<td>'+vmCount+'</td>'
+          + '<td>'+smBadge+'</td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    // Recent jobs (last 8)
+    var jobs = Array.isArray(jobsData) ? jobsData.slice(0, 8) : [];
+    var jbody = document.getElementById('dbJobsTbody');
+    if (!jobs.length) {
+      jbody.innerHTML = '<tr><td colspan="3" class="empty">'+t('db_no_jobs')+'</td></tr>';
+    } else {
+      jbody.innerHTML = jobs.map(function(j) {
+        return '<tr>'
+          + '<td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+            + esc(j.label || j.job_type || '–') + '</td>'
+          + '<td>'+statusBadge(j.status)+'</td>'
+          + '<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+esc(fmtDate(j.created_at||''))+'</td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    // Alert banner — datastores in error state
+    var errDs = items.filter(function(ds){ return ds.status === 'error'; });
+    var alertDiv = document.getElementById('db_alert_banner');
+    if (errDs.length) {
+      alertDiv.style.display = '';
+      alertDiv.innerHTML = '<div class="db-alert"><strong>⚠ '
+        + errDs.length + ' Datastore'+(errDs.length>1?'s':'')+' '+t('db_issues')+':</strong> '
+        + errDs.map(function(ds){ return esc(ds.name); }).join(', ')
+        + '</div>';
+    } else {
+      alertDiv.style.display = 'none';
+    }
+
+  } catch(e) { console.error('[dashboard]', e); }
+}
+
 function showProvWizard() {
   provWizShowStep(1);
   ['provWizName','provWizSvm','provWizVolName','provWizLunName','provWizVgName','provWizStorageId',
@@ -5697,15 +5984,35 @@ function showProvWizard() {
   var lsz=document.getElementById('provWizLunSize'); if(lsz) lsz.value='100';
   var nsz=document.getElementById('provWizNsSize');  if(nsz) nsz.value='100';
   var fsz=document.getElementById('provWizNfsSize');  if(fsz) fsz.value='500';
+  var nc=document.getElementById('provWizNfsNconnect'); if(nc) nc.value='';
+  _provJunctionAutoFill = '';
+  ['images','rootdir'].forEach(function(t){ var cb=document.getElementById('pvct_'+t); if(cb) cb.checked=true; });
+  ['iso','vztmpl','backup','snippets'].forEach(function(t){ var cb=document.getElementById('pvct_'+t); if(cb) cb.checked=false; });
   provWizUpdateSanVolHint('provWizLunSize','provWizLunSizeUnit','provWizLunVolHint','LUN');
   provWizUpdateSanVolHint('provWizNsSize','provWizNsSizeUnit','provWizNsVolHint','namespace');
   document.getElementById('provOntapLoadErr').textContent='';
   var r=document.querySelector('input[name="provProto"][value="iscsi"]');
   if(r) r.checked=true;
   provProtoChange();
+  var btn = document.getElementById('provSubmitBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Create Datastore'; }
   document.getElementById('provWizModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   loadProvEndpoints();
+}
+
+var _provJunctionAutoFill = '';
+function provWizVolNameInput(val) {
+  var proto = (document.querySelector('input[name="provProto"]:checked')||{}).value||'iscsi';
+  if (proto !== 'nfs') return;
+  var jEl = document.getElementById('provWizNfsJunction');
+  if (!jEl) return;
+  var slug = val.trim().replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  var suggested = slug ? '/' + slug : '';
+  if (jEl.value === '' || jEl.value === _provJunctionAutoFill) {
+    jEl.value = suggested;
+    _provJunctionAutoFill = suggested;
+  }
 }
 
 function provProtoChange() {
@@ -5716,6 +6023,9 @@ function provProtoChange() {
   document.getElementById('provWizNfsSection').style.display=proto==='nfs'?'block':'none';
   document.querySelectorAll('.prov-san-only').forEach(function(el){
     el.style.display=isSan?'':'none';
+  });
+  document.querySelectorAll('.prov-nfs-only').forEach(function(el){
+    el.style.display=proto==='nfs'?'':'none';
   });
 }
 
@@ -5989,7 +6299,12 @@ async function submitProvWizard() {
       var sz=parseInt(document.getElementById('provWizNfsSize').value)||0;
       sizeBytes=sz*(UNITS[document.getElementById('provWizNfsSizeUnit').value]||0);
     }
-    Object.assign(body,{ nfs_junction_path:junction, nfs_lif_ip:nfsLifIp, size_bytes:sizeBytes });
+    var nconnectVal=parseInt(document.getElementById('provWizNfsNconnect').value)||0;
+    var contentTypes=['images','rootdir','iso','vztmpl','backup','snippets']
+      .filter(function(t){ var cb=document.getElementById('pvct_'+t); return cb&&cb.checked; });
+    var pveContent=contentTypes.length?contentTypes.join(','):'images,rootdir';
+    Object.assign(body,{ nfs_junction_path:junction, nfs_lif_ip:nfsLifIp, size_bytes:sizeBytes,
+      nfs_nconnect:nconnectVal, pve_content:pveContent });
   }
   var btn=document.getElementById('provSubmitBtn');
   btn.disabled=true; btn.textContent='Creating…';
@@ -5997,8 +6312,8 @@ async function submitProvWizard() {
     var r=await apiPost('provisioning/datastores',body);
     hideProvWizard();
     toast('Provisioning job started','success');
+    if (r && r.job_id) trackJob(r.job_id, 'Provision: ' + (name || storageId));
     loadProvDatastores();
-    setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); },800);
   } catch(e) {
     toast(e.message,'error');
     btn.disabled=false; btn.textContent='Create Datastore';
@@ -6054,11 +6369,11 @@ function showResizeDialog(dsId, dsName, currentBytes, protocol) {
     var btn=document.getElementById('resizeDlgOk');
     btn.disabled=true; btn.textContent='Resizing…';
     try {
-      await apiPost('provisioning/datastores/resize',{id:dsId,size_bytes:sizeBytes});
+      var rRes=await apiPost('provisioning/datastores/resize',{id:dsId,size_bytes:sizeBytes});
       document.body.removeChild(overlay);
       toast('Resize job started','success');
+      if (rRes && rRes.job_id) trackJob(rRes.job_id, 'Resize: ' + dsName);
       loadProvDatastores();
-      setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); },800);
     } catch(e) {
       errEl.textContent=e.message;
       btn.disabled=false; btn.textContent='Resize';
@@ -6096,10 +6411,10 @@ async function showAddHostDialog(dsId, dsName, existingHostIds) {
     var hid = box.querySelector('#_addHostSel').value;
     cleanup();
     try {
-      await apiPost('provisioning/datastores/add-host', {id: dsId, pve_host_id: hid});
+      var rAh=await apiPost('provisioning/datastores/add-host', {id: dsId, pve_host_id: hid});
       toast('Add-host job started','success');
+      if (rAh && rAh.job_id) trackJob(rAh.job_id, 'Add host: ' + dsName);
       loadProvDatastores();
-      setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); }, 800);
     } catch(e) { toast(e.message,'error'); }
   };
 }
@@ -6112,10 +6427,10 @@ async function confirmRemoveDatastore(id, name) {
     'I understand this will permanently delete data on the NetApp'
   );
   try {
-    await apiPost('provisioning/datastores/remove', {id:id, delete_ontap_objects:delOntap});
+    var rRm=await apiPost('provisioning/datastores/remove', {id:id, delete_ontap_objects:delOntap});
     toast('Removal job started','success');
+    if (rRm && rRm.job_id) trackJob(rRm.job_id, 'Remove: ' + name);
     loadProvDatastores();
-    setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); }, 800);
   } catch(e) {
     var data = e.data || {};
     if(data.volumes && data.volumes.length) {
@@ -6441,9 +6756,9 @@ async function rcvBind() {
   document.getElementById('rcvBindErr').textContent='';
   try {
     var r = await api('POST', 'provisioning/recovery/bind', body);
-    toast('Bind job started — see Jobs tab for progress', 'success');
+    toast('Bind job started','success');
+    if (r && r.job_id) trackJob(r.job_id, 'Mount: ' + (rcvState.storage_id || ''));
     hideBindWizard();
-    setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); }, 800);
   } catch(e) {
     document.getElementById('rcvBindErr').textContent = e.message||String(e);
   }
@@ -8248,10 +8563,86 @@ async function toggleDrEnabled() {
   } catch(e) { toast('Failed to save setting', 'error'); }
 }
 
+// ── Job Tracker ────────────────────────────────────────────────────────────
+var _activeJobs = {};
+
+function _isStorageJob(label) {
+  return /^(Provision|Remove|Resize|Add host|Mount):/.test(label || '');
+}
+
+function trackJob(jobId, label) {
+  if (!jobId || _activeJobs[jobId]) return;
+  _activeJobs[jobId] = { label: label, status: 'running', pct: 0, lastLog: '' };
+  _renderJobTrackers();
+  _pollJob(jobId);
+}
+
+async function _pollJob(jobId) {
+  var entry = _activeJobs[jobId];
+  if (!entry) return;
+  try {
+    var d = await apiFetch('jobs/status?job_id=' + encodeURIComponent(jobId));
+    entry = _activeJobs[jobId];
+    if (!entry) return;
+    entry.pct    = d.progress_pct || 0;
+    entry.status = d.status;
+    var logs     = d.log || [];
+    var lastEntry = logs.length ? logs[logs.length - 1] : null;
+    entry.lastLog = lastEntry ? (lastEntry.msg || String(lastEntry)) : '';
+    _renderJobTrackers();
+    if (d.status === 'running' || d.status === 'cancelling') {
+      setTimeout(function() { _pollJob(jobId); }, 2000);
+    } else if (d.status === 'done') {
+      if (_isStorageJob(entry.label)) loadStorageUnified();
+      setTimeout(function() { delete _activeJobs[jobId]; _renderJobTrackers(); }, 6000);
+    } else if (d.status === 'failed') {
+      if (_isStorageJob(entry.label)) loadStorageUnified();
+    }
+    // 'failed': stays until dismissed
+  } catch(e) {
+    entry = _activeJobs[jobId];
+    if (entry && (entry.status === 'running' || entry.status === 'cancelling')) {
+      setTimeout(function() { _pollJob(jobId); }, 3000);
+    }
+  }
+}
+
+function _dismissJobTracker(jobId) {
+  delete _activeJobs[jobId];
+  _renderJobTrackers();
+}
+
+function _renderJobTrackers() {
+  var container = document.getElementById('jobTrackersContainer');
+  if (!container) return;
+  var ids = Object.keys(_activeJobs);
+  if (!ids.length) { container.innerHTML = ''; return; }
+  container.innerHTML = ids.map(function(jid) {
+    var e   = _activeJobs[jid];
+    var ok  = e.status === 'done';
+    var err = e.status === 'failed';
+    var run = !ok && !err;
+    var clr = err ? '#f08080' : ok ? '#56d364' : 'var(--primary)';
+    var ico = err ? '✗' : ok ? '✓' : '⟳';
+    var pct = ok ? 100 : (e.pct || 0);
+    var log = e.lastLog || (ok ? 'Completed.' : err ? 'Failed.' : 'Running…');
+    return '<div class="jtc">'
+      + '<div class="jtc-title">'
+      + '<span class="jtc-icon" style="color:' + clr + '">' + ico + '</span>'
+      + '<span class="jtc-label" title="' + esc(e.label) + '">' + esc(e.label) + '</span>'
+      + '<button class="jtc-x" onclick="_dismissJobTracker(' + JSON.stringify(jid) + ')">✕</button>'
+      + '</div>'
+      + '<div class="jtc-track"><div class="jtc-bar" style="width:' + pct + '%;background:' + clr + '"></div></div>'
+      + '<div class="jtc-log">' + esc(log) + '</div>'
+      + '<div class="jtc-foot"><a href="#" onclick="showTabByName(\'jobs\');return false" style="font-size:11px;color:var(--primary)">→ Details in Jobs tab</a></div>'
+      + '</div>';
+  }).join('');
+}
+
 // Initial load
 applyI18n();
 loadUiSettings();
-loadSnapshots();
+loadDashboard();
 </script>
 <!-- ═══════════════════════ DEPLOY WIZARD MODAL ═══════════════════════ -->
 <div id="setupWizardModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="setupWizardBackdropClick(event)">
@@ -8538,7 +8929,7 @@ loadSnapshots();
           </div>
           <div class="form-group" id="provWizNewVolRow" style="display:none">
             <label>New Volume Name</label>
-            <input class="form-control" id="provWizVolName" placeholder="e.g. ucnlabprox_san01">
+            <input class="form-control" id="provWizVolName" placeholder="e.g. ucnlabprox_san01" oninput="provWizVolNameInput(this.value)">
           </div>
           <div class="form-group" id="provWizAggRow">
             <label>Aggregate <span style="font-weight:400;color:var(--muted)">(for new volume, optional)</span></label>
@@ -8652,6 +9043,10 @@ loadSnapshots();
                 </select>
               </div>
             </div>
+            <div class="form-group">
+              <label>nconnect <span style="font-weight:400;color:var(--muted)">(parallel TCP, 1–16 — leave blank to skip)</span></label>
+              <input class="form-control" id="provWizNfsNconnect" type="number" min="1" max="16" placeholder="off" style="width:90px">
+            </div>
           </div>
         </div>
 
@@ -8683,6 +9078,17 @@ loadSnapshots();
               <option value="linear">Linear (thick)</option>
               <option value="thin">Thin-provisioned</option>
             </select>
+          </div>
+          <div class="form-group prov-nfs-only" style="grid-column:1/-1">
+            <label>Content Types</label>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pvct_images" checked> Disk images</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pvct_rootdir" checked> Containers</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pvct_iso"> ISO images</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pvct_vztmpl"> CT templates</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pvct_backup"> Backups</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pvct_snippets"> Snippets</label>
+            </div>
           </div>
         </div>
         <div style="display:flex;gap:8px">

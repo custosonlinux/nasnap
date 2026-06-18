@@ -722,6 +722,82 @@ def _vms_for_mapping():
         return {"error": str(exc)}, 500
 
 
+def _protection_summary():
+    """Returns VM counts from PVE and schedule/datastore protection coverage."""
+    db = get_db()
+
+    # Schedule coverage
+    sched_rows = db.query(
+        "SELECT DISTINCT mapping_id FROM netapp_snapshot_schedules WHERE enabled=1"
+    )
+    protected_mapping_ids = {r["mapping_id"] for r in (sched_rows or [])}
+
+    total_ds_rows = db.query(
+        "SELECT DISTINCT pve_storage_id FROM netapp_volume_mapping"
+    )
+    total_datastores = len(total_ds_rows or [])
+
+    protected_ds: set = set()
+    for mid in protected_mapping_ids:
+        row = db.query_one(
+            "SELECT pve_storage_id FROM netapp_volume_mapping WHERE id=?", (mid,)
+        )
+        if row:
+            protected_ds.add(dict(row).get("pve_storage_id", ""))
+    protected_datastores = len(protected_ds)
+
+    sched_count_row = db.query_one(
+        "SELECT COUNT(*) AS c FROM netapp_snapshot_schedules WHERE enabled=1"
+    )
+    active_schedules = dict(sched_count_row or {}).get("c", 0)
+
+    # VM counts — query each PVE host, deduplicate by vmid
+    total_vms = 0
+    running_vms = 0
+    stopped_vms = 0
+    seen_vmids: set = set()
+
+    host_rows = db.query("SELECT * FROM netapp_pve_hosts")
+    for hr in (host_rows or []):
+        try:
+            from ..core._helpers import build_pve_client
+            pve = build_pve_client(db, dict(hr)["id"])
+            r = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
+            if r.ok:
+                for vm in r.json().get("data", []):
+                    vmid = vm.get("vmid")
+                    if vmid and vmid not in seen_vmids:
+                        seen_vmids.add(vmid)
+                        total_vms += 1
+                        if vm.get("status") == "running":
+                            running_vms += 1
+                        else:
+                            stopped_vms += 1
+        except Exception as exc:
+            log.debug(f"[netapp_storage] protection-summary: {dict(hr).get('host','?')}: {exc}")
+
+    # Snapshot counts (fast DB-only queries)
+    snap_total   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots") or {}).get("c", 0)
+    snap_done    = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status='done'") or {}).get("c", 0)
+    snap_failed  = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status IN ('failed','error')") or {}).get("c", 0)
+
+    # SnapMirror health
+    sm_total   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapmirror_relationships") or {}).get("c", 0)
+    sm_healthy = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapmirror_relationships WHERE healthy=1 AND state='snapmirrored'") or {}).get("c", 0)
+
+    return {
+        "total_vms": total_vms,
+        "total_datastores": total_datastores,
+        "protected_datastores": protected_datastores,
+        "active_schedules": int(active_schedules),
+        "snap_total": int(snap_total),
+        "snap_done": int(snap_done),
+        "snap_failed": int(snap_failed),
+        "sm_total": int(sm_total),
+        "sm_healthy": int(sm_healthy),
+    }
+
+
 def _snapshot_manifest():
     """Reads the manifest of an ONTAP snapshot on-demand from the .snapshot directory."""
     params = request.args if request.method == "GET" else (request.get_json() or {})
@@ -1057,6 +1133,7 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "snapshots/volumes", _list_ontap_volumes)
     register_plugin_route(PLUGIN_ID, "snapshots/vms-for-mapping", _vms_for_mapping)
     register_plugin_route(PLUGIN_ID, "snapshots/manifest", _snapshot_manifest)
+    register_plugin_route(PLUGIN_ID, "snapshots/protection-summary", _protection_summary)
 
     register_plugin_route(PLUGIN_ID, "jobs/status", _job_status)
     register_plugin_route(PLUGIN_ID, "jobs/delete", _delete_job)

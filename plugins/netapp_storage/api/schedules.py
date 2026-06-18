@@ -144,88 +144,98 @@ def _execute_schedule(schedule):
     from ..core.snapshot_engine import start_snapshot_job
 
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+    status = "failed"
     job_id = str(uuid.uuid4())
-
-    db.execute(
-        "INSERT INTO netapp_jobs (id, job_type, vmid, node, status, created_by, created_at) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (job_id, "snapshot", None, "", "running", f"schedule:{schedule['name']}", now),
-    )
-
-    vmids = json.loads(schedule.get("vmids_json") or "[]")
-
-    # Auto-sync: replace vmids with current datastore content before running
-    mapping_row_early = db.query_one(
-        "SELECT * FROM netapp_volume_mapping WHERE id=?", (schedule["mapping_id"],)
-    )
-    if schedule.get("sync_vmids") and mapping_row_early:
-        try:
-            synced = _sync_vmids_for_schedule(db, dict(mapping_row_early))
-            if synced is not None:
-                vmids = synced
-                db.execute(
-                    "UPDATE netapp_snapshot_schedules SET vmids_json=? WHERE id=?",
-                    (json.dumps(vmids), schedule["id"]),
-                )
-                log.info(f"[netapp_storage] Schedule '{schedule['name']}' synced vmids: {vmids}")
-        except Exception as exc:
-            log.warning(f"[netapp_storage] Schedule '{schedule['name']}' vmid sync failed: {exc}")
-
-    # Derive node from mapping (via plugin-managed PVE client)
-    mapping_row = db.query_one(
-        "SELECT * FROM netapp_volume_mapping WHERE id=?", (schedule["mapping_id"],)
-    )
-    node = ""
-    cluster_id = ""
-    if mapping_row:
-        cluster_id = mapping_row["pve_cluster_id"]
-        try:
-            from ..core._helpers import build_pve_client
-            pve = build_pve_client(db, cluster_id)
-            vmids_for_node = json.loads(schedule.get("vmids_json") or "[]")
-            if vmids_for_node:
-                found = pve.find_vm_node(vmids_for_node[0])
-                if found:
-                    node = found
-            if not node:
-                nodes = list(pve.get_node_status().keys())
-                if nodes:
-                    node = nodes[0]
-        except Exception as exc:
-            log.warning(f"[netapp_storage] Schedule node lookup failed: {exc}")
-
-    sched_name_safe = re.sub(r'[^a-zA-Z0-9_-]', '-', schedule.get("name", ""))[:30].strip('-')
-    data = {
-        "cluster_id": cluster_id,
-        "node": node,
-        "vmids": vmids,
-        "mapping_id": schedule["mapping_id"],
-        "pve_storage_id":    mapping_row["pve_storage_id"] if mapping_row else "",
-        "consistency":       schedule.get("consistency", "crash"),
-        "label":             schedule.get("label", ""),
-        "pre_script":        schedule.get("pre_script",  "") or "",
-        "post_script":       schedule.get("post_script", "") or "",
-        "schedule_id":       schedule["id"],
-        "schedule_name":     schedule.get("name", ""),
-        "snap_name_suffix":  sched_name_safe,
-        "retention_count":   int(schedule.get("retention_count") or 7),
-        "snapmirror_update": bool(schedule.get("snapmirror_update", 0)),
-        "notify_enabled":    bool(schedule.get("notify_enabled", 0)),
-        "notify_on":         schedule.get("notify_on", "all") or "all",
-        "notify_recipients": schedule.get("notify_recipients", "") or "",
-    }
-    status = "done"
     try:
-        start_snapshot_job(job_id, data, f"schedule:{schedule['name']}")
-    except Exception as exc:
-        log.error(f"[netapp_storage] Schedule '{schedule['name']}' failed: {exc}")
-        status = "failed"
+        now = datetime.now(timezone.utc).isoformat()
 
-    db.execute(
-        "UPDATE netapp_snapshot_schedules SET last_run_at=?, last_run_status=? WHERE id=?",
-        (datetime.now(timezone.utc).isoformat(), status, schedule["id"]),
-    )
+        db.execute(
+            "INSERT INTO netapp_jobs (id, job_type, vmid, node, status, created_by, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (job_id, "snapshot", None, "", "running", f"schedule:{schedule['name']}", now),
+        )
+
+        vmids = json.loads(schedule.get("vmids_json") or "[]")
+
+        # Auto-sync: replace vmids with current datastore content before running
+        mapping_row_early = db.query_one(
+            "SELECT * FROM netapp_volume_mapping WHERE id=?", (schedule["mapping_id"],)
+        )
+        if schedule.get("sync_vmids") and mapping_row_early:
+            try:
+                synced = _sync_vmids_for_schedule(db, dict(mapping_row_early))
+                if synced is not None:
+                    vmids = synced
+                    db.execute(
+                        "UPDATE netapp_snapshot_schedules SET vmids_json=? WHERE id=?",
+                        (json.dumps(vmids), schedule["id"]),
+                    )
+                    log.info(f"[netapp_storage] Schedule '{schedule['name']}' synced vmids: {vmids}")
+            except Exception as exc:
+                log.warning(f"[netapp_storage] Schedule '{schedule['name']}' vmid sync failed: {exc}")
+
+        # Derive node from mapping (via plugin-managed PVE client)
+        mapping_row = db.query_one(
+            "SELECT * FROM netapp_volume_mapping WHERE id=?", (schedule["mapping_id"],)
+        )
+        node = ""
+        cluster_id = ""
+        if mapping_row:
+            cluster_id = mapping_row["pve_cluster_id"]
+            try:
+                from ..core._helpers import build_pve_client
+                pve = build_pve_client(db, cluster_id)
+                vmids_for_node = json.loads(schedule.get("vmids_json") or "[]")
+                if vmids_for_node:
+                    found = pve.find_vm_node(vmids_for_node[0])
+                    if found:
+                        node = found
+                if not node:
+                    nodes = list(pve.get_node_status().keys())
+                    if nodes:
+                        node = nodes[0]
+            except Exception as exc:
+                log.warning(f"[netapp_storage] Schedule node lookup failed: {exc}")
+
+        sched_name_safe = re.sub(r'[^a-zA-Z0-9_-]', '-', schedule.get("name", ""))[:30].strip('-')
+        data = {
+            "cluster_id": cluster_id,
+            "node": node,
+            "vmids": vmids,
+            "mapping_id": schedule["mapping_id"],
+            "pve_storage_id":    mapping_row["pve_storage_id"] if mapping_row else "",
+            "consistency":       schedule.get("consistency", "crash"),
+            "label":             schedule.get("label", ""),
+            "pre_script":        schedule.get("pre_script",  "") or "",
+            "post_script":       schedule.get("post_script", "") or "",
+            "schedule_id":       schedule["id"],
+            "schedule_name":     schedule.get("name", ""),
+            "snap_name_suffix":  sched_name_safe,
+            "retention_count":   int(schedule.get("retention_count") or 7),
+            "snapmirror_update": bool(schedule.get("snapmirror_update", 0)),
+            "notify_enabled":    bool(schedule.get("notify_enabled", 0)),
+            "notify_on":         schedule.get("notify_on", "all") or "all",
+            "notify_recipients": schedule.get("notify_recipients", "") or "",
+        }
+        try:
+            start_snapshot_job(job_id, data, f"schedule:{schedule['name']}")
+            status = "done"
+        except Exception as exc:
+            log.error(f"[netapp_storage] Schedule '{schedule['name']}' failed: {exc}")
+            status = "failed"
+
+    except Exception as exc:
+        log.error(f"[netapp_storage] Schedule '{schedule['name']}' setup error: {exc}")
+    finally:
+        # Always update last_run_at so the scheduler doesn't retry immediately
+        # and the UI shows that the schedule was attempted.
+        try:
+            db.execute(
+                "UPDATE netapp_snapshot_schedules SET last_run_at=?, last_run_status=? WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(), status, schedule["id"]),
+            )
+        except Exception as exc:
+            log.error(f"[netapp_storage] Schedule '{schedule['name']}' last_run update failed: {exc}")
     # Retention is now handled inside snapshot_engine._run_snapshot, directly after
     # the snapshot status is set to 'done'.  This avoids the race condition where the
     # retention count ran while the new snapshot was still status='running' and therefore

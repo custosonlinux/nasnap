@@ -131,6 +131,10 @@ def _init_db():
                                "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_provisioned_datastores", "snapinfo_lv_name",
                                "TEXT NOT NULL DEFAULT 'netapp_snapmanifest'")
+        _add_column_if_missing(db, "netapp_provisioned_datastores", "pve_content",
+                               "TEXT NOT NULL DEFAULT 'images,rootdir'")
+        _add_column_if_missing(db, "netapp_provisioned_datastores", "nfs_nconnect",
+                               "INTEGER NOT NULL DEFAULT 0")
 
         # v1.2: DR site SSH test log + sync password
         _add_column_if_missing(db, "netapp_dr_sites", "last_test_at",          "TEXT NOT NULL DEFAULT ''")

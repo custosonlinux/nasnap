@@ -12,6 +12,7 @@ services:
       - /docker/nasnap/data:/data
       - /docker/nasnap/ssh:/root/.ssh
     environment:
+      NASNAP_DATA: /data
       NASNAP_ADMIN_PASSWORD: "${NASNAP_ADMIN_PASSWORD:-admin}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
       SESSION_HOURS: "8"

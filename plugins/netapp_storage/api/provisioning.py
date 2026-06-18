@@ -136,8 +136,9 @@ def _prov_datastores():
             vg_name, lvm_type, lvm_pool_name,
             nfs_junction_path, pve_storage_id,
             pve_host_ids, size_bytes, status, error_message,
-            created_by, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            created_by, created_at, updated_at,
+            pve_content, nfs_nconnect)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ds_id, body["name"], body["endpoint_id"],
             body.get("svm_name", ""), body.get("volume_uuid", ""),
@@ -152,6 +153,8 @@ def _prov_datastores():
             json.dumps(body["pve_host_ids"]),
             int(body.get("size_bytes", 0)),
             "provisioning", "", username, now, now,
+            body.get("pve_content", "images,rootdir") or "images,rootdir",
+            int(body.get("nfs_nconnect", 0) or 0),
         ),
     )
     job_id = _start_job(db, "provision", ds_id, username)
@@ -726,9 +729,85 @@ def _storage_unified():
     return {"items": items}
 
 
+def _storage_capacity():
+    """
+    Returns PVE-reported used/total bytes and VM count per storage_id.
+    Calls cluster/resources once per PVE host (cheap).
+    """
+    db = get_db()
+    cap: dict = {}   # storage_id → {used_bytes, total_bytes, vm_count}
+    vm_by_node: dict = {}  # node → list of vmids
+
+    host_rows = db.query("SELECT * FROM netapp_pve_hosts")
+    for hr in (host_rows or []):
+        try:
+            from ..core._helpers import build_pve_client
+            pve = build_pve_client(db, dict(hr)["id"])
+
+            # Storage capacity
+            r = pve._api_get(f"{pve._base}/cluster/resources?type=storage")
+            if r.ok:
+                for st in r.json().get("data", []):
+                    sid   = st.get("storage")
+                    node  = st.get("node", "")
+                    used  = int(st.get("disk", 0))
+                    total = int(st.get("maxdisk", 0))
+                    if not sid or total == 0:
+                        continue
+                    if sid not in cap:
+                        cap[sid] = {"used_bytes": used, "total_bytes": total, "vm_count": 0}
+                    # Aggregate: take the node with most data (active node)
+                    elif used > cap[sid]["used_bytes"]:
+                        cap[sid]["used_bytes"] = used
+                        cap[sid]["total_bytes"] = total
+
+            # VM count per storage via storage content listing
+            r2 = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
+            if r2.ok:
+                for vm in r2.json().get("data", []):
+                    node = vm.get("node", "")
+                    vmid = vm.get("vmid")
+                    if node and vmid:
+                        vm_by_node.setdefault(node, set()).add(vmid)
+
+        except Exception as exc:
+            log.debug(f"[netapp_storage] storage/capacity: {exc}")
+
+    # VM count per storage — query storage content per node for our known datastores
+    known_ids = set(cap.keys())
+    if known_ids and vm_by_node:
+        for hr in (host_rows or []):
+            try:
+                from ..core._helpers import build_pve_client
+                pve = build_pve_client(db, dict(hr)["id"])
+                nodes_r = pve._api_get(f"{pve._base}/nodes")
+                if not nodes_r.ok:
+                    continue
+                for nd in nodes_r.json().get("data", []):
+                    node_name = nd.get("node")
+                    if not node_name:
+                        continue
+                    for sid in known_ids:
+                        try:
+                            rc = pve._api_get(
+                                f"{pve._base}/nodes/{node_name}/storage/{sid}/content"
+                            )
+                            if rc.ok:
+                                vmids = {e.get("vmid") for e in rc.json().get("data", []) if e.get("vmid")}
+                                cap.setdefault(sid, {"used_bytes": 0, "total_bytes": 0, "vm_count": 0})
+                                cap[sid]["vm_count"] = max(cap[sid]["vm_count"], len(vmids))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+    return {"stats": cap}
+
+
 def register_routes():
     from nasnap_core.api.plugins import register_plugin_route
     register_plugin_route(PLUGIN_ID, "storage/unified",                    _storage_unified)
+    register_plugin_route(PLUGIN_ID, "storage/capacity",                   _storage_capacity)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores",            _prov_datastores)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/import",     _prov_import)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/remove",     _prov_remove)
@@ -2447,12 +2526,19 @@ def _provision_nfs(ds_id, params, db, jlog):
     # ── PVE: register storage — NFS is cluster-wide, run pvesm add once ─────
     # In a PVE cluster, pvesm add writes to /etc/pve/storage.cfg (pmxcfs),
     # which propagates automatically. Run on the first host only.
+    pve_content  = params.get("pve_content", "images,rootdir") or "images,rootdir"
+    nfs_nconnect = int(params.get("nfs_nconnect", 0) or 0)
+    nfs_options  = "vers=3"
+    if 1 <= nfs_nconnect <= 16:
+        nfs_options += f",nconnect={nfs_nconnect}"
     sid_q = shlex.quote(pve_storage_id)
     pvesm_cmd = (f"pvesm add nfs {sid_q}"
                  f" --server {shlex.quote(nfs_ip)}"
                  f" --export {shlex.quote(junction_path)}"
-                 f" --content images,rootdir --options vers=3")
+                 f" --content {shlex.quote(pve_content)}"
+                 f" --options {shlex.quote(nfs_options)}")
 
+    _pvesm_ok = False
     try:
         pve = build_pve_client(db, pve_host_ids[0])
         su, sp, sk = get_ssh_creds(pve)
@@ -2467,6 +2553,7 @@ def _provision_nfs(ds_id, params, db, jlog):
             jlog.log(f"[{sh}] PVE storage registered.")
         else:
             jlog.log(f"[{sh}] PVE storage already exists.")
+        _pvesm_ok = True
         # Pre-create snapmanifest directory so NFS snapshots work immediately
         manifest_dir = shlex.quote(f"/mnt/pve/{pve_storage_id}/.netapp-snapmanifest")
         try:
@@ -2475,9 +2562,13 @@ def _provision_nfs(ds_id, params, db, jlog):
         except Exception as md_exc:
             jlog.log(f"[{sh}] WARNING: could not create snapmanifest dir: {md_exc}")
     except Exception as exc:
-        jlog.log(f"WARNING: pvesm add: {exc}")
+        jlog.log(f"ERROR: pvesm add failed: {exc}")
+        jlog.log("The ONTAP volume was created. Fix the NFS export/LIF and use 'Add Host' to retry the PVE registration.")
+        _set_ds_status(db, ds_id, "error", str(exc))
+        return
 
-    _set_ds_status(db, ds_id, "active")
+    if _pvesm_ok:
+        _set_ds_status(db, ds_id, "active")
 
     # ── Register volume_mapping ───────────────────────────────────────────────
     now = _now()
@@ -2600,11 +2691,17 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
         jlog.log(f"WARNING: export rule: {exc}")
 
     # Register PVE storage on host
+    pve_content  = ds.get("pve_content", "images,rootdir") or "images,rootdir"
+    nfs_nconnect = int(ds.get("nfs_nconnect", 0) or 0)
+    nfs_options  = "vers=3"
+    if 1 <= nfs_nconnect <= 16:
+        nfs_options += f",nconnect={nfs_nconnect}"
     sid_q     = shlex.quote(pve_storage_id)
     pvesm_cmd = (f"pvesm add nfs {sid_q}"
                  f" --server {shlex.quote(nfs_ip)}"
                  f" --export {shlex.quote(junction_path)}"
-                 f" --content images,rootdir --options vers=3")
+                 f" --content {shlex.quote(pve_content)}"
+                 f" --options {shlex.quote(nfs_options)}")
     try:
         pve = build_pve_client(db, host_id)
         su, sp, sk = get_ssh_creds(pve)

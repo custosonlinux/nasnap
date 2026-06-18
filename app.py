@@ -484,6 +484,7 @@ def create_app():
           if (lnk) lnk.style.display = 'flex';
         }
       });
+
   });
 })();
 </script>
