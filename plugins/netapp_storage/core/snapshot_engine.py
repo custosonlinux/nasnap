@@ -304,7 +304,11 @@ def _run_snapshot(job_id, params, username):
             if params.get("tamperproof_enabled") and int(params.get("tamperproof_days") or 0) > 0:
                 _expiry = datetime.now(timezone.utc) + timedelta(days=int(params["tamperproof_days"]))
                 expiry_time = _expiry.strftime('%Y-%m-%dT%H:%M:%SZ')
-                jlog.log(f"Tamperproof: snapshot locked until {expiry_time}.")
+                jlog.log(f"Tamperproof: source snapshot locked until {expiry_time}.")
+            sm_expiry_time = ""
+            if params.get("sm_tamperproof_enabled") and int(params.get("sm_tamperproof_days") or 0) > 0:
+                _sm_expiry = datetime.now(timezone.utc) + timedelta(days=int(params["sm_tamperproof_days"]))
+                sm_expiry_time = _sm_expiry.strftime('%Y-%m-%dT%H:%M:%SZ')
             job_uuid = client.create_snapshot(
                 mapping["volume_uuid"], snap_name,
                 comment=f"nasnap cluster={cluster_id} vms={','.join(str(v) for v in vmids)}",
@@ -365,12 +369,12 @@ def _run_snapshot(job_id, params, username):
                 n = trigger_update_for_volume(db, mapping["volume_uuid"], mapping["endpoint_id"], jlog)
                 if n == 0:
                     jlog.log("SnapMirror®: no relationships found (run scan first).")
-                elif expiry_time:
-                    # Lock the replicated snapshot on the destination volume too.
-                    # Polls until the snapshot appears after the transfer completes.
+                elif sm_expiry_time:
+                    # Lock replicated snapshot on destination (independent of source tamperproof).
+                    jlog.log(f"SnapMirror® dest tamperproof: locking until {sm_expiry_time} …")
                     lock_dest_snapshot(
                         db, mapping["volume_uuid"], mapping["endpoint_id"],
-                        snap_name, expiry_time, jlog,
+                        snap_name, sm_expiry_time, jlog,
                     )
             except Exception as sm_exc:
                 jlog.log(f"SnapMirror® update: {sm_exc} (non-critical)")

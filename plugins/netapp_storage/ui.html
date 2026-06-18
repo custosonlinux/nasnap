@@ -4248,7 +4248,7 @@ function _renderSchedules() {
       '<td>'+vmDisplay+'</td>' +
       '<td>'+esc(cronHuman(s.cron_expr))+'</td>' +
       '<td>'+(s.label?'<span class="corp-badge corp-badge-ha">'+esc(s.label)+'</span>':'<span style="color:var(--muted)">–</span>')+'</td>' +
-      '<td>'+s.retention_count+'× '+(s.tamperproof_enabled ? _dbPill('Lock '+s.tamperproof_days+'d','rgba(86,131,210,.15)','var(--primary)') : '')+'</td>' +
+      '<td>'+s.retention_count+'× '+(s.tamperproof_enabled ? _dbPill('Lock '+s.tamperproof_days+'d','rgba(86,131,210,.15)','var(--primary)') : '')+(s.sm_tamperproof_enabled ? _dbPill('Dest '+s.sm_tamperproof_days+'d','rgba(86,131,210,.08)','var(--primary)') : '')+'</td>' +
       '<td>'+(s.enabled?'<span class="corp-badge corp-badge-online">'+t('badge_active')+'</span>':'<span class="corp-badge corp-badge-stopped">'+t('badge_inactive')+'</span>')+'</td>' +
       '<td style="color:var(--muted)">'+lastRun+'</td>' +
       '<td>'+schedSmBadge(s.snapmirror)+'</td>' +
@@ -4400,6 +4400,76 @@ function schedRetentionWarn() {
     warnDiv.style.display = 'none';
   }
   schedTamperproofUpdate();
+}
+
+function schedSmUpdateChanged() {
+  var smOn  = !!(document.getElementById('sched_sm_update') && document.getElementById('sched_sm_update').checked);
+  var sec   = document.getElementById('sched_sm_tamperproof_section');
+  if (!sec) return;
+  sec.style.opacity      = smOn ? '' : '.4';
+  sec.style.pointerEvents = smOn ? '' : 'none';
+  if (!smOn) {
+    var chk = document.getElementById('sched_sm_tamperproof');
+    if (chk) { chk.checked = false; }
+    var opts = document.getElementById('sched_sm_tamperproof_opts');
+    if (opts) opts.style.display = 'none';
+  }
+}
+
+function _schedSmTamperproofPayload() {
+  var chk  = document.getElementById('sched_sm_tamperproof');
+  var days = parseInt((document.getElementById('sched_sm_tamperproof_days') || {value:'0'}).value) || 0;
+  var enabled = !!(chk && chk.checked);
+  return { sm_tamperproof_enabled: enabled, sm_tamperproof_days: enabled ? Math.max(1, days) : 0 };
+}
+
+function schedSmTamperproofToggle() {
+  var chk  = document.getElementById('sched_sm_tamperproof');
+  var opts = document.getElementById('sched_sm_tamperproof_opts');
+  if (!opts) return;
+  opts.style.display = chk.checked ? '' : 'none';
+  if (chk.checked) {
+    var max = _schedTamperproofMax();
+    var daysEl = document.getElementById('sched_sm_tamperproof_days');
+    if (daysEl && max >= 1) daysEl.value = max;
+    schedSmTamperproofUpdate();
+  }
+}
+
+function schedSmTamperproofUpdate() {
+  var chk = document.getElementById('sched_sm_tamperproof');
+  if (!chk || !chk.checked) return;
+  var max = _schedTamperproofMax();
+  var el  = document.getElementById('sched_sm_tamperproof_suggest');
+  if (el) {
+    if (max < 1) {
+      el.textContent = 'Not practical: increase retention count or use a less frequent schedule.';
+      el.style.color = '#f08080';
+    } else {
+      el.textContent = 'Maximum: ' + max + ' day' + (max !== 1 ? 's' : '') + ' (= (retention − 1) × interval)';
+      el.style.color = '';
+    }
+  }
+  schedSmTamperproofWarn();
+}
+
+function schedSmTamperproofWarn() {
+  var chk  = document.getElementById('sched_sm_tamperproof');
+  var warn = document.getElementById('sched_sm_tamperproof_warn');
+  if (!warn) return;
+  if (!chk || !chk.checked) { warn.style.display = 'none'; return; }
+  var max  = _schedTamperproofMax();
+  var days = parseInt((document.getElementById('sched_sm_tamperproof_days') || {value:'0'}).value) || 0;
+  if (max < 1) {
+    warn.style.display = '';
+    warn.textContent = 'With this frequency and retention count the rotation window is less than 1 day — day-level tamperproof locking is not practical.';
+  } else if (days > max) {
+    warn.style.display = '';
+    warn.textContent = 'Lock duration (' + days + 'd) exceeds the maximum (' + max + 'd = (retention − 1) × interval). '
+      + 'Snapshots will still be locked when retention tries to delete them and will accumulate.';
+  } else {
+    warn.style.display = 'none';
+  }
 }
 
 // ── Timeline Ribbon ────────────────────────────────────────────────────────
@@ -4644,7 +4714,10 @@ async function showAddScheduleForm() {
   document.getElementById('sched_pre_script').value = '';
   document.getElementById('sched_post_script').value = '';
   _schedWizHasSM = false;
-  if (document.getElementById('sched_sm_update')) document.getElementById('sched_sm_update').checked = false;
+  if (document.getElementById('sched_sm_update')) {
+    document.getElementById('sched_sm_update').checked = false;
+    schedSmUpdateChanged();
+  }
   if (document.getElementById('sched_sync_vmids')) {
     document.getElementById('sched_sync_vmids').checked = false;
     document.getElementById('sched_vmids_manual').style.display = 'block';
@@ -4696,7 +4769,16 @@ async function showEditScheduleForm(s) {
   document.getElementById('sched_pre_script').value  = s.pre_script  || '';
   document.getElementById('sched_post_script').value = s.post_script || '';
   _schedWizHasSM = false;
-  if (document.getElementById('sched_sm_update')) document.getElementById('sched_sm_update').checked = !!s.snapmirror_update;
+  if (document.getElementById('sched_sm_update')) {
+    document.getElementById('sched_sm_update').checked = !!s.snapmirror_update;
+    schedSmUpdateChanged();
+  }
+  if (document.getElementById('sched_sm_tamperproof')) {
+    var smTpEnabled = !!s.sm_tamperproof_enabled;
+    document.getElementById('sched_sm_tamperproof').checked = smTpEnabled;
+    document.getElementById('sched_sm_tamperproof_days').value = s.sm_tamperproof_days || 7;
+    document.getElementById('sched_sm_tamperproof_opts').style.display = smTpEnabled ? '' : 'none';
+  }
   if (document.getElementById('sched_sync_vmids')) {
     document.getElementById('sched_sync_vmids').checked = !!s.sync_vmids;
     document.getElementById('sched_vmids_manual').style.display = s.sync_vmids ? 'none' : 'block';
@@ -4970,6 +5052,17 @@ function schedWizUpdateSummary() {
     html += row('SM Label', esc(smLabel));
     var smUpdate = document.getElementById('sched_sm_update').checked;
     html += row('SM Update', smUpdate ? '<span style="color:var(--success)">✓ Yes — transfer after snapshot</span>' : '<span style="opacity:.5">✗ No</span>');
+    var smTpChk = document.getElementById('sched_sm_tamperproof');
+    var smTpOn  = !!(smTpChk && smTpChk.checked);
+    var smTpMax = _schedTamperproofMax();
+    var smTpDays = parseInt((document.getElementById('sched_sm_tamperproof_days') || {value:'0'}).value) || 0;
+    if (smTpOn) {
+      var smTpHtml = '<span style="color:var(--primary);font-weight:600">Enabled</span> — lock duration: <strong>' + esc(String(smTpDays)) + ' days</strong>';
+      if (smTpDays > smTpMax) smTpHtml += ' <span style="color:#f08080;font-size:11px">⚠ exceeds max (' + smTpMax + 'd)</span>';
+      html += row('Dest Tamperproof', smTpHtml);
+    } else {
+      html += row('Dest Tamperproof', '<span style="opacity:.5">Disabled</span>');
+    }
   } else {
     html += row('SnapMirror', '<span style="opacity:.5">No relationship configured</span>');
   }
@@ -5024,7 +5117,7 @@ async function updateSchedule(id) {
   var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
   if (_sbtn) _sbtn.disabled = true;
   try {
-    await apiPost('schedules/update', Object.assign({id,name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload()));
+    await apiPost('schedules/update', Object.assign({id,name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload(), _schedSmTamperproofPayload()));
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
@@ -5050,7 +5143,7 @@ async function addSchedule() {
   var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
   if (_sbtn) _sbtn.disabled = true;
   try {
-    await apiPost('schedules/add', Object.assign({name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload()));
+    await apiPost('schedules/add', Object.assign({name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload(), _schedSmTamperproofPayload()));
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
@@ -9958,9 +10051,31 @@ loadDashboard();
           </div>
           <div class="form-group" style="margin:0">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="sched_sm_update">
+              <input type="checkbox" id="sched_sm_update" onchange="schedSmUpdateChanged()">
               <span>Trigger SnapMirror® transfer immediately after snapshot</span>
             </label>
+          </div>
+          <!-- Tamperproof on destination -->
+          <div id="sched_sm_tamperproof_section" style="padding-top:4px;border-top:1px solid var(--border);opacity:.4;pointer-events:none">
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+              <input type="checkbox" id="sched_sm_tamperproof" style="margin-top:3px;flex-shrink:0" onchange="schedSmTamperproofToggle()">
+              <div>
+                <div style="font-weight:600;font-size:13px">Tamperproof on Destination
+                  <span style="font-size:10px;font-weight:600;background:rgba(139,148,158,.14);color:var(--fg);padding:2px 7px;border-radius:10px;margin-left:6px;vertical-align:middle">ONTAP 9.12.1+</span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">Lock replicated snapshots on the SnapMirror destination with an expiry date. Independent of source tamperproof.</div>
+              </div>
+            </label>
+            <div id="sched_sm_tamperproof_opts" style="display:none;margin-top:12px;margin-left:26px">
+              <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+                <div class="form-group" style="margin:0">
+                  <label style="font-size:12px">Lock duration (days)</label>
+                  <input type="number" id="sched_sm_tamperproof_days" min="1" max="36500" value="7" style="width:90px" oninput="schedSmTamperproofWarn()">
+                </div>
+                <div id="sched_sm_tamperproof_suggest" style="font-size:12px;color:var(--muted);padding-bottom:6px"></div>
+              </div>
+              <div id="sched_sm_tamperproof_warn" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(240,160,64,.1);border:1px solid rgba(240,160,64,.35);border-radius:6px;font-size:12px;color:#f0a040"></div>
+            </div>
           </div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:20px">
