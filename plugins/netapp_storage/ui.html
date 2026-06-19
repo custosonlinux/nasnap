@@ -6973,9 +6973,9 @@ function _jtScrollToJob(id) {
 function _jtOpenPopup(bucket, evt) {
   var popup = document.createElement('div');
   popup.id = 'jtClusterPopup';
-  popup.style.cssText = 'position:fixed;z-index:9200;background:#1e293b;color:#e2e8f0;'
-    + 'border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:6px 0;'
-    + 'font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.5);'
+  popup.style.cssText = 'position:fixed;z-index:9200;background:var(--card);color:var(--text);'
+    + 'border:1px solid var(--border);border-radius:8px;padding:6px 0;'
+    + 'font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);'
     + 'max-height:300px;overflow-y:auto;min-width:230px;left:-9999px;top:-9999px';
 
   var sorted = bucket.jobs.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
@@ -6985,7 +6985,6 @@ function _jtOpenPopup(bucket, evt) {
     var sColor = status==='done' ? '#56d364' : status==='cancelled' ? '#8b949e' : '#f08080';
     var jidEsc = j.id.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 
-    // Context line: VM, node, schedule/user, last log msg
     var ctx = [];
     if (j.vmid) ctx.push('VM ' + j.vmid);
     if (j.node) ctx.push(j.node);
@@ -6995,22 +6994,22 @@ function _jtOpenPopup(bucket, evt) {
     if (lastLog) ctx.push(lastLog);
 
     return '<div onclick="_jtClosePopup();_jtNavigateToJob(\''+jidEsc+'\')"'
-      + ' style="padding:5px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)"'
-      + ' onmouseenter="this.style.background=\'rgba(255,255,255,.06)\'"'
+      + ' style="padding:5px 14px;cursor:pointer;border-bottom:1px solid var(--border)"'
+      + ' onmouseenter="this.style.background=\'var(--bg)\'"'
       + ' onmouseleave="this.style.background=\'\'">'
       + '<div style="display:flex;align-items:center;gap:7px">'
       + '<span style="width:7px;height:7px;border-radius:50%;background:'+sColor+';flex-shrink:0"></span>'
       + '<span style="font-weight:600;flex:1">'+esc(label)+'</span>'
-      + '<span style="color:#475569;font-size:10px;white-space:nowrap">'+fmtDateRel(j.created_at)+'</span>'
+      + '<span style="color:var(--muted);font-size:10px;white-space:nowrap">'+fmtDateRel(j.created_at)+'</span>'
       + '</div>'
-      + (ctx.length ? '<div style="font-size:10px;color:#64748b;margin-top:2px;padding-left:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ctx.join(' · '))+'</div>' : '')
+      + (ctx.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;padding-left:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ctx.join(' · '))+'</div>' : '')
       + '</div>';
   }).join('');
 
-  popup.innerHTML = '<div style="padding:5px 14px 5px;font-size:10px;color:#475569;'
-    + 'border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">'
+  popup.innerHTML = '<div style="padding:5px 14px 5px;font-size:10px;color:var(--muted);'
+    + 'border-bottom:1px solid var(--border);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">'
     + '<span>'+bucket.jobs.length+' jobs in this window</span>'
-    + '<span onclick="_jtClosePopup()" style="cursor:pointer;font-size:13px;color:#64748b;padding:0 2px">✕</span></div>'
+    + '<span onclick="_jtClosePopup()" style="cursor:pointer;font-size:13px;color:var(--muted);padding:0 2px">✕</span></div>'
     + rows;
 
   document.body.appendChild(popup);
