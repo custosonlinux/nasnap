@@ -3307,13 +3307,16 @@ function renderRcVmList() {
   done.forEach(function(s) {
     var vmids   = s.vmids   || [];
     var vmNames = s.vm_names || {};
+    var dsk = s.pve_storage_id || s.volume_name || s.mapping_id || '';
     vmids.forEach(function(vid) {
-      var key = String(vid);
+      var nk = String(vid);
+      // Key by vmid + datastore so a VM that moved datastores gets one row per datastore
+      var key = nk + '|' + dsk;
       if (!vmMap[key]) {
         vmMap[key] = {
-          vmid: vid, name: vmNames[key] || '',
+          vmid: vid, name: vmNames[nk] || '',
           mappingId: s.mapping_id, relId: '', isDR: false,
-          dsName: s.pve_storage_id || s.volume_name || s.mapping_id,
+          dsName: dsk,
           protocol: _snapProtoLabel(s), isSan: _snapIsSan(s),
           sanOpt: !!s.san_optimized, pveClusterId: s.pve_cluster_id || '',
           snapCount: 0, lastSnap: null, lastSnapId: null, hasImported: false,
@@ -3324,7 +3327,7 @@ function renderRcVmList() {
       if (!vmMap[key].lastSnap || (s.created_at||'') > vmMap[key].lastSnap) {
         vmMap[key].lastSnap   = s.created_at;
         vmMap[key].lastSnapId = s.id;
-        if (vmNames[key]) vmMap[key].name = vmNames[key];
+        if (vmNames[nk]) vmMap[key].name = vmNames[nk];
       }
     });
   });
@@ -3390,9 +3393,9 @@ function _renderRcRows() {
       '<td style="color:var(--muted)">'+cnt+'</td>'+
       '<td style="color:var(--muted)">'+fmtDateRel(v.lastSnap)+'</td>'+
       '<td><div class="row-actions">'+
-        '<button class="btn btn-secondary btn-sm" onclick="openRestoreWizard('+v.vmid+')">'+
+        '<button class="btn btn-secondary btn-sm" onclick="openRestoreWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')">'+
           '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Restore</button>'+
-        '<button class="btn btn-ghost btn-sm" onclick="openCloneWizard('+v.vmid+')">'+
+        '<button class="btn btn-ghost btn-sm" onclick="openCloneWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')">'+
           '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Clone</button>'+
       '</div></td>'+
     '</tr>';
@@ -3470,8 +3473,9 @@ async function rcDrRelChanged() {
 
 var _rwState = { vmid:null, name:'', mappingId:'', relId:'', isDR:false, isSan:false, sanOpt:false, pveClusterId:'', snap:null, snapName:'', step:1 };
 
-function openRestoreWizard(vmid, preSnapId) {
-  var vm = _rcVms.find(function(v){ return v.vmid===vmid; });
+function openRestoreWizard(vmid, preSnapId, dsName) {
+  var vm = _rcVms.find(function(v){ return v.vmid===vmid && (!dsName || v.dsName===dsName); });
+  if (!vm) vm = _rcVms.find(function(v){ return v.vmid===vmid; }); // fallback: any ds
   if (!vm) { toast('VM not found in snapshot history','error'); return; }
   _rwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, dsName:vm.dsName||'',
                relId:vm.relId||'', isDR:!!vm.isDR,
@@ -3692,10 +3696,11 @@ async function doRestore() {
 
 var _cwState = { vmid:null, name:'', mappingId:'', relId:'', isDR:false, isSan:false, pveClusterId:'', snap:null, snapName:'', step:1 };
 
-function openCloneWizard(vmid, preSnapId) {
-  var vm = _rcVms.find(function(v){ return v.vmid===vmid; });
+function openCloneWizard(vmid, preSnapId, dsName) {
+  var vm = _rcVms.find(function(v){ return v.vmid===vmid && (!dsName || v.dsName===dsName); });
+  if (!vm) vm = _rcVms.find(function(v){ return v.vmid===vmid; }); // fallback: any ds
   if (!vm) { toast('VM not found in snapshot history','error'); return; }
-  _cwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, relId:vm.relId||'', isDR:!!vm.isDR,
+  _cwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, dsName:vm.dsName||'', relId:vm.relId||'', isDR:!!vm.isDR,
                isSan:vm.isSan, pveClusterId:vm.pveClusterId, snap:null, snapName:'', step:1 };
   document.getElementById('cw_vm_hdr').textContent = (vm.name||'VM')+' (ID: '+vmid+(vm.isDR?' · DR Secondary':'')+')';
   cwPopulateSnaps(preSnapId);
@@ -3727,8 +3732,13 @@ async function cwPopulateSnaps(preSnapId) {
     return;
   }
   var done = _allSnapshots.filter(function(s){
-    return s.status==='done' && s.mapping_id===_cwState.mappingId &&
-      s.vmids && s.vmids.indexOf(_cwState.vmid)>=0;
+    if (s.status !== 'done') return false;
+    var sameDs = _cwState.dsName
+      ? s.pve_storage_id === _cwState.dsName
+      : s.mapping_id === _cwState.mappingId;
+    if (!sameDs) return false;
+    if (!s.vmids || !s.vmids.length) return false;
+    return s.vmids.indexOf(_cwState.vmid) >= 0 || s.vmids.indexOf(String(_cwState.vmid)) >= 0;
   });
   var plugin = done.filter(function(s){ return s.source!=='ontap_native'; });
   var native  = done.filter(function(s){ return s.source==='ontap_native'; });
@@ -5843,6 +5853,7 @@ function downloadJobLog() {
 function prepareRestore(snapId) {
   var snap = _allSnapshots.find(function(s){ return String(s.id)===String(snapId); });
   var vmid = snap && snap.vmids && snap.vmids.length ? snap.vmids[0] : null;
+  var dsName = snap ? (snap.pve_storage_id || '') : '';
   document.querySelectorAll('.subtab').forEach(function(x){ x.classList.remove('active'); });
   document.querySelectorAll('.tab-panel').forEach(function(x){ x.style.display='none'; });
   document.querySelector('[data-tab="restore"]').classList.add('active');
@@ -5850,15 +5861,16 @@ function prepareRestore(snapId) {
   if (!vmid) { toast('Snapshot has no VM entries','error'); return; }
   if (!_rcVms.length) {
     loadRcVmList();
-    setTimeout(function(){ openRestoreWizard(vmid, snapId); }, 600);
+    setTimeout(function(){ openRestoreWizard(vmid, snapId, dsName); }, 600);
   } else {
-    openRestoreWizard(vmid, snapId);
+    openRestoreWizard(vmid, snapId, dsName);
   }
 }
 
 function prepareClone(snapId) {
   var snap = _allSnapshots.find(function(s){ return String(s.id)===String(snapId); });
   var vmid = snap && snap.vmids && snap.vmids.length ? snap.vmids[0] : null;
+  var dsName = snap ? (snap.pve_storage_id || '') : '';
   document.querySelectorAll('.subtab').forEach(function(x){ x.classList.remove('active'); });
   document.querySelectorAll('.tab-panel').forEach(function(x){ x.style.display='none'; });
   document.querySelector('[data-tab="restore"]').classList.add('active');
@@ -5866,9 +5878,9 @@ function prepareClone(snapId) {
   if (!vmid) { toast('Snapshot has no VM entries','error'); return; }
   if (!_rcVms.length) {
     loadRcVmList();
-    setTimeout(function(){ openCloneWizard(vmid, snapId); }, 600);
+    setTimeout(function(){ openCloneWizard(vmid, snapId, dsName); }, 600);
   } else {
-    openCloneWizard(vmid, snapId);
+    openCloneWizard(vmid, snapId, dsName);
   }
 }
 
