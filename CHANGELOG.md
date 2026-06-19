@@ -14,6 +14,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Storage tab — ⟳ Index button for SAN** — the index scan button is now shown for iSCSI and NVMe-oF datastores (when snapmanifest is initialized), in addition to NFS.
 - **Startup auto-scan for SAN** — the auto-scan setting now includes SAN datastores with an initialized snapmanifest LV.
 
+### Fixed
+
+- **Manual snapshot on empty datastores** — creating a snapshot of a datastore with no VMs no longer fails with "Required field missing: vmids". An empty `vmids` list is now accepted; the engine takes the ONTAP volume snapshot without per-VM consistency steps, identical to how scheduled snapshots with no VM selection already work. The snapshot dialog shows "No VMs on this datastore — volume snapshot only" instead of blocking.
+- **⟳ Index button missing for provisioned SAN datastores** — `snapinfo_initialized` and `mapping_id` are now backfilled from `netapp_volume_mapping` for provisioned iSCSI/NVMe entries in the unified storage response. Previously these fields were missing because `netapp_provisioned_datastores` has no `snapinfo_initialized` column, so the Index button was never shown even when snapmanifest was initialized.
+
 ---
 
 ## [1.2.0] — 2026-06-19
