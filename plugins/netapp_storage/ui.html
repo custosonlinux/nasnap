@@ -657,7 +657,7 @@ de:{
   sm_no_dest_ep:'Kein Sekundär-Endpoint — erst scannen',
   ct_dr_clone:'DR-Clone von Sekundärsystem',btn_start_dr_clone:'DR-Clone starten',
   sm_source_vol:'Quell-Volume',sm_dest_vol:'Ziel-Volume',sm_state:'Zustand',sm_lag:'Verzug',
-  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   db_vm_overview:'VM-Übersicht',db_total:'Gesamt',db_running:'Laufend',db_stopped:'Gestoppt',
   db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Schutzpläne aktiv',
   db_storage:'Storage-Übersicht',db_recent_jobs:'Letzte Jobs',db_no_ds:'Keine Datastores konfiguriert.',
@@ -777,7 +777,7 @@ en:{
   sm_no_dest_ep:'No secondary endpoint configured — scan first',
   ct_dr_clone:'DR Clone from Secondary',btn_start_dr_clone:'Start DR Clone',
   sm_source_vol:'Source Volume',sm_dest_vol:'Destination Volume',sm_state:'State',sm_lag:'Lag',
-  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   db_vm_overview:'VM Overview',db_total:'Total',db_running:'Running',db_stopped:'Stopped',
   db_ds_overview:'Datastores',db_protected:'Protected',db_schedules_active:'Protection Plans',
   db_storage:'Storage Overview',db_recent_jobs:'Recent Jobs',db_no_ds:'No datastores configured.',
@@ -897,7 +897,7 @@ fr:{
   sm_no_dest_ep:'Aucun endpoint secondaire configuré — scanner d\'abord',
   ct_dr_clone:'DR Clone depuis le secondaire',btn_start_dr_clone:'Démarrer DR Clone',
   sm_source_vol:'Volume Source',sm_dest_vol:'Volume Destination',sm_state:'État',sm_lag:'Décalage',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notifications e-mail (SMTP)',
   lbl_smtp_host:'Serveur SMTP',lbl_smtp_port:'Port',lbl_smtp_user:"Nom d'utilisateur",
   lbl_smtp_pass:'Mot de passe',lbl_smtp_from:'Expéditeur (De)',lbl_smtp_encryption:'Chiffrement',
@@ -1012,7 +1012,7 @@ es:{
   sm_no_dest_ep:'Sin endpoint secundario configurado — escanear primero',
   ct_dr_clone:'DR Clone desde Secundario',btn_start_dr_clone:'Iniciar DR Clone',
   sm_source_vol:'Volumen Origen',sm_dest_vol:'Volumen Destino',sm_state:'Estado',sm_lag:'Retraso',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notificaciones por correo (SMTP)',
   lbl_smtp_host:'Servidor SMTP',lbl_smtp_port:'Puerto',lbl_smtp_user:'Usuario',
   lbl_smtp_pass:'Contraseña',lbl_smtp_from:'Remitente (De)',lbl_smtp_encryption:'Cifrado',
@@ -1127,7 +1127,7 @@ pt:{
   sm_no_dest_ep:'Sem endpoint secundário configurado — escanear primeiro',
   ct_dr_clone:'DR Clone do Secundário',btn_start_dr_clone:'Iniciar DR Clone',
   sm_source_vol:'Volume Origem',sm_dest_vol:'Volume Destino',sm_state:'Estado',sm_lag:'Atraso',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notificações por e-mail (SMTP)',
   lbl_smtp_host:'Servidor SMTP',lbl_smtp_port:'Porta',lbl_smtp_user:'Usuário',
   lbl_smtp_pass:'Senha',lbl_smtp_from:'Remetente (De)',lbl_smtp_encryption:'Criptografia',
@@ -1357,7 +1357,7 @@ it:{
   sm_no_dest_ep:'Nessun endpoint secondario configurato — scansionare prima',
   ct_dr_clone:'DR Clone dal Secondario',btn_start_dr_clone:'Avvia DR Clone',
   sm_source_vol:'Volume Sorgente',sm_dest_vol:'Volume Destinazione',sm_state:'Stato',sm_lag:'Ritardo',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notifiche e-mail (SMTP)',
   lbl_smtp_host:'Server SMTP',lbl_smtp_port:'Porta',lbl_smtp_user:'Nome utente',
   lbl_smtp_pass:'Password',lbl_smtp_from:'Mittente (Da)',lbl_smtp_encryption:'Cifratura',
@@ -1474,7 +1474,7 @@ function applyI18n() {
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn btn-ghost btn-sm" onclick="loadDashboard()" title="Refresh" id="db_refresh_btn">↻</button>
               <span id="db_ts" style="font-size:10px;color:var(--muted)"></span>
-              <a href="#" onclick="document.querySelector('[data-tab=\'storage\']').click();return false" style="font-size:11px;color:var(--primary)">→ Storage</a>
+              <a href="#" onclick="document.querySelector('[data-tab=\'storage\']').click();return false" style="font-size:11px;color:var(--primary)">→ Datastores</a>
             </div>
           </div>
           <div class="table-scroll">

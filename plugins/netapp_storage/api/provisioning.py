@@ -628,9 +628,16 @@ def _storage_unified():
     items = []
     prov_storage_ids: set = set()
 
+    # Pre-fetch valid host IDs to filter out stale entries in pve_host_ids
+    _valid_host_ids: set = {
+        row["id"] for row in (db.query("SELECT id FROM netapp_pve_hosts") or [])
+    }
+
     for r in (prov_rows or []):
         d = _ds_to_dict(r)
         d["source"] = "provisioned"
+        # Filter out deleted PVE hosts so the host count stays accurate
+        d["pve_host_ids"] = [h for h in (d.get("pve_host_ids") or []) if h in _valid_host_ids]
         # Backfill fields from volume_mapping (provisioned table doesn't have them)
         if d.get("protocol") in ("iscsi", "nvme"):
             vm_row = db.query_one(
@@ -701,11 +708,25 @@ def _storage_unified():
             continue  # deduplicate multi-host rows for the same volume
         seen_discovered.add(storage_id)
 
-        # Collect all hosts that have this storage discovered
-        host_rows = db.query(
-            "SELECT DISTINCT pve_cluster_id FROM netapp_volume_mapping WHERE pve_storage_id=?",
-            (storage_id,)
-        )
+        # Collect all currently-configured hosts that have this volume discovered.
+        # Use volume_uuid as the join key (more reliable than pve_storage_id, which can
+        # differ per host) and INNER JOIN with netapp_pve_hosts to exclude stale entries
+        # left behind from deleted hosts.
+        volume_uuid = m.get("volume_uuid", "")
+        if volume_uuid:
+            host_rows = db.query(
+                "SELECT DISTINCT m2.pve_cluster_id FROM netapp_volume_mapping m2 "
+                "INNER JOIN netapp_pve_hosts h ON h.id = m2.pve_cluster_id "
+                "WHERE m2.volume_uuid=?",
+                (volume_uuid,),
+            )
+        else:
+            host_rows = db.query(
+                "SELECT DISTINCT m2.pve_cluster_id FROM netapp_volume_mapping m2 "
+                "INNER JOIN netapp_pve_hosts h ON h.id = m2.pve_cluster_id "
+                "WHERE m2.pve_storage_id=?",
+                (storage_id,),
+            )
         pve_host_ids = [dict(r)["pve_cluster_id"] for r in (host_rows or [])]
 
         item = {
