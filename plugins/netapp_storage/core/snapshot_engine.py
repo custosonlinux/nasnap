@@ -540,6 +540,21 @@ def _run_snapshot(job_id, params, username):
             except Exception as ne:
                 log.warning(f"[netapp_storage] Notification failed for job {job_id}: {ne}")
 
+        # Single-DS async runs: write the final status back to the schedule now
+        # that the job has actually completed. Multi-DS runs use suppress_notify and
+        # set update_schedule_status=False; their consolidated status is written by
+        # _execute_schedule after all datastores finish.
+        if params.get("update_schedule_status") and schedule_id:
+            try:
+                _jr = db.query_one("SELECT status FROM netapp_jobs WHERE id=?", (job_id,))
+                _fs = (_jr["status"] if _jr else None) or "failed"
+                db.execute(
+                    "UPDATE netapp_snapshot_schedules SET last_run_status=? WHERE id=?",
+                    (_fs, schedule_id),
+                )
+            except Exception:
+                pass
+
 
 # ── Schedule retention ──────────────────────────────────────────────────────
 

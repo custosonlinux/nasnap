@@ -238,6 +238,7 @@ def _execute_single_ds(schedule, mapping_id, sched_name_safe, suppress_notify=Fa
             "notify_enabled":        False if suppress_notify else bool(schedule.get("notify_enabled", 0)),
             "notify_on":             schedule.get("notify_on", "all") or "all",
             "notify_recipients":     schedule.get("notify_recipients", "") or "",
+            "update_schedule_status": not suppress_notify,
             "tamperproof_enabled":   bool(schedule.get("tamperproof_enabled", 0)),
             "tamperproof_days":      int(schedule.get("tamperproof_days") or 0),
             "sm_tamperproof_enabled": bool(schedule.get("sm_tamperproof_enabled", 0)),
@@ -319,13 +320,23 @@ def _execute_schedule(schedule):
         r = _execute_single_ds(schedule, mid, sched_name_safe, suppress_notify=multi_ds)
         results.append(r)
 
-    statuses = [r["status"] for r in results]
-    overall = "done" if all(s == "done" for s in statuses) else "failed"
     try:
-        db.execute(
-            "UPDATE netapp_snapshot_schedules SET last_run_at=?, last_run_status=? WHERE id=?",
-            (datetime.now(timezone.utc).isoformat(), overall, schedule["id"]),
-        )
+        if multi_ds:
+            # All DS jobs ran synchronously — we have their real final statuses.
+            statuses = [r["status"] for r in results]
+            overall = "done" if all(s == "done" for s in statuses) else "failed"
+            db.execute(
+                "UPDATE netapp_snapshot_schedules SET last_run_at=?, last_run_status=? WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(), overall, schedule["id"]),
+            )
+        else:
+            # Single-DS: job runs async; status is still "running" here.
+            # Only update last_run_at (to suppress the next scheduler tick).
+            # The snapshot engine writes last_run_status when the job actually finishes.
+            db.execute(
+                "UPDATE netapp_snapshot_schedules SET last_run_at=? WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(), schedule["id"]),
+            )
     except Exception as exc:
         log.error(f"[netapp_storage] Schedule '{schedule['name']}' last_run update failed: {exc}")
 
