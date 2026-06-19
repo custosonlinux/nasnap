@@ -3505,9 +3505,10 @@ function _icoBtn(variant, tip, onclick, key) {
 var _actLogMin     = false;
 var _actLogTimer   = null;
 var _actLogBusy    = false;
-var _actLogWasActive = false;
-var _actLogFinished  = [];
-var _actLogHideTimer = null;
+var _actLogWasActive     = false;
+var _actLogFinished      = [];
+var _actLogHideTimer     = null;
+var _actLogPrevActiveIds = new Set();
 var _actJobLabels  = {
   'snapshot':              'Snapshot',
   'restore_sfsr':          'Restore (SFSR)',
@@ -3595,6 +3596,7 @@ async function actLogPoll() {
       if (_actLogHideTimer) { clearTimeout(_actLogHideTimer); _actLogHideTimer = null; _actLogFinished = []; }
       delay = 3000; // fast poll while jobs are running
       _actLogWasActive = true;
+      _actLogPrevActiveIds = new Set(active.map(function(j){ return j.id; }));
       _actLogRender(active);
       // Keep Jobs tab in sync if it's currently visible
       if (document.querySelector('[data-tab=jobs].active')) {
@@ -3603,8 +3605,14 @@ async function actLogPoll() {
         renderJobsPage();
       }
     } else if (_actLogWasActive) {
-      // Jobs just finished: show completed state for 10 s, then hide
-      _actLogFinished = deduped.filter(function(j){ return j.status === 'done' || j.status === 'failed'; }).slice(0, 5);
+      // Jobs just finished: show completed state for 10 s, then hide.
+      // Only show jobs that were actually running in the last active poll —
+      // not old done/failed jobs that happen to be in the recent list.
+      var _prevIds = _actLogPrevActiveIds;
+      _actLogPrevActiveIds = new Set();
+      _actLogFinished = deduped.filter(function(j){
+        return (j.status === 'done' || j.status === 'failed') && _prevIds.has(j.id);
+      }).slice(0, 5);
       _actLogWasActive = false;
       _actLogRender([], _actLogFinished);
       if (_actLogHideTimer) clearTimeout(_actLogHideTimer);
