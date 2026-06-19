@@ -11,14 +11,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Protection Plans (multi-datastore schedules)** — Veeam-style 1:N protection: one plan covers any number of datastores. Assigning multiple datastores to a plan runs one snapshot job per datastore sequentially with independent failure isolation — if one fails, the others continue. The Schedules tab is renamed "Protection" and the wizard title becomes "Protection Plan".
-- **Consolidated email notifications** — when a protection plan covers multiple datastores, NaSnap sends one consolidated email per plan run instead of one email per datastore. The email includes a summary table (Datastore | Status | Snapshot) and individual per-datastore job log sections in a dark terminal block.
+- **Consolidated email notifications** — when a protection plan covers multiple datastores, NaSnap sends one consolidated email per plan run instead of one email per datastore. The email includes a summary table (Datastore | Status | Snapshot | VMs | SnapMirror) and individual per-datastore job log sections in a dark terminal block.
 - **Snapshot job progress tracking** — the snapshot engine now updates `progress_pct` at eight milestones (VM fetch → manifest → pre-script → consistency applied → ONTAP snapshot → ONTAP poll → consistency released → done: 5% / 15% / 25% / 45% / 60% / 75% / 90% / 100%). The Activity Log progress bar now reflects real job progress.
 - **Activity Log linger** — when all jobs finish, the Activity Log panel stays visible for 10 seconds showing ✓ Done / ✗ Failed state per job instead of disappearing immediately. A new job during the linger window cancels the timer and switches back to active mode.
 
 ### Fixed
 
 - **VMs not appearing in Protection view after first run** — for single-datastore plans with "Auto-sync VMs" enabled, the synced VMID list is now persisted back to the plan record after each run. This DB write was accidentally dropped during the multi-DS refactor, causing the VM column to always show "will be populated on first run".
-- **Multi-DS VM column** — plans with two or more datastores now show "Auto — per datastore" in the VM column instead of an empty or misleading badge list.
+- **Multi-DS VM column** — plans with two or more datastores now show an "Auto" badge plus the VM list (populated after the first run) instead of an empty or misleading state.
+- **SnapMirror wizard step disabled for mixed plans** — if a protection plan contained one datastore with SnapMirror and one without, the SnapMirror step was incorrectly disabled. NaSnap now checks all selected datastores in parallel and enables the step as soon as any one of them has a SnapMirror relationship.
+- **Datastore host count incorrect** — the Datastores tab showed inflated host counts (e.g. 4 instead of 2) due to stale `netapp_volume_mapping` rows left over from deleted PVE hosts. Host counts are now calculated with an `INNER JOIN` against `netapp_pve_hosts`, and use `volume_uuid` as the join key so a volume visible under different storage names on different hosts is still counted correctly.
+- **Datastores tab renamed** — the "Storage" tab is now called "Datastores" across all seven supported locales.
+- **Activity Log shows stale failed job permanently** — a failed job from a previous run would resurface in the Activity Log every time a new job completed, eventually blocking the view of current activity. The completed-state view now only shows jobs that were active in the most recent polling cycle.
+- **Protection plan Last Run shows "failed" despite successful jobs** — for single-datastore plans the snapshot job runs asynchronously, so reading the job status immediately after launch returned "running", which was interpreted as a failure. The schedule status is now written by the snapshot engine once the job actually completes.
 
 ---
 
