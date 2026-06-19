@@ -6755,6 +6755,13 @@ function _dbRenderJobs(jobsData, stale) {
 var _jtJobMap    = {};
 var _jtBucketMap = {};
 
+function _jtBucketColor(bucket) {
+  if (!bucket.failedCount) return '#56d364'; // all good → green
+  if (bucket.scheduledFailed) return '#f08080'; // any scheduled failure → red
+  var failRate = bucket.failedCount / bucket.jobs.length;
+  return failRate >= 0.5 ? '#f08080' : '#f0a040'; // ≥50% failed → red, else orange
+}
+
 function _dbRenderJobTimeline(jobsData) {
   var container = document.getElementById('db_job_timeline');
   if (!container) return;
@@ -6782,10 +6789,14 @@ function _dbRenderJobTimeline(jobsData) {
     if (ts < tStart || ts > now) return;
     _jtJobMap[j.id] = j;
     var bk = Math.floor(ts / bucketMs);
-    if (!_jtBucketMap[bk]) _jtBucketMap[bk] = { jobs:[], hasFailed:false, hasSuccess:false };
+    if (!_jtBucketMap[bk]) _jtBucketMap[bk] = { jobs:[], failedCount:0, scheduledFailed:false, hasSuccess:false };
     _jtBucketMap[bk].jobs.push(j);
-    if (status === 'failed' || status === 'error') _jtBucketMap[bk].hasFailed = true;
-    else if (status === 'done')                    _jtBucketMap[bk].hasSuccess = true;
+    if (status === 'failed' || status === 'error') {
+      _jtBucketMap[bk].failedCount++;
+      if ((j.created_by || '').indexOf('schedule:') === 0) _jtBucketMap[bk].scheduledFailed = true;
+    } else if (status === 'done') {
+      _jtBucketMap[bk].hasSuccess = true;
+    }
   });
 
   var svgParts = [];
@@ -6821,8 +6832,9 @@ function _dbRenderJobTimeline(jobsData) {
     if (x < padL - 10 || x > padL + plotW + 10) return;
     hasDots = true;
 
-    var fill   = bucket.hasFailed ? 'rgba(240,128,128,.15)' : 'rgba(86,211,100,.15)';
-    var stroke = bucket.hasFailed ? '#f08080' : '#56d364';
+    var stroke = _jtBucketColor(bucket);
+    var fillAlpha = stroke === '#56d364' ? 'rgba(86,211,100,.15)' : stroke === '#f08080' ? 'rgba(240,128,128,.15)' : 'rgba(240,160,64,.15)';
+    var fill = fillAlpha;
     var r      = count === 1 ? 5.5 : (count < 10 ? 8 : 10);
     var cx = x.toFixed(1);
     var cy = (axisY - r - 6).toFixed(1);
@@ -6898,10 +6910,16 @@ function _jtHoverBucket(bk, evt) {
     var centerTs = parseInt(bk) * 6*3600e3;
     var window6h = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'})
                  + '–' + new Date(centerTs + 6*3600e3).toLocaleTimeString([],{hour:'2-digit'});
+    var bubbleColor = _jtBucketColor(bucket);
+    var failColor   = bubbleColor === '#f0a040' ? '#f0a040' : '#f08080';
+    var nCancelled  = bucket.jobs.filter(function(j){ return j.status==='cancelled'; }).length;
     var summary  = '<div style="margin-top:4px;font-size:11px">';
-    if (nDone)   summary += '<span style="color:#56d364">● '+nDone+' done</span>  ';
-    if (nFailed) summary += '<span style="color:#f08080">● '+nFailed+' failed</span>';
+    if (nDone)      summary += '<span style="color:#56d364">● '+nDone+' done</span>  ';
+    if (nFailed)    summary += '<span style="color:'+failColor+'">● '+nFailed+' failed</span>  ';
+    if (nCancelled) summary += '<span style="color:#8b949e">● '+nCancelled+' cancelled</span>';
     summary += '</div>';
+    if (nFailed && bucket.scheduledFailed) summary += '<div style="font-size:10px;color:#f08080;margin-top:2px">⚠ Scheduled job(s) failed</div>';
+    else if (nFailed && bubbleColor==='#f0a040') summary += '<div style="font-size:10px;color:#f0a040;margin-top:2px">'+Math.round(bucket.failedCount/bucket.jobs.length*100)+'% failure rate</div>';
     // Most recent job log snippet
     var newest = bucket.jobs.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); })[0];
     tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+count+' Jobs</div>'
