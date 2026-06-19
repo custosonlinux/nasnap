@@ -248,6 +248,13 @@
   .btn-icon[data-tip]:hover::before { opacity: 1; }
   .row-actions { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 
+  /* ── Job Timeline ────────────────────────────────────────────── */
+  @keyframes jobRowFlash {
+    0%,100% { background: transparent; }
+    25%,75%  { background: rgba(88,166,255,.18); }
+  }
+  tr.job-row-flash { animation: jobRowFlash .9s ease 2; }
+
   /* ── Activity Log Panel ──────────────────────────────────────── */
   .act-log {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 500;
@@ -1438,6 +1445,18 @@ function applyI18n() {
 
       <!-- Alert banner -->
       <div id="db_alert_banner" style="display:none"></div>
+
+      <!-- Job Timeline -->
+      <div class="card" style="padding:0;margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px">
+          <span style="font-weight:600;font-size:13px;color:var(--text)">Job Activity</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:10px;color:var(--muted)">last 7 days — click a dot to go to job</span>
+            <a href="#" onclick="document.querySelector('[data-tab=\'jobs\']').click();return false" style="font-size:11px;color:var(--primary)">→ All Jobs</a>
+          </div>
+        </div>
+        <div id="db_job_timeline" style="padding:0 8px 10px;min-height:56px;box-sizing:border-box"></div>
+      </div>
 
       <!-- Two-column content -->
       <div class="db-two-col">
@@ -5911,7 +5930,7 @@ function renderJobsPage() {
           ? '<span style="color:var(--muted);font-size:11px">'+t('badge_cancelling')+'…</span>'
           : _icoBtn('warning', t('act_cancel_job'), 'cancelJob(\''+j.id+'\')', 'stop'))
       : _icoBtn('danger', t('act_delete'), 'deleteJob(\''+j.id+'\')', 'trash');
-    return '<tr>' +
+    return '<tr data-job-id="'+esc(j.id)+'">' +
       '<td><span class="corp-badge corp-badge-ha">'+esc(j.job_type||'')+'</span></td>' +
       '<td><code style="font-size:12px">'+esc(String(j.vmid||'–'))+'</code></td>' +
       '<td><code style="font-size:12px">'+esc(j.node||'–')+'</code></td>' +
@@ -6732,6 +6751,136 @@ function _dbRenderJobs(jobsData, stale) {
   }
 }
 
+// ── Job Timeline (Dashboard) ─────────────────────────────────────────────────
+var _jtJobMap = {};
+
+function _dbRenderJobTimeline(jobsData) {
+  var container = document.getElementById('db_job_timeline');
+  if (!container) return;
+  var W = container.getBoundingClientRect().width;
+  if (W < 80) { requestAnimationFrame(function(){ _dbRenderJobTimeline(jobsData); }); return; }
+
+  var jobs = Array.isArray(jobsData) ? jobsData : [];
+  var now    = Date.now();
+  var tStart = now - 7 * 864e5;
+  var tEnd   = now + 864e5 * 0.15;
+
+  var padL = 10, padR = 10, padT = 8, axisY = 40, H = 56;
+  var plotW = W - padL - padR;
+  function toX(ts) { return padL + (ts - tStart) / (tEnd - tStart) * plotW; }
+
+  var svgParts = [];
+
+  // Axis line
+  svgParts.push('<line x1="'+padL+'" y1="'+axisY+'" x2="'+(padL+plotW)+'" y2="'+axisY+'" stroke="var(--border)" stroke-width="1"/>');
+
+  // Day tick marks
+  var dayMs = 864e5;
+  var firstTick = Math.ceil(tStart / dayMs) * dayMs;
+  for (var tk = firstTick; tk <= tEnd; tk += dayMs) {
+    var tx = toX(tk).toFixed(1);
+    var td = new Date(tk);
+    var lbl = td.toLocaleDateString([], {month:'short', day:'numeric'});
+    svgParts.push('<line x1="'+tx+'" y1="'+axisY+'" x2="'+tx+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
+    svgParts.push('<text x="'+tx+'" y="'+(axisY+13)+'" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="sans-serif">'+esc(lbl)+'</text>');
+  }
+
+  // "Now" marker
+  var nowX = toX(now).toFixed(1);
+  svgParts.push('<line x1="'+nowX+'" y1="'+padT+'" x2="'+nowX+'" y2="'+(axisY+4)+'" stroke="var(--accent,#e07800)" stroke-width="1.5" stroke-dasharray="3,3"/>');
+  svgParts.push('<text x="'+nowX+'" y="'+(axisY+13)+'" text-anchor="middle" font-size="9" fill="var(--accent,#e07800)" font-weight="600" font-family="sans-serif">now</text>');
+
+  // Job dots
+  _jtJobMap = {};
+  var dotsHtml = [];
+  // Track x-positions to offset overlapping dots vertically
+  var xBuckets = {};
+  jobs.forEach(function(j) {
+    if (!j.created_at) return;
+    var status = j.status;
+    if (status !== 'done' && status !== 'failed' && status !== 'error' && status !== 'cancelled') return;
+    var ts = Date.parse(j.created_at);
+    if (ts < tStart || ts > now) return;
+    var x = toX(ts);
+    if (x < padL - 4 || x > padL + plotW + 4) return;
+
+    _jtJobMap[j.id] = j;
+    var fill  = (status === 'done') ? '#56d364' : (status === 'cancelled') ? 'var(--muted)' : '#f08080';
+    var stroke = (status === 'done') ? 'rgba(86,211,100,.3)' : (status === 'cancelled') ? 'rgba(139,148,158,.3)' : 'rgba(240,128,128,.3)';
+    var cx = x.toFixed(1);
+    // Stack vertically if x is crowded (bucket by 10px)
+    var bk = Math.round(x / 10);
+    if (!xBuckets[bk]) xBuckets[bk] = 0;
+    var cy = (axisY - 10 - xBuckets[bk] * 11).toFixed(1);
+    xBuckets[bk]++;
+
+    var jidEsc = j.id.replace(/'/g, "\\'");
+    var label = _actJobLabels[j.job_type] || j.job_type || 'Job';
+    var tip = esc(label) + (j.vmid ? ' · VM '+j.vmid : '') + '&#10;' + esc(fmtDateRel(j.created_at));
+    dotsHtml.push(
+      '<circle cx="'+cx+'" cy="'+cy+'" r="5"'
+      +' fill="'+fill+'" stroke="'+stroke+'" stroke-width="3"'
+      +' onmouseenter="_jtHover(\''+jidEsc+'\',event)"'
+      +' onmouseleave="_jtUnhover()"'
+      +' onclick="_jtClick(\''+jidEsc+'\')"'
+      +' style="cursor:pointer"/>'
+    );
+  });
+
+  if (!Object.keys(_jtJobMap).length) {
+    svgParts.push('<text x="'+(padL+plotW/2).toFixed(1)+'" y="'+(axisY-14)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="sans-serif">No completed jobs in the last 7 days</text>');
+  }
+
+  svgParts.push(dotsHtml.join(''));
+  container.innerHTML = '<svg width="'+W+'" height="'+H+'" style="display:block;overflow:visible">'
+    + svgParts.join('') + '</svg>';
+}
+
+function _jtHover(id, evt) {
+  var j = _jtJobMap[id];
+  if (!j) return;
+  var tt = document.getElementById('tlTooltip');
+  if (!tt) return;
+  var label  = _actJobLabels[j.job_type] || j.job_type || 'Job';
+  var status = j.status;
+  var sColor = (status === 'done') ? '#56d364' : (status === 'cancelled') ? '#8b949e' : '#f08080';
+  tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+esc(label)+'</div>'
+    + (j.vmid ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">VM '+esc(String(j.vmid))+(j.node?' · '+esc(j.node):'')+'</div>' : '')
+    + '<div style="margin-top:3px;font-size:11px">'+fmtDateRel(j.created_at)+'</div>'
+    + '<div style="margin-top:3px"><span style="background:rgba(0,0,0,.25);color:'+sColor+';padding:1px 7px;border-radius:4px;font-size:11px">'+esc(status)+'</span></div>'
+    + '<div style="margin-top:5px;font-size:10px;color:#64748b">Click to go to job</div>';
+  _tlPositionTooltip(evt);
+}
+
+function _jtUnhover() {
+  var tt = document.getElementById('tlTooltip');
+  if (tt) tt.style.display = 'none';
+}
+
+function _jtClick(id) {
+  // Switch to Jobs tab
+  var jobsTab = document.querySelector('[data-tab=jobs]');
+  if (jobsTab) jobsTab.click();
+  // Find the job in cache, jump to its page, highlight it
+  setTimeout(function() {
+    var idx = _allJobsCache.findIndex(function(j){ return j.id === id; });
+    if (idx < 0) { loadAllJobs().then(function(){ _jtScrollToJob(id); }); return; }
+    _jobPage = Math.floor(idx / _JOB_PAGE_SIZE);
+    renderJobsPage();
+    setTimeout(function(){ _jtScrollToJob(id); }, 80);
+  }, 180);
+}
+
+function _jtScrollToJob(id) {
+  var row = document.querySelector('tr[data-job-id="'+id+'"]');
+  if (!row) return;
+  row.scrollIntoView({behavior:'smooth', block:'center'});
+  row.classList.remove('job-row-flash');
+  void row.offsetWidth; // reflow to restart animation
+  row.classList.add('job-row-flash');
+  setTimeout(function(){ row.classList.remove('job-row-flash'); }, 1900);
+}
+
 var _DB_SYSTEMS_CACHE_KEY = 'nasnap_db_systems_cache';
 
 function _dbRenderSystems(data, stale) {
@@ -6833,6 +6982,7 @@ async function loadDashboard() {
       _dbRenderSummary(cached.summary, true);
       _dbRenderStorage(cached.storageData, cached.capData, true);
       _dbRenderJobs(cached.jobsData, true);
+      _dbRenderJobTimeline(cached.jobsData);
       _dbSetTimestamp(cached.ts, true);
     }
   } catch(_) {}
@@ -6847,8 +6997,8 @@ async function loadDashboard() {
     // Update stat cards as soon as protection-summary arrives (usually fast)
     summaryP.then(function(s){ _dbRenderSummary(s, false); });
 
-    // Update jobs as soon as jobs/status arrives (usually fast)
-    jobsP.then(function(j){ _dbRenderJobs(j, false); });
+    // Update jobs + timeline as soon as jobs/status arrives (usually fast)
+    jobsP.then(function(j){ _dbRenderJobs(j, false); _dbRenderJobTimeline(j); });
 
     // Storage table needs both storage list and capacity — wait for both
     Promise.all([storageP, capP]).then(function(res){ _dbRenderStorage(res[0], res[1], false); });
