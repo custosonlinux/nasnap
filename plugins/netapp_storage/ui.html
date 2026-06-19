@@ -6844,11 +6844,30 @@ function _jtHover(id, evt) {
   var label  = _actJobLabels[j.job_type] || j.job_type || 'Job';
   var status = j.status;
   var sColor = (status === 'done') ? '#56d364' : (status === 'cancelled') ? '#8b949e' : '#f08080';
+
+  // Last 3 log entries
+  var logHtml = '';
+  if (j.log && j.log.length) {
+    var entries = j.log.slice(-3);
+    logHtml = '<div style="margin-top:7px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px">'
+      + entries.map(function(l) {
+          var msg = l.msg || l;
+          var ts  = l.ts ? new Date(l.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+          return '<div style="display:flex;gap:5px;font-size:10px;line-height:1.4">'
+            + (ts ? '<span style="color:#475569;flex-shrink:0">'+esc(ts)+'</span>' : '')
+            + '<span style="color:#94a3b8">'+esc(msg)+'</span></div>';
+        }).join('')
+      + (j.log.length > 3 ? '<div style="font-size:10px;color:#475569;margin-top:2px">… '+( j.log.length - 3)+' earlier entries</div>' : '')
+      + '</div>';
+  }
+
   tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+esc(label)+'</div>'
     + (j.vmid ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">VM '+esc(String(j.vmid))+(j.node?' · '+esc(j.node):'')+'</div>' : '')
     + '<div style="margin-top:3px;font-size:11px">'+fmtDateRel(j.created_at)+'</div>'
+    + (j.created_by ? '<div style="color:#64748b;font-size:10px;margin-top:1px">by '+esc(j.created_by)+'</div>' : '')
     + '<div style="margin-top:3px"><span style="background:rgba(0,0,0,.25);color:'+sColor+';padding:1px 7px;border-radius:4px;font-size:11px">'+esc(status)+'</span></div>'
-    + '<div style="margin-top:5px;font-size:10px;color:#64748b">Click to go to job</div>';
+    + logHtml
+    + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to go to job</div>';
   _tlPositionTooltip(evt);
 }
 
@@ -11407,7 +11426,7 @@ actLogPoll();
   </div>
 </div>
 
-<div id="tlTooltip" style="display:none;position:fixed;z-index:9100;pointer-events:none;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:260px;line-height:1.55"></div>
+<div id="tlTooltip" style="display:none;position:fixed;z-index:9100;pointer-events:none;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:340px;line-height:1.55"></div>
 
 <!-- ══════════════ RESTORE WIZARD MODAL ══════════════ -->
 <div id="rwModal" role="dialog" aria-modal="true" aria-label="Restore Wizard"
