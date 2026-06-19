@@ -139,16 +139,40 @@ def _sync_vmids_for_schedule(db, mapping_row):
 
 # ── Schedule execution ──────────────────────────────────────────────────────────
 
-def _execute_schedule(schedule):
-    """Executes a scheduled snapshot (runs in its own thread)."""
-    from ..core.snapshot_engine import start_snapshot_job
+def _resolve_mapping_ids(schedule):
+    """Return the list of mapping IDs for a schedule.
+
+    New schedules store the list in mapping_ids (JSON). Legacy single-datastore
+    schedules have only mapping_id — return that wrapped in a list.
+    """
+    raw = schedule.get("mapping_ids")
+    if raw:
+        try:
+            ids = json.loads(raw)
+            if ids:
+                return ids
+        except Exception:
+            pass
+    fallback = schedule.get("mapping_id")
+    return [fallback] if fallback else []
+
+
+def _execute_single_ds(schedule, mapping_id, sched_name_safe, suppress_notify=False):
+    """Snapshot one datastore for a schedule.
+
+    When suppress_notify=True the per-job notification is skipped; the caller
+    is responsible for sending a consolidated notification (multi-DS schedules).
+
+    Returns a dict: {job_id, status, pve_storage_id, snap_name}
+    """
+    from ..core.snapshot_engine import start_snapshot_job, run_snapshot_sync
 
     db = get_db()
-    status = "failed"
+    result = {"job_id": None, "status": "failed", "pve_storage_id": "", "snap_name": ""}
     job_id = str(uuid.uuid4())
+    result["job_id"] = job_id
     try:
         now = datetime.now(timezone.utc).isoformat()
-
         db.execute(
             "INSERT INTO netapp_jobs (id, job_type, vmid, node, status, created_by, created_at) "
             "VALUES (?,?,?,?,?,?,?)",
@@ -156,94 +180,130 @@ def _execute_schedule(schedule):
         )
 
         vmids = json.loads(schedule.get("vmids_json") or "[]")
+        mapping_row = db.query_one("SELECT * FROM netapp_volume_mapping WHERE id=?", (mapping_id,))
+        if not mapping_row:
+            log.warning(f"[netapp_storage] Schedule '{schedule['name']}': mapping {mapping_id} not found, skipping")
+            return result
 
-        # Auto-sync: replace vmids with current datastore content before running
-        mapping_row_early = db.query_one(
-            "SELECT * FROM netapp_volume_mapping WHERE id=?", (schedule["mapping_id"],)
-        )
-        if schedule.get("sync_vmids") and mapping_row_early:
+        mapping_row = dict(mapping_row)
+        result["pve_storage_id"] = mapping_row.get("pve_storage_id", "")
+
+        if schedule.get("sync_vmids"):
             try:
-                synced = _sync_vmids_for_schedule(db, dict(mapping_row_early))
+                synced = _sync_vmids_for_schedule(db, mapping_row)
                 if synced is not None:
                     vmids = synced
-                    db.execute(
-                        "UPDATE netapp_snapshot_schedules SET vmids_json=? WHERE id=?",
-                        (json.dumps(vmids), schedule["id"]),
-                    )
-                    log.info(f"[netapp_storage] Schedule '{schedule['name']}' synced vmids: {vmids}")
+                    if not suppress_notify:
+                        # Single-DS: persist synced VMIDs so they appear in the Protection view
+                        db.execute(
+                            "UPDATE netapp_snapshot_schedules SET vmids_json=? WHERE id=?",
+                            (json.dumps(vmids), schedule["id"]),
+                        )
             except Exception as exc:
                 log.warning(f"[netapp_storage] Schedule '{schedule['name']}' vmid sync failed: {exc}")
 
-        # Derive node from mapping (via plugin-managed PVE client)
-        mapping_row = db.query_one(
-            "SELECT * FROM netapp_volume_mapping WHERE id=?", (schedule["mapping_id"],)
-        )
         node = ""
-        cluster_id = ""
-        if mapping_row:
-            cluster_id = mapping_row["pve_cluster_id"]
-            try:
-                from ..core._helpers import build_pve_client
-                pve = build_pve_client(db, cluster_id)
-                vmids_for_node = json.loads(schedule.get("vmids_json") or "[]")
-                if vmids_for_node:
-                    found = pve.find_vm_node(vmids_for_node[0])
-                    if found:
-                        node = found
-                if not node:
-                    nodes = list(pve.get_node_status().keys())
-                    if nodes:
-                        node = nodes[0]
-            except Exception as exc:
-                log.warning(f"[netapp_storage] Schedule node lookup failed: {exc}")
+        cluster_id = mapping_row["pve_cluster_id"]
+        try:
+            from ..core._helpers import build_pve_client
+            pve = build_pve_client(db, cluster_id)
+            if vmids:
+                found = pve.find_vm_node(vmids[0])
+                if found:
+                    node = found
+            if not node:
+                nodes = list(pve.get_node_status().keys())
+                if nodes:
+                    node = nodes[0]
+        except Exception as exc:
+            log.warning(f"[netapp_storage] Schedule node lookup failed: {exc}")
 
-        sched_name_safe = re.sub(r'[^a-zA-Z0-9_-]', '-', schedule.get("name", ""))[:30].strip('-')
         data = {
-            "cluster_id": cluster_id,
-            "node": node,
-            "vmids": vmids,
-            "mapping_id": schedule["mapping_id"],
-            "pve_storage_id":    mapping_row["pve_storage_id"] if mapping_row else "",
-            "consistency":       schedule.get("consistency", "crash"),
-            "label":             schedule.get("label", ""),
-            "pre_script":        schedule.get("pre_script",  "") or "",
-            "post_script":       schedule.get("post_script", "") or "",
-            "schedule_id":       schedule["id"],
-            "schedule_name":     schedule.get("name", ""),
-            "snap_name_suffix":  sched_name_safe,
-            "retention_count":   int(schedule.get("retention_count") or 7),
-            "snapmirror_update":   bool(schedule.get("snapmirror_update", 0)),
-            "notify_enabled":      bool(schedule.get("notify_enabled", 0)),
-            "notify_on":           schedule.get("notify_on", "all") or "all",
-            "notify_recipients":   schedule.get("notify_recipients", "") or "",
-            "tamperproof_enabled":    bool(schedule.get("tamperproof_enabled", 0)),
-            "tamperproof_days":       int(schedule.get("tamperproof_days") or 0),
+            "cluster_id":            cluster_id,
+            "node":                  node,
+            "vmids":                 vmids,
+            "mapping_id":            mapping_id,
+            "pve_storage_id":        mapping_row["pve_storage_id"],
+            "consistency":           schedule.get("consistency", "crash"),
+            "label":                 schedule.get("label", ""),
+            "pre_script":            schedule.get("pre_script",  "") or "",
+            "post_script":           schedule.get("post_script", "") or "",
+            "schedule_id":           schedule["id"],
+            "schedule_name":         schedule.get("name", ""),
+            "snap_name_suffix":      sched_name_safe,
+            "retention_count":       int(schedule.get("retention_count") or 7),
+            "snapmirror_update":     bool(schedule.get("snapmirror_update", 0)),
+            "notify_enabled":        False if suppress_notify else bool(schedule.get("notify_enabled", 0)),
+            "notify_on":             schedule.get("notify_on", "all") or "all",
+            "notify_recipients":     schedule.get("notify_recipients", "") or "",
+            "tamperproof_enabled":   bool(schedule.get("tamperproof_enabled", 0)),
+            "tamperproof_days":      int(schedule.get("tamperproof_days") or 0),
             "sm_tamperproof_enabled": bool(schedule.get("sm_tamperproof_enabled", 0)),
-            "sm_tamperproof_days":    int(schedule.get("sm_tamperproof_days") or 0),
+            "sm_tamperproof_days":   int(schedule.get("sm_tamperproof_days") or 0),
         }
         try:
-            start_snapshot_job(job_id, data, f"schedule:{schedule['name']}")
-            status = "done"
+            if suppress_notify:
+                # Run synchronously so we can collect results and send one consolidated email
+                run_snapshot_sync(job_id, data, f"schedule:{schedule['name']}")
+            else:
+                start_snapshot_job(job_id, data, f"schedule:{schedule['name']}")
         except Exception as exc:
-            log.error(f"[netapp_storage] Schedule '{schedule['name']}' failed: {exc}")
-            status = "failed"
+            log.error(f"[netapp_storage] Schedule '{schedule['name']}' ds={mapping_id} failed: {exc}")
+
+        # Read final job status and log from DB (meaningful only when run_snapshot_sync was used)
+        job_row = db.query_one("SELECT status, log_json FROM netapp_jobs WHERE id=?", (job_id,))
+        result["status"] = job_row["status"] if job_row else "failed"
+        result["log_lines"] = json.loads(job_row["log_json"] or "[]") if job_row else []
+
+        # Read snap_name for consolidated notification
+        snap_row = db.query_one("SELECT snap_name FROM netapp_snapshots WHERE id IN "
+                                "(SELECT snapshot_id FROM netapp_jobs WHERE id=?)", (job_id,))
+        if snap_row:
+            result["snap_name"] = snap_row["snap_name"]
 
     except Exception as exc:
-        log.error(f"[netapp_storage] Schedule '{schedule['name']}' setup error: {exc}")
-    finally:
-        # Always update last_run_at so the scheduler doesn't retry immediately
-        # and the UI shows that the schedule was attempted.
+        log.error(f"[netapp_storage] Schedule '{schedule['name']}' ds={mapping_id} setup error: {exc}")
+    return result
+
+
+def _execute_schedule(schedule):
+    """Executes a schedule — one snapshot job per datastore, sequentially."""
+    db = get_db()
+    mapping_ids = _resolve_mapping_ids(schedule)
+    if not mapping_ids:
+        log.warning(f"[netapp_storage] Schedule '{schedule['name']}' has no datastores, skipping")
+        return
+
+    sched_name_safe = re.sub(r'[^a-zA-Z0-9_-]', '-', schedule.get("name", ""))[:30].strip('-')
+    multi_ds = len(mapping_ids) > 1
+    results = []
+    for mid in mapping_ids:
+        r = _execute_single_ds(schedule, mid, sched_name_safe, suppress_notify=multi_ds)
+        results.append(r)
+
+    statuses = [r["status"] for r in results]
+    overall = "done" if all(s == "done" for s in statuses) else "failed"
+    try:
+        db.execute(
+            "UPDATE netapp_snapshot_schedules SET last_run_at=?, last_run_status=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), overall, schedule["id"]),
+        )
+    except Exception as exc:
+        log.error(f"[netapp_storage] Schedule '{schedule['name']}' last_run update failed: {exc}")
+
+    # Send one consolidated notification for multi-DS schedules
+    if multi_ds and schedule.get("notify_enabled") and schedule.get("notify_recipients"):
         try:
-            db.execute(
-                "UPDATE netapp_snapshot_schedules SET last_run_at=?, last_run_status=? WHERE id=?",
-                (datetime.now(timezone.utc).isoformat(), status, schedule["id"]),
+            from .settings import send_schedule_consolidated_notification
+            send_schedule_consolidated_notification(
+                schedule_name=schedule.get("name", ""),
+                overall_status=overall,
+                ds_results=results,
+                recipients_csv=schedule.get("notify_recipients", ""),
+                notify_on=schedule.get("notify_on", "all") or "all",
             )
         except Exception as exc:
-            log.error(f"[netapp_storage] Schedule '{schedule['name']}' last_run update failed: {exc}")
-    # Retention is now handled inside snapshot_engine._run_snapshot, directly after
-    # the snapshot status is set to 'done'.  This avoids the race condition where the
-    # retention count ran while the new snapshot was still status='running' and therefore
-    # not included in the count, causing a permanent off-by-one (retention+1 snapshots).
+            log.warning(f"[netapp_storage] Consolidated notification failed: {exc}")
 
 
 def _scheduler_loop():
@@ -283,40 +343,65 @@ def stop_scheduler():
 
 def _list_schedules():
     db = get_db()
-    rows = db.query(
-        "SELECT s.*, vm.pve_storage_id, vm.volume_name, vm.volume_uuid, ep.name AS endpoint_name "
-        "FROM netapp_snapshot_schedules s "
-        "JOIN netapp_volume_mapping vm ON vm.id = s.mapping_id "
-        "JOIN netapp_endpoints ep ON ep.id = vm.endpoint_id "
-        "ORDER BY s.name"
-    )
+    rows = db.query("SELECT * FROM netapp_snapshot_schedules ORDER BY name")
+    # Build mapping lookup once
+    all_mappings = {r["id"]: dict(r) for r in (db.query(
+        "SELECT vm.*, ep.name AS endpoint_name "
+        "FROM netapp_volume_mapping vm "
+        "JOIN netapp_endpoints ep ON ep.id = vm.endpoint_id"
+    ) or [])}
+
     result = []
     for r in rows:
         d = dict(r)
         d["vmids"] = json.loads(d.get("vmids_json") or "[]")
 
-        # Attach SnapMirror relationship for this volume (prefer healthy/most-recent)
-        sm_rows = db.query(
-            "SELECT dest_cluster_name, dest_svm, dest_volume, state, healthy, "
-            "lag_time, last_transfer_time "
-            "FROM netapp_snapmirror_relationships "
-            "WHERE source_volume_uuid=? "
-            "ORDER BY healthy DESC, last_transfer_time DESC LIMIT 1",
-            (d.get("volume_uuid", ""),),
-        )
-        if sm_rows:
-            rel = dict(sm_rows[0])
-            d["snapmirror"] = {
-                "exists":             True,
-                "dest_cluster":       rel.get("dest_cluster_name", ""),
-                "dest_svm":           rel.get("dest_svm", ""),
-                "dest_volume":        rel.get("dest_volume", ""),
-                "state":              rel.get("state", ""),
-                "healthy":            bool(rel.get("healthy", 0)),
-                "lag_time":           rel.get("lag_time", ""),
-                "last_transfer_time": rel.get("last_transfer_time", ""),
-            }
-        else:
+        # Resolve datastores list
+        mid_list = _resolve_mapping_ids(d)
+        datastores = []
+        for mid in mid_list:
+            vm = all_mappings.get(mid)
+            if vm:
+                datastores.append({
+                    "mapping_id":    mid,
+                    "pve_storage_id": vm.get("pve_storage_id", ""),
+                    "volume_name":   vm.get("volume_name", ""),
+                    "volume_uuid":   vm.get("volume_uuid", ""),
+                    "endpoint_name": vm.get("endpoint_name", ""),
+                })
+        d["datastores"] = datastores
+        # Legacy compat: keep flat fields from first datastore
+        if datastores:
+            d.setdefault("pve_storage_id", datastores[0]["pve_storage_id"])
+            d.setdefault("volume_name",    datastores[0]["volume_name"])
+            d.setdefault("volume_uuid",    datastores[0]["volume_uuid"])
+            d.setdefault("endpoint_name",  datastores[0]["endpoint_name"])
+
+        # SnapMirror: attach for all datastores, return first hit for legacy badge
+        sm_found = False
+        for ds in datastores:
+            sm_rows = db.query(
+                "SELECT dest_cluster_name, dest_svm, dest_volume, state, healthy, "
+                "lag_time, last_transfer_time "
+                "FROM netapp_snapmirror_relationships "
+                "WHERE source_volume_uuid=? "
+                "ORDER BY healthy DESC, last_transfer_time DESC LIMIT 1",
+                (ds.get("volume_uuid", ""),),
+            )
+            if sm_rows and not sm_found:
+                rel = dict(sm_rows[0])
+                d["snapmirror"] = {
+                    "exists":             True,
+                    "dest_cluster":       rel.get("dest_cluster_name", ""),
+                    "dest_svm":           rel.get("dest_svm", ""),
+                    "dest_volume":        rel.get("dest_volume", ""),
+                    "state":              rel.get("state", ""),
+                    "healthy":            bool(rel.get("healthy", 0)),
+                    "lag_time":           rel.get("lag_time", ""),
+                    "last_transfer_time": rel.get("last_transfer_time", ""),
+                }
+                sm_found = True
+        if not sm_found:
             d["snapmirror"] = {"exists": False}
 
         result.append(d)
@@ -328,10 +413,21 @@ def _add_schedule():
     if err:
         return err
     data = request.get_json() or {}
-    for field in ("name", "mapping_id", "cron_expr"):
-        if not data.get(field):
-            return {"error": f"Required field missing: {field}"}, 400
+    if not data.get("name"):
+        return {"error": "Required field missing: name"}, 400
+    if not data.get("cron_expr"):
+        return {"error": "Required field missing: cron_expr"}, 400
 
+    # Accept mapping_ids (list) or legacy mapping_id (single)
+    mapping_ids = data.get("mapping_ids") or []
+    if isinstance(mapping_ids, str):
+        mapping_ids = [mapping_ids]
+    if not mapping_ids and data.get("mapping_id"):
+        mapping_ids = [data["mapping_id"]]
+    if not mapping_ids:
+        return {"error": "At least one datastore (mapping_ids) is required"}, 400
+
+    primary_mapping_id = mapping_ids[0]
     vmids = data.get("vmids", [])
     if not isinstance(vmids, list):
         vmids = []
@@ -343,14 +439,14 @@ def _add_schedule():
 
     db.execute(
         "INSERT INTO netapp_snapshot_schedules "
-        "(id, name, mapping_id, vmids_json, cron_expr, retention_count, "
+        "(id, name, mapping_id, mapping_ids, vmids_json, cron_expr, retention_count, "
         "consistency, label, pre_script, post_script, snapmirror_update, "
         "notify_enabled, notify_on, notify_recipients, sync_vmids, "
         "tamperproof_enabled, tamperproof_days, "
         "sm_tamperproof_enabled, sm_tamperproof_days, enabled, created_by, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (sid, data["name"], data["mapping_id"], json.dumps(vmids),
-         data["cron_expr"], int(data.get("retention_count", 7)),
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (sid, data["name"], primary_mapping_id, json.dumps(mapping_ids),
+         json.dumps(vmids), data["cron_expr"], int(data.get("retention_count", 7)),
          data.get("consistency", "crash"), data.get("label", ""),
          data.get("pre_script", ""), data.get("post_script", ""),
          1 if data.get("snapmirror_update") else 0,
@@ -399,10 +495,17 @@ def _update_schedule():
         ("enabled", data.get("enabled")),
         ("vmids_json", json.dumps(data["vmids"]) if "vmids" in data else None),
         ("mapping_id", data.get("mapping_id")),
+        ("mapping_ids", json.dumps(data["mapping_ids"]) if "mapping_ids" in data else None),
     ]:
         if val is not None:
             fields.append(f"{col}=?")
             values.append(int(val) if col in ("retention_count", "enabled", "tamperproof_days", "sm_tamperproof_days") else val)
+    # Keep mapping_id in sync with first entry of mapping_ids
+    if "mapping_ids" in data and data["mapping_ids"]:
+        new_primary = data["mapping_ids"][0]
+        if f"mapping_id=?" not in ",".join(fields):
+            fields.append("mapping_id=?")
+            values.append(new_primary)
 
     if not fields:
         return {"error": "No changes"}, 400

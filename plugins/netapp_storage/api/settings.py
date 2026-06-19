@@ -418,6 +418,179 @@ def send_job_notification(schedule_name, job_status, snap_name,
         log.warning(f"[netapp_storage] Notification send failed: {exc}")
 
 
+def send_schedule_consolidated_notification(schedule_name, overall_status,
+                                            ds_results, recipients_csv, notify_on):
+    """Send one consolidated email for a multi-datastore schedule run.
+
+    ds_results is a list of dicts: {job_id, status, pve_storage_id, snap_name, log_lines}.
+    """
+    if not recipients_csv or not recipients_csv.strip():
+        return
+    if notify_on == 'failed' and overall_status != 'failed':
+        return
+    if notify_on == 'success' and overall_status != 'done':
+        return
+
+    try:
+        db = get_db()
+        _ensure_smtp_row(db)
+        row = db.query_one("SELECT * FROM netapp_smtp_config WHERE id='default'")
+        d = dict(row)
+        if not d.get('enabled'):
+            return
+        host       = d.get('host', '').strip()
+        port       = int(d.get('port') or 587)
+        username   = d.get('username', '').strip()
+        password   = db._decrypt(d.get('password_encrypted', ''))
+        encryption = d.get('encryption', 'starttls')
+        from_addr  = d.get('from_address', '') or username
+        if not host:
+            return
+
+        status_str   = 'Success' if overall_status == 'done' else 'Failed'
+        ds_count     = len(ds_results)
+        failed_count = sum(1 for r in ds_results if r.get("status") != "done")
+        subject = (f"[NaSnap] Protection Plan {status_str}: {schedule_name} "
+                   f"— {ds_count} datastores ({failed_count} failed)")
+
+        banner_color = "#16a34a" if overall_status == "done" else "#dc2626"
+        banner_icon  = "✓" if overall_status == "done" else "✗"
+        banner_label = "All datastores protected successfully" if overall_status == "done" \
+            else f"{failed_count} of {ds_count} datastore(s) failed"
+
+        _sev_color = {"err": "#f87171", "warn": "#fbbf24", "info": "#a3e4b0"}
+        _sev_tag   = {"err": "[ERR] ", "warn": "[WARN]", "info": "[INFO]"}
+
+        def _esc(s):
+            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        def _render_log_block(log_lines):
+            entries = []
+            for entry in (log_lines or [])[-50:]:
+                ts  = entry.get('ts', '')[:19].replace('T', ' ')
+                msg = entry.get('msg', str(entry))
+                sev = _log_severity(msg)
+                entries.append((ts, sev, msg))
+            if not entries:
+                return '<div style="color:#6b7280;font-style:italic">No log entries.</div>'
+            rows = ""
+            for ts, sev, msg in entries:
+                col = _sev_color[sev]
+                tag = _sev_tag[sev]
+                rows += (
+                    f'<div style="margin:1px 0">'
+                    f'<span style="color:#6b7280;user-select:none">{_esc(ts)} </span>'
+                    f'<span style="color:{col};font-weight:700;user-select:none">{tag} </span>'
+                    f'<span style="color:{col if sev != "info" else "#d1fae5"}">{_esc(msg)}</span>'
+                    f'</div>'
+                )
+            return rows
+
+        def _plain_log(log_lines):
+            lines = []
+            for entry in (log_lines or [])[-50:]:
+                ts  = entry.get('ts', '')[:19].replace('T', ' ')
+                msg = entry.get('msg', str(entry))
+                sev = _log_severity(msg)
+                lines.append(f"    {ts}  {_sev_tag[sev]}  {msg}")
+            return "\n".join(lines) if lines else "    (no log entries)"
+
+        # Build per-DS summary row + log block
+        ds_summary_html = ""
+        ds_detail_html  = ""
+        ds_plain_parts  = []
+
+        for r in ds_results:
+            s       = r.get("status", "failed")
+            ds_name = r.get("pve_storage_id") or r.get("job_id", "?")
+            snap    = r.get("snap_name") or "—"
+            logs    = r.get("log_lines", [])
+            col     = "#16a34a" if s == "done" else "#dc2626"
+            label   = "Success" if s == "done" else "Failed"
+
+            ds_summary_html += (
+                f'<tr style="border-bottom:1px solid #e5e7eb">'
+                f'<td style="padding:8px 12px;font-size:13px;font-family:monospace">{_esc(ds_name)}</td>'
+                f'<td style="padding:8px 12px;font-size:13px;color:{col};font-weight:700">● {label}</td>'
+                f'<td style="padding:8px 12px;font-size:12px;font-family:monospace;color:#6b7280">{_esc(snap)}</td>'
+                f'</tr>'
+            )
+            ds_detail_html += (
+                f'<div style="margin-top:20px">'
+                f'  <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;'
+                f'letter-spacing:.06em;margin-bottom:6px">{_esc(ds_name)}'
+                f'  <span style="color:{col};margin-left:8px">● {label}</span></div>'
+                f'  <div style="font-family:\'Courier New\',Courier,monospace;font-size:11.5px;line-height:1.65">'
+                f'    {_render_log_block(logs)}'
+                f'  </div>'
+                f'</div>'
+            )
+            ds_plain_parts.append(
+                f"  [{label.upper()}] {ds_name}  ({snap})\n{_plain_log(logs)}"
+            )
+
+        html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:20px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
+<div style="max-width:680px;margin:0 auto">
+
+  <!-- Banner -->
+  <div style="background:{banner_color};border-radius:8px 8px 0 0;padding:22px 28px;color:#fff">
+    <div style="font-size:22px;font-weight:700">{banner_icon}&nbsp; {_esc(schedule_name)}</div>
+    <div style="font-size:13px;opacity:.85;margin-top:4px">{banner_label} — NaSnap Protection Plan</div>
+  </div>
+
+  <!-- Summary table -->
+  <div style="background:#fff;padding:20px 24px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
+    <p style="margin:0 0 12px;font-size:13px;color:#374151">
+      Protection plan <strong>{_esc(schedule_name)}</strong> ran across {ds_count} datastore(s).
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+      <tr style="background:#f9fafb">
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Datastore</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Status</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Snapshot</th>
+      </tr>
+      {ds_summary_html}
+    </table>
+  </div>
+
+  <!-- Per-DS log blocks -->
+  <div style="background:#0f172a;border-radius:0 0 8px 8px;padding:20px 24px">
+    <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px">
+      Job Logs
+    </div>
+    {ds_detail_html}
+  </div>
+
+  <!-- Footer -->
+  <div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:14px">
+    NaSnap — NetApp ONTAP Snapshot Management for Proxmox
+  </div>
+</div>
+</body></html>"""
+
+        plain_body = (
+            f"NaSnap Protection Plan Report: {schedule_name}\n"
+            f"Overall: {status_str}\n\n"
+            f"Results ({ds_count} datastores):\n\n"
+            + "\n\n".join(ds_plain_parts)
+        )
+
+        recipients = [r.strip() for r in recipients_csv.split(',') if r.strip()]
+        msg = email.mime.multipart.MIMEMultipart('alternative')
+        msg['From']    = from_addr
+        msg['To']      = ', '.join(recipients)
+        msg['Subject'] = subject
+        msg.attach(email.mime.text.MIMEText(plain_body, 'plain', 'utf-8'))
+        msg.attach(email.mime.text.MIMEText(html_body,  'html',  'utf-8'))
+        _send_smtp(host, port, username, password, encryption, from_addr, recipients, msg.as_string())
+        log.info(f"[netapp_storage] Consolidated notification sent for '{schedule_name}' ({overall_status})")
+    except Exception as exc:
+        log.warning(f"[netapp_storage] Consolidated notification failed: {exc}")
+
+
 def _send_smtp(host, port, username, password, encryption, from_addr, recipients, raw_message):
     ctx = ssl.create_default_context()
     if encryption == 'ssl':

@@ -159,6 +159,7 @@ def _init_db():
         _add_column_if_missing(db, "netapp_volume_mapping", "snapinfo_initialized",  "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_volume_mapping", "snapinfo_lv_name",      "TEXT NOT NULL DEFAULT 'netapp_snapmanifest'")
         _add_column_if_missing(db, "netapp_volume_mapping", "created_at",            "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(db, "netapp_snapshot_schedules", "mapping_ids",       "TEXT DEFAULT NULL")
 
         log.info("[netapp_storage] DB tables initialised")
     except Exception as e:

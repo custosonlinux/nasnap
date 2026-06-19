@@ -280,6 +280,7 @@ CREATE TABLE IF NOT EXISTS netapp_snapshot_schedules (
     notify_on       TEXT NOT NULL DEFAULT 'all',
     notify_recipients TEXT NOT NULL DEFAULT '',
     sync_vmids          INTEGER NOT NULL DEFAULT 0,
+    mapping_ids         TEXT DEFAULT NULL,
     tamperproof_enabled    INTEGER NOT NULL DEFAULT 0,
     tamperproof_days       INTEGER NOT NULL DEFAULT 0,
     sm_tamperproof_enabled INTEGER NOT NULL DEFAULT 0,

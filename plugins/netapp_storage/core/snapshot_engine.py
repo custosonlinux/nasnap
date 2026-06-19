@@ -40,6 +40,19 @@ def start_snapshot_job(job_id, params, username):
     _reg_register(job_id, t)
 
 
+def run_snapshot_sync(job_id, params, username):
+    """Runs the snapshot workflow in a thread and blocks until it completes.
+
+    Used by multi-datastore schedule execution so each DS runs to completion
+    before the next one starts, and results can be collected for a consolidated
+    notification email.
+    """
+    t = threading.Thread(target=_run_snapshot, args=(job_id, params, username), daemon=True)
+    t.start()
+    _reg_register(job_id, t)
+    t.join()
+
+
 def _find_pve_for_vms(db, volume_uuid, vmids, fallback_cluster_id):
     """Selects the PVE host that actually hosts the given VMs.
 
@@ -80,6 +93,13 @@ def _find_pve_for_vms(db, volume_uuid, vmids, fallback_cluster_id):
     return build_pve_client(db, fallback_cluster_id)
 
 
+def _set_progress(db, job_id, pct):
+    try:
+        db.execute("UPDATE netapp_jobs SET progress_pct=? WHERE id=?", (pct, job_id))
+    except Exception:
+        pass
+
+
 def _run_snapshot(job_id, params, username):
     db = get_db()
     jlog = JobLogger(job_id, db)
@@ -116,6 +136,7 @@ def _run_snapshot(job_id, params, username):
         client = build_ontap_client(endpoint)
         pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
 
+        _set_progress(db, job_id, 5)
         # ── 1. Fetch VM/CT configurations ─────────────────────────────
         jlog.log("Fetching VM/CT configurations …")
         vm_entries = []
@@ -160,6 +181,7 @@ def _run_snapshot(job_id, params, username):
         else:
             jlog.log(f"{len(vm_entries)} VM(s) ready for snapshot.")
 
+        _set_progress(db, job_id, 15)
         # ── 2. Build manifest ──────────────────────────────────────────
         manifest = {
             "schema": "pegaprox-netapp-v1",
@@ -252,6 +274,7 @@ def _run_snapshot(job_id, params, username):
         pre_script  = params.get("pre_script",  "").strip()
         post_script = params.get("post_script", "").strip()
 
+        _set_progress(db, job_id, 25)
         # ── 5. Pre-Script ─────────────────────────────────────────────
         if pre_script:
             jlog.log("Running pre-script …")
@@ -298,6 +321,7 @@ def _run_snapshot(job_id, params, username):
                     else:
                         jlog.log(f"WARNING: {label} {vmid}: suspend failed – crash-consistent.")
 
+            _set_progress(db, job_id, 45)
             # ── 7. Create ONTAP snapshot ───────────────────────────────
             jlog.log(f"Creating ONTAP snapshot '{snap_name}' …")
             expiry_time = ""
@@ -346,6 +370,7 @@ def _run_snapshot(job_id, params, username):
                 expiry_time=expiry_time,
             )
 
+            _set_progress(db, job_id, 60)
             # ── 8. Poll job ───────────────────────────────────────────
             poll_cfg = load_plugin_config()
             client.poll_job(
@@ -353,6 +378,7 @@ def _run_snapshot(job_id, params, username):
                 interval_s=poll_cfg.get("job_poll_interval_s", 3),
                 timeout_s=poll_cfg.get("job_poll_timeout_s", 300),
             )
+            _set_progress(db, job_id, 75)
             jlog.log("ONTAP job completed.")
 
             snaps = client.list_snapshots(mapping["volume_uuid"])
@@ -379,6 +405,7 @@ def _run_snapshot(job_id, params, username):
                 _run_hook(pve_host, pve_user, pve_pass, pve_key,
                           post_script, vmids, snap_name, node, jlog, "Post-Script")
 
+        _set_progress(db, job_id, 90)
         # ── 9. Update DB ──────────────────────────────────────────────
         completed = datetime.now(timezone.utc).isoformat()
         db.execute(

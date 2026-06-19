@@ -256,6 +256,12 @@
   tr.job-row-flash { animation: jobRowFlash .9s ease 2; }
 
   /* ── Activity Log Panel ──────────────────────────────────────── */
+  .sched-ds-list { border: 1px solid var(--border); border-radius: 6px; max-height: 160px; overflow-y: auto; background: var(--bg); }
+  .sched-ds-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--border); font-size: 13px; user-select: none; }
+  .sched-ds-item:last-child { border-bottom: none; }
+  .sched-ds-item:hover { background: rgba(88,166,255,.08); }
+  .sched-ds-item.ds-checked { background: rgba(88,166,255,.1); }
+
   .act-log {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 500;
     background: var(--card); border-top: 2px solid var(--border);
@@ -546,9 +552,9 @@ var _LANG = (function(){
 
 var _I18N = {
 de:{
-  tab_snapshots:'Snapshots',tab_schedules:'Zeitpläne',tab_jobs:'Jobs & Logs',tab_settings:'Einstellungen',
+  tab_snapshots:'Snapshots',tab_schedules:'Protection',tab_jobs:'Jobs & Logs',tab_settings:'Einstellungen',
   btn_create_snapshot:'+ Snapshot erstellen',btn_refresh:'Aktualisieren',btn_start_snapshot:'Snapshot starten',
-  btn_cancel:'Abbrechen',btn_save:'Speichern',btn_add_schedule:'+ Zeitplan anlegen',
+  btn_cancel:'Abbrechen',btn_save:'Speichern',btn_add_schedule:'+ Schutzplan anlegen',
   btn_start_restore:'VM-Restore starten',btn_start_clone:'Klonen starten',btn_suggest:'Vorschlagen',
   btn_cleanup_jobs:'Erledigte aufräumen',btn_detect_now:'Jetzt erkennen',
   btn_add_netapp:'+ NetApp System hinzufügen',btn_add_pve:'+ PVE-Host hinzufügen',
@@ -564,8 +570,8 @@ de:{
   lbl_host_ip:'Host / IP',lbl_port:'Port',lbl_snapshot:'Snapshot',lbl_vm_id:'VM-ID',
   lbl_name_hint:'(Snapshot heißt dann NPP_<em>Name</em>)',lbl_node_hint:'(optional)',
   lbl_start_after:'VM nach dem Klonen starten',lbl_mgmt_ip:'Cluster-Management-IP / FQDN',
-  ct_create_snapshot:'Snapshot erstellen',ct_new_schedule:'Neuer Zeitplan',
-  ct_edit_schedule:'Zeitplan bearbeiten',ct_start_restore:'Single-VM Restore',
+  ct_create_snapshot:'Snapshot erstellen',ct_new_schedule:'Neuer Schutzplan',
+  ct_edit_schedule:'Schutzplan bearbeiten',ct_start_restore:'Single-VM Restore',
   ct_clone_vm:'VM klonen',ct_jobs_history:'Jobs & Verlauf',
   ct_new_endpoint:'Neuer ONTAP-Endpoint',ct_new_pve_host:'Neuer PVE-Host',
   th_name:'Name',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Zeitplan',th_label:'Label',
@@ -602,9 +608,9 @@ de:{
   badge_running:'Läuft',badge_pending:'In Warteschlange',badge_cancelling:'Wird abgebrochen',badge_cancelled:'Abgebrochen',badge_schedule:'Zeitplan',badge_ontap:'ONTAP-nativ',badge_running_dots:'läuft …',
   act_restore:'Restore',act_clone:'Clone',act_delete:'Löschen',act_activate:'Aktivieren',
   act_deactivate:'Deaktivieren',act_run_now:'Jetzt',act_edit:'Bearbeiten',
-  pg_prev:'← Zurück',pg_next:'Weiter →',sched_save:'Zeitplan speichern',sched_update:'Zeitplan aktualisieren',
+  pg_prev:'← Zurück',pg_next:'Weiter →',sched_save:'Plan speichern',sched_update:'Plan aktualisieren',
   sched_step1:'Grundlagen',sched_step2:'Zeitplan',sched_step3:'VMs & Skripte',sched_step4:'SnapMirror',sched_step5:'Benachrichtigungen',sched_step6:'Zusammenfassung',
-  empty_snapshots:'Keine Snapshots vorhanden.',empty_schedules:'Keine Zeitpläne konfiguriert.',
+  empty_snapshots:'Keine Snapshots vorhanden.',empty_schedules:'Keine Schutzpläne konfiguriert.',
   empty_jobs:'Keine Jobs vorhanden.',empty_endpoints:'Keine Endpoints – oben hinzufügen.',
   empty_pve:'Keine PVE-Hosts – oben hinzufügen.',empty_mappings:'Noch keine Erkennung – „Jetzt erkennen" klicken.',
   empty_no_restore:'Keine fertigen Snapshots vorhanden',
@@ -619,9 +625,9 @@ de:{
   msg_fill_required:'Name und Mapping angeben',msg_snap_mapping_req:'Bitte Mapping auswählen',
   msg_snap_vm_req:'Mindestens eine VM auswählen',msg_snap_name_req:'Bitte einen Namen eingeben',
   msg_snap_started:'Snapshot-Job gestartet',msg_snap_deleted:'Snapshot gelöscht',
-  msg_sched_saved:'Zeitplan gespeichert',msg_sched_updated:'Zeitplan aktualisiert',
-  msg_sched_deleted:'Zeitplan gelöscht',msg_sched_enabled:'Zeitplan aktiviert',
-  msg_sched_disabled:'Zeitplan deaktiviert',msg_sched_running:'Zeitplan wird ausgeführt',
+  msg_sched_saved:'Schutzplan gespeichert',msg_sched_updated:'Schutzplan aktualisiert',
+  msg_sched_deleted:'Schutzplan gelöscht',msg_sched_enabled:'Schutzplan aktiviert',
+  msg_sched_disabled:'Schutzplan deaktiviert',msg_sched_running:'Schutzplan wird ausgeführt',
   msg_restore_started:'Restore-Job gestartet: %s',msg_clone_started:'Clone-Job gestartet: %s',
   msg_ep_saved:'Endpoint gespeichert',msg_ep_deleted:'Endpoint gelöscht',
   msg_pve_saved:'PVE-Host gespeichert',msg_pve_deleted:'PVE-Host gelöscht',
@@ -651,9 +657,9 @@ de:{
   sm_no_dest_ep:'Kein Sekundär-Endpoint — erst scannen',
   ct_dr_clone:'DR-Clone von Sekundärsystem',btn_start_dr_clone:'DR-Clone starten',
   sm_source_vol:'Quell-Volume',sm_dest_vol:'Ziel-Volume',sm_state:'Zustand',sm_lag:'Verzug',
-  tab_dashboard:'Dashboard',tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
   db_vm_overview:'VM-Übersicht',db_total:'Gesamt',db_running:'Laufend',db_stopped:'Gestoppt',
-  db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Zeitpläne aktiv',
+  db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Schutzpläne aktiv',
   db_storage:'Storage-Übersicht',db_recent_jobs:'Letzte Jobs',db_no_ds:'Keine Datastores konfiguriert.',
   db_no_jobs:'Noch keine Jobs.',db_protected_badge:'Zeitplan aktiv',db_unprotected_badge:'Kein Zeitplan',
   db_all_ok:'Alle Systeme in Ordnung.',db_issues:'Probleme erkannt',db_systems:'Environment',
@@ -667,9 +673,9 @@ de:{
   provision_title:'Storage Provisioning',provision_desc:'Volumes (NFS, iSCSI, NVMe-oF) anlegen und automatisch an Proxmox anbinden – inkl. Vergrößern/Verkleinern. Demnächst verfügbar.',
 },
 en:{
-  tab_snapshots:'Snapshots',tab_schedules:'Schedules',tab_jobs:'Jobs & Logs',tab_settings:'Settings',
+  tab_snapshots:'Snapshots',tab_schedules:'Protection',tab_jobs:'Jobs & Logs',tab_settings:'Settings',
   btn_create_snapshot:'+ Create Snapshot',btn_refresh:'Refresh',btn_start_snapshot:'Start Snapshot',
-  btn_cancel:'Cancel',btn_save:'Save',btn_add_schedule:'+ Add Schedule',
+  btn_cancel:'Cancel',btn_save:'Save',btn_add_schedule:'+ Add Protection Plan',
   btn_start_restore:'Start VM Restore',btn_start_clone:'Start Clone',btn_suggest:'Suggest',
   btn_cleanup_jobs:'Clean Up Done',btn_detect_now:'Detect Now',
   btn_add_netapp:'+ Add NetApp System',btn_add_pve:'+ Add PVE Host',
@@ -685,8 +691,8 @@ en:{
   lbl_host_ip:'Host / IP',lbl_port:'Port',lbl_snapshot:'Snapshot',lbl_vm_id:'VM ID',
   lbl_name_hint:'(Snapshot will be named NPP_<em>Name</em>)',lbl_node_hint:'(empty = auto)',
   lbl_start_after:'Start VM after cloning',lbl_mgmt_ip:'Cluster Management IP / FQDN',
-  ct_create_snapshot:'Create Snapshot',ct_new_schedule:'New Schedule',
-  ct_edit_schedule:'Edit Schedule',ct_start_restore:'Single VM Restore',
+  ct_create_snapshot:'Create Snapshot',ct_new_schedule:'New Protection Plan',
+  ct_edit_schedule:'Edit Protection Plan',ct_start_restore:'Single VM Restore',
   ct_clone_vm:'Clone VM',ct_jobs_history:'Jobs & History',
   ct_new_endpoint:'New ONTAP Endpoint',ct_new_pve_host:'New PVE Host',
   th_name:'Name',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Schedule',th_label:'Label',
@@ -722,9 +728,9 @@ en:{
   badge_running:'Running',badge_pending:'Queued',badge_cancelling:'Cancelling',badge_cancelled:'Cancelled',badge_schedule:'Schedule',badge_ontap:'ONTAP-native',badge_running_dots:'running …',
   act_restore:'Restore',act_clone:'Clone',act_delete:'Delete',act_activate:'Activate',
   act_deactivate:'Deactivate',act_run_now:'Run now',act_edit:'Edit',
-  pg_prev:'← Back',pg_next:'Next →',sched_save:'Save Schedule',sched_update:'Update Schedule',
+  pg_prev:'← Back',pg_next:'Next →',sched_save:'Save Plan',sched_update:'Update Plan',
   sched_step1:'Basics',sched_step2:'Schedule',sched_step3:'VMs & Scripts',sched_step4:'SnapMirror',sched_step5:'Notifications',sched_step6:'Summary',
-  empty_snapshots:'No snapshots available.',empty_schedules:'No schedules configured.',
+  empty_snapshots:'No snapshots available.',empty_schedules:'No protection plans configured.',
   empty_jobs:'No jobs available.',empty_endpoints:'No endpoints – add one above.',
   empty_pve:'No PVE hosts – add one above.',empty_mappings:'No discovery run yet – click "Detect Now".',
   empty_no_restore:'No completed snapshots available',
@@ -739,9 +745,9 @@ en:{
   msg_fill_required:'Please provide name and mapping',msg_snap_mapping_req:'Please select a mapping',
   msg_snap_vm_req:'Select at least one VM',msg_snap_name_req:'Please enter a name',
   msg_snap_started:'Snapshot job started',msg_snap_deleted:'Snapshot deleted',
-  msg_sched_saved:'Schedule saved',msg_sched_updated:'Schedule updated',
-  msg_sched_deleted:'Schedule deleted',msg_sched_enabled:'Schedule activated',
-  msg_sched_disabled:'Schedule deactivated',msg_sched_running:'Running schedule',
+  msg_sched_saved:'Protection plan saved',msg_sched_updated:'Protection plan updated',
+  msg_sched_deleted:'Protection plan deleted',msg_sched_enabled:'Protection plan activated',
+  msg_sched_disabled:'Protection plan deactivated',msg_sched_running:'Running protection plan',
   msg_restore_started:'Restore job started: %s',msg_clone_started:'Clone job started: %s',
   msg_ep_saved:'Endpoint saved',msg_ep_deleted:'Endpoint deleted',
   msg_pve_saved:'PVE host saved',msg_pve_deleted:'PVE host deleted',
@@ -771,9 +777,9 @@ en:{
   sm_no_dest_ep:'No secondary endpoint configured — scan first',
   ct_dr_clone:'DR Clone from Secondary',btn_start_dr_clone:'Start DR Clone',
   sm_source_vol:'Source Volume',sm_dest_vol:'Destination Volume',sm_state:'State',sm_lag:'Lag',
-  tab_dashboard:'Dashboard',tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
   db_vm_overview:'VM Overview',db_total:'Total',db_running:'Running',db_stopped:'Stopped',
-  db_ds_overview:'Datastores',db_protected:'Protected',db_schedules_active:'Active Schedules',
+  db_ds_overview:'Datastores',db_protected:'Protected',db_schedules_active:'Protection Plans',
   db_storage:'Storage Overview',db_recent_jobs:'Recent Jobs',db_no_ds:'No datastores configured.',
   db_no_jobs:'No jobs yet.',db_protected_badge:'Schedule active',db_unprotected_badge:'No schedule',
   db_all_ok:'All systems operational.',db_issues:'Issues detected',db_systems:'Environment',
@@ -891,7 +897,7 @@ fr:{
   sm_no_dest_ep:'Aucun endpoint secondaire configuré — scanner d\'abord',
   ct_dr_clone:'DR Clone depuis le secondaire',btn_start_dr_clone:'Démarrer DR Clone',
   sm_source_vol:'Volume Source',sm_dest_vol:'Volume Destination',sm_state:'État',sm_lag:'Décalage',
-  tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
   sect_smtp:'Notifications e-mail (SMTP)',
   lbl_smtp_host:'Serveur SMTP',lbl_smtp_port:'Port',lbl_smtp_user:"Nom d'utilisateur",
   lbl_smtp_pass:'Mot de passe',lbl_smtp_from:'Expéditeur (De)',lbl_smtp_encryption:'Chiffrement',
@@ -1006,7 +1012,7 @@ es:{
   sm_no_dest_ep:'Sin endpoint secundario configurado — escanear primero',
   ct_dr_clone:'DR Clone desde Secundario',btn_start_dr_clone:'Iniciar DR Clone',
   sm_source_vol:'Volumen Origen',sm_dest_vol:'Volumen Destino',sm_state:'Estado',sm_lag:'Retraso',
-  tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
   sect_smtp:'Notificaciones por correo (SMTP)',
   lbl_smtp_host:'Servidor SMTP',lbl_smtp_port:'Puerto',lbl_smtp_user:'Usuario',
   lbl_smtp_pass:'Contraseña',lbl_smtp_from:'Remitente (De)',lbl_smtp_encryption:'Cifrado',
@@ -1121,7 +1127,7 @@ pt:{
   sm_no_dest_ep:'Sem endpoint secundário configurado — escanear primeiro',
   ct_dr_clone:'DR Clone do Secundário',btn_start_dr_clone:'Iniciar DR Clone',
   sm_source_vol:'Volume Origem',sm_dest_vol:'Volume Destino',sm_state:'Estado',sm_lag:'Atraso',
-  tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
   sect_smtp:'Notificações por e-mail (SMTP)',
   lbl_smtp_host:'Servidor SMTP',lbl_smtp_port:'Porta',lbl_smtp_user:'Usuário',
   lbl_smtp_pass:'Senha',lbl_smtp_from:'Remetente (De)',lbl_smtp_encryption:'Criptografia',
@@ -1351,7 +1357,7 @@ it:{
   sm_no_dest_ep:'Nessun endpoint secondario configurato — scansionare prima',
   ct_dr_clone:'DR Clone dal Secondario',btn_start_dr_clone:'Avvia DR Clone',
   sm_source_vol:'Volume Sorgente',sm_dest_vol:'Volume Destinazione',sm_state:'Stato',sm_lag:'Ritardo',
-  tab_restore:'Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
+  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Storage',
   sect_smtp:'Notifiche e-mail (SMTP)',
   lbl_smtp_host:'Server SMTP',lbl_smtp_port:'Porta',lbl_smtp_user:'Nome utente',
   lbl_smtp_pass:'Password',lbl_smtp_from:'Mittente (Da)',lbl_smtp_encryption:'Cifratura',
@@ -1395,8 +1401,8 @@ function applyI18n() {
   <div class="subtabs">
     <div class="subtab active" data-tab="dashboard"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg><span data-i18n="tab_dashboard">Dashboard</span></div>
     <div class="subtab" data-tab="snapshots"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_snapshots">Snapshots</span></div>
-    <div class="subtab" data-tab="schedules"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span data-i18n="tab_schedules">Schedules</span></div>
-    <div class="subtab" data-tab="restore"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span data-i18n="tab_restore">Restore &amp; Clone</span></div>
+    <div class="subtab" data-tab="schedules"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span data-i18n="tab_schedules">Protection</span></div>
+    <div class="subtab" data-tab="restore"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span data-i18n="tab_restore">VM Restore &amp; Clone</span></div>
     <div class="subtab" data-tab="storage"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg><span data-i18n="tab_storage">Storage</span></div>
     <div class="subtab" data-tab="jobs"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><span data-i18n="tab_jobs">Jobs &amp; Logs</span></div>
     <div class="subtab" data-tab="dr"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg><span>Disaster Recovery</span></div>
@@ -1634,7 +1640,7 @@ function applyI18n() {
     <!-- ═══════════════════════ SCHEDULES ═══════════════════════ -->
     <div id="tab-schedules" class="tab-panel" style="display:none">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <button class="btn btn-primary" onclick="showAddScheduleForm()" data-i18n="btn_add_schedule">+ Add Schedule</button>
+        <button class="btn btn-primary" onclick="showAddScheduleForm()" data-i18n="btn_add_schedule">+ Add Protection Plan</button>
         <input id="schedSearch" type="text" placeholder="Filter by name, datastore or label…" oninput="schedFilterChanged()" style="flex:1;min-width:140px;max-width:240px;margin-left:4px">
       </div>
 
@@ -1667,7 +1673,7 @@ function applyI18n() {
       <!-- VM List header -->
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink:0;color:var(--accent)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-        <span style="font-weight:700;font-size:15px">Restore &amp; Clone</span>
+        <span style="font-weight:700;font-size:15px">VM Restore &amp; Clone</span>
         <div style="display:flex;gap:4px;margin-left:4px">
           <button id="rcSrcPrimary" class="btn btn-primary btn-sm" onclick="rcSetSource('primary')">Primary</button>
           <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">SnapMirror Secondary</button>
@@ -2947,6 +2953,86 @@ async function populateMappingSelect(selId) {
   }).join('');
 }
 
+function _schedGetMappingIds() {
+  return Array.from(document.querySelectorAll('#sched_ds_list .sched-ds-item.ds-checked'))
+    .map(function(el){ return el.getAttribute('data-mid'); }).filter(Boolean);
+}
+
+function _schedDsUpdateCount() {
+  var n = _schedGetMappingIds().length;
+  var el = document.getElementById('sched_ds_count');
+  if (el) el.textContent = n + ' datastore' + (n !== 1 ? 's' : '') + ' selected';
+}
+
+function schedDsToggle(el) {
+  var isChecked = el.classList.contains('ds-checked');
+  el.classList.toggle('ds-checked', !isChecked);
+  var chk = el.querySelector('input[type=checkbox]');
+  if (chk) chk.checked = !isChecked;
+  _schedDsUpdateCount();
+  var ids = _schedGetMappingIds();
+  if (ids.length) {
+    updateSchedMapping(ids[0]);
+  } else {
+    var sel = document.getElementById('sched_vmids_select');
+    if (sel) sel.innerHTML = '<option disabled>← Select datastore first</option>';
+    _schedWizHasSM = false;
+    schedWizUpdateSMPill();
+  }
+  _schedWizUpdateMultiDsMode();
+}
+
+function _schedWizUpdateMultiDsMode() {
+  var n = _schedGetMappingIds().length;
+  var note = document.getElementById('sched_multi_ds_note');
+  var syncRow = document.getElementById('sched_sync_vmids_row');
+  var manualRow = document.getElementById('sched_vmids_manual');
+  var syncChk = document.getElementById('sched_sync_vmids');
+  if (n > 1) {
+    if (note) note.style.display = '';
+    if (syncRow) syncRow.style.display = 'none';
+    if (syncChk) { syncChk.checked = true; syncChk.disabled = true; }
+    if (manualRow) manualRow.style.display = 'none';
+  } else {
+    if (note) note.style.display = 'none';
+    if (syncRow) syncRow.style.display = '';
+    if (syncChk) syncChk.disabled = false;
+    var on = syncChk && syncChk.checked;
+    if (manualRow) manualRow.style.display = on ? 'none' : 'block';
+  }
+}
+
+async function populateSchedDsList(selectedIds) {
+  if (!_mappingsCache.length) {
+    try { _mappingsCache = await apiFetch('volume-mappings'); } catch(e){}
+  }
+  selectedIds = selectedIds || [];
+  var seen = new Set();
+  var unique = _mappingsCache.filter(function(m) {
+    var key = m.volume_uuid || m.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  var container = document.getElementById('sched_ds_list');
+  if (!container) return;
+  if (!unique.length) {
+    container.innerHTML = '<div style="padding:10px;color:var(--muted);font-size:12px">No datastores found. Run Detect &amp; Scan first.</div>';
+    _schedDsUpdateCount();
+    return;
+  }
+  container.innerHTML = unique.map(function(m) {
+    var checked = selectedIds.indexOf(m.id) >= 0;
+    return '<div class="sched-ds-item'+(checked?' ds-checked':'')+'" data-mid="'+esc(m.id)+'" onclick="schedDsToggle(this)">'
+      + '<input type="checkbox"'+(checked?' checked':'')+' onclick="event.stopPropagation();schedDsToggle(this.parentElement)">'
+      + '<span><code style="font-size:11px">'+esc(m.pve_storage_id)+'</code>'
+      + ' <span style="color:var(--muted)">→</span> '+esc(m.volume_name)
+      + (m.svm_name ? ' <span style="color:var(--muted);font-size:11px">('+esc(m.svm_name)+')</span>' : '')
+      + '</span></div>';
+  }).join('');
+  _schedDsUpdateCount();
+}
+
 async function showCreateSnapshotForm() {
   document.getElementById('createSnapshotForm').style.display = '';
   document.body.style.overflow = 'hidden';
@@ -3394,6 +3480,8 @@ var _actLogMin     = false;
 var _actLogTimer   = null;
 var _actLogBusy    = false;
 var _actLogWasActive = false;
+var _actLogFinished  = [];
+var _actLogHideTimer = null;
 var _actJobLabels  = {
   'snapshot':              'Snapshot',
   'restore_sfsr':          'Restore (SFSR)',
@@ -3421,16 +3509,20 @@ function actLogToggle() {
   if (ch) ch.textContent = _actLogMin ? '▼' : '▲';
 }
 
-function _actLogRender(activeJobs) {
+function _actLogRender(activeJobs, finishedJobs) {
   var panel = document.getElementById('activityLog');
   if (!panel) return;
-  if (!activeJobs.length) { panel.style.display = 'none'; return; }
+  var showJobs = activeJobs.length ? activeJobs : (finishedJobs || []);
+  if (!showJobs.length) { panel.style.display = 'none'; return; }
   panel.style.display = '';
-  document.getElementById('actLogCount').textContent = activeJobs.length;
-  var firstJob = activeJobs[0];
+  var isDoneView = !activeJobs.length;
+  document.getElementById('actLogCount').textContent = showJobs.length;
+  var firstJob = showJobs[0];
   var firstEntry = (firstJob.log && firstJob.log.length) ? firstJob.log[firstJob.log.length - 1] : null;
-  document.getElementById('actLogHint').textContent = firstEntry ? (firstEntry.msg || firstEntry) : '';
-  document.getElementById('actLogBody').innerHTML = activeJobs.map(function(j) {
+  document.getElementById('actLogHint').textContent = isDoneView
+    ? (showJobs.every(function(j){ return j.status === 'done'; }) ? 'Completed' : 'Finished with errors')
+    : (firstEntry ? (firstEntry.msg || firstEntry) : '');
+  document.getElementById('actLogBody').innerHTML = showJobs.map(function(j) {
     var label = _actJobLabels[j.job_type] || j.job_type || 'Job';
     var ctx   = [];
     if (j.vmid) ctx.push('VM ' + j.vmid);
@@ -3438,17 +3530,25 @@ function _actLogRender(activeJobs) {
     var ctxStr  = ctx.join(' · ') || (j.created_by || '');
     var lastEntry = (j.log && j.log.length) ? j.log[j.log.length - 1] : null;
     var lastLog = lastEntry ? (lastEntry.msg || lastEntry) : '';
-    var pct     = j.progress_pct || 0;
-    var cancelBtn = (j.status === 'cancelling')
-      ? '<span style="font-size:11px;color:var(--muted)">Cancelling…</span>'
-      : '<button class="btn btn-icon btn-warning" data-tip="Cancel" title="Cancel" onclick="cancelJob(\''+esc(j.id)+'\')">'+_ico('stop', 13)+'</button>';
+    var pct = isDoneView ? (j.status === 'done' ? 100 : j.progress_pct || 0) : (j.progress_pct || 0);
+    var rightCol;
+    if (isDoneView) {
+      rightCol = j.status === 'done'
+        ? '<span style="font-size:12px;color:#3fb950;white-space:nowrap;min-width:28px">&#10003; Done</span>'
+        : '<span style="font-size:12px;color:#f85149;white-space:nowrap;min-width:28px">&#10007; Failed</span>';
+    } else {
+      var cancelBtn = (j.status === 'cancelling')
+        ? '<span style="font-size:11px;color:var(--muted)">Cancelling…</span>'
+        : '<button class="btn btn-icon btn-warning" data-tip="Cancel" title="Cancel" onclick="cancelJob(\''+esc(j.id)+'\')">'+_ico('stop', 13)+'</button>';
+      rightCol = '<div class="act-log-prog-wrap"><div class="act-log-prog-fill" style="width:'+pct+'%"></div></div>'
+        + '<span style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:28px">'+pct+'%</span>'
+        + cancelBtn;
+    }
     return '<div class="act-log-row">'
       + '<span class="act-log-type">'+esc(label)+'</span>'
       + (ctxStr ? '<span class="act-log-ctx">'+esc(ctxStr)+'</span>' : '')
       + '<span class="act-log-step">'+esc(lastLog)+'</span>'
-      + '<div class="act-log-prog-wrap"><div class="act-log-prog-fill" style="width:'+pct+'%"></div></div>'
-      + '<span style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:28px">'+pct+'%</span>'
-      + cancelBtn
+      + rightCol
       + '</div>';
   }).join('');
 }
@@ -3465,10 +3565,11 @@ async function actLogPoll() {
     var seen = {}, all = results[1].concat(results[0]);
     var deduped = all.filter(function(j){ if (seen[j.id]) return false; seen[j.id] = true; return true; });
     var active = deduped.filter(function(j){ return j.status === 'running' || j.status === 'cancelling'; });
-    _actLogRender(active);
     if (active.length) {
+      if (_actLogHideTimer) { clearTimeout(_actLogHideTimer); _actLogHideTimer = null; _actLogFinished = []; }
       delay = 3000; // fast poll while jobs are running
       _actLogWasActive = true;
+      _actLogRender(active);
       // Keep Jobs tab in sync if it's currently visible
       if (document.querySelector('[data-tab=jobs].active')) {
         deduped.sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
@@ -3476,9 +3577,20 @@ async function actLogPoll() {
         renderJobsPage();
       }
     } else if (_actLogWasActive) {
-      // Jobs just finished → do one final full reload of the Jobs table
+      // Jobs just finished: show completed state for 10 s, then hide
+      _actLogFinished = deduped.filter(function(j){ return j.status === 'done' || j.status === 'failed'; }).slice(0, 5);
       _actLogWasActive = false;
+      _actLogRender([], _actLogFinished);
+      if (_actLogHideTimer) clearTimeout(_actLogHideTimer);
+      _actLogHideTimer = setTimeout(function(){
+        _actLogFinished = [];
+        _actLogHideTimer = null;
+        var p = document.getElementById('activityLog');
+        if (p) p.style.display = 'none';
+      }, 10000);
       loadAllJobs();
+    } else {
+      _actLogRender([], _actLogFinished);
     }
   } catch(e) { /* silent */ }
   _actLogBusy = false;
@@ -3539,7 +3651,7 @@ async function dsScanIndex(mappingId, name) {
         + '<div style="font-size:12px;color:var(--muted);margin-top:3px">'
         + skip+' already in DB · '+(r.snapshots_in_index||0)+' in index · '+vmsF+' VMs'
         + '</div></div></div>'
-        + (imp>0?'<div style="font-size:12px;color:var(--muted)">Refresh <em>Restore &amp; Clone</em> to see imported snapshots.</div>':'')
+        + (imp>0?'<div style="font-size:12px;color:var(--muted)">Refresh <em>VM Restore &amp; Clone</em> to see imported snapshots.</div>':'')
         + '</div>';
       if (imp > 0) loadRcVmList();
     }
@@ -4583,8 +4695,12 @@ async function loadSchedules() {
     var rows = await apiFetch('schedules');
     _schedulesCache = rows;
     _schedVmNameMap = {};
-    var uniqueMids = rows.map(function(r){ return r.mapping_id; }).filter(function(v,i,a){ return a.indexOf(v)===i; });
-    await Promise.all(uniqueMids.map(async function(mid) {
+    var midSet = {};
+    rows.forEach(function(r){
+      var dsList = r.datastores && r.datastores.length ? r.datastores : (r.mapping_id ? [{mapping_id:r.mapping_id}] : []);
+      dsList.forEach(function(d){ if(d.mapping_id) midSet[d.mapping_id] = 1; });
+    });
+    await Promise.all(Object.keys(midSet).map(async function(mid) {
       try {
         var d = await apiFetch('snapshots/vms-for-mapping?mapping_id='+encodeURIComponent(mid));
         (d.vms||[]).forEach(function(v){ _schedVmNameMap[v.vmid] = v.name || ''; });
@@ -4611,10 +4727,10 @@ function _renderSchedules() {
   var q = (_schedSearch||'').toLowerCase();
   var rows = _schedulesCache.filter(function(s){
     if (!q) return true;
-    return (s.name||'').toLowerCase().indexOf(q)>=0
-      || (s.pve_storage_id||'').toLowerCase().indexOf(q)>=0
-      || (s.volume_name||'').toLowerCase().indexOf(q)>=0
-      || (s.label||'').toLowerCase().indexOf(q)>=0;
+    if ((s.name||'').toLowerCase().indexOf(q)>=0) return true;
+    if ((s.label||'').toLowerCase().indexOf(q)>=0) return true;
+    var dsList = s.datastores && s.datastores.length ? s.datastores : [{pve_storage_id: s.pve_storage_id||'', volume_name: s.volume_name||''}];
+    return dsList.some(function(d){ return (d.pve_storage_id||'').toLowerCase().indexOf(q)>=0 || (d.volume_name||'').toLowerCase().indexOf(q)>=0; });
   });
   var col = _schedSortCol, dir = _schedSortDir;
   rows = rows.slice().sort(function(a,b){
@@ -4629,25 +4745,44 @@ function _renderSchedules() {
   if (!rows.length) {
     tbody.innerHTML = q
       ? _emptyRow(10, _svgClock, 'No schedules match "'+esc(q)+'".')
-      : _emptyRow(10, _svgClock, 'No schedules configured', 'Without a schedule, snapshots must be created manually. Add a schedule to automate protection.', '+ Add Schedule', 'showAddScheduleForm()');
+      : _emptyRow(10, _svgClock, 'No protection plans configured', 'Without a protection plan, snapshots must be created manually. Add a plan to automate protection.', '+ Add Protection Plan', 'showAddScheduleForm()');
     return;
   }
   tbody.innerHTML = rows.map(function(s) {
     var lastRun = s.last_run_at ? fmtDate(s.last_run_at)+' '+statusBadge(s.last_run_status) : '–';
+    var _numDs = (s.datastores && s.datastores.length) ? s.datastores.length : 1;
     var vmDisplay = '<div class="vm-bubble-box">';
-    if (s.sync_vmids) {
-      vmDisplay += '<span class="badge" style="background:var(--primary);color:#fff;margin-right:4px" title="VMs are fetched from the datastore before each run">Auto</span>';
-    }
-    vmDisplay += (s.vmids||[]).map(function(id){
-      return vmBadge(id, _schedVmNameMap[id]);
-    }).join('');
-    if (s.sync_vmids && !(s.vmids||[]).length) {
-      vmDisplay += '<span style="color:var(--muted);font-size:11px">will be populated on first run</span>';
+    if (_numDs > 1) {
+      vmDisplay += '<span style="color:var(--muted);font-size:11px">Auto — per datastore</span>';
+    } else {
+      if (s.sync_vmids) {
+        vmDisplay += '<span class="badge" style="background:var(--primary);color:#fff;margin-right:4px" title="VMs are fetched from the datastore before each run">Auto</span>';
+      }
+      vmDisplay += (s.vmids||[]).map(function(id){
+        return vmBadge(id, _schedVmNameMap[id]);
+      }).join('');
+      if (s.sync_vmids && !(s.vmids||[]).length) {
+        vmDisplay += '<span style="color:var(--muted);font-size:11px">will be populated on first run</span>';
+      }
     }
     vmDisplay += '</div>';
+    var dsList = (s.datastores && s.datastores.length) ? s.datastores : (s.pve_storage_id ? [{pve_storage_id:s.pve_storage_id, volume_name:s.volume_name||''}] : []);
+    var dsCell;
+    if (!dsList.length) {
+      dsCell = '<span style="color:var(--muted)">–</span>';
+    } else if (dsList.length === 1) {
+      var d0 = dsList[0];
+      dsCell = '<code style="font-size:11px">'+esc(d0.pve_storage_id||'')+'</code>'+(d0.volume_name&&d0.volume_name!==d0.pve_storage_id?'<br><code style="font-size:10px;opacity:.6">'+esc(d0.volume_name)+'</code>':'');
+    } else {
+      dsCell = '<span class="corp-badge" style="background:var(--border);color:var(--text)">'+dsList.length+' datastores</span>'
+        + '<div style="margin-top:3px">'
+        + dsList.slice(0,2).map(function(d){ return '<code style="font-size:10px;display:block">'+esc(d.pve_storage_id||'')+'</code>'; }).join('')
+        + (dsList.length > 2 ? '<span style="font-size:10px;color:var(--muted)">+' + (dsList.length-2) + ' more</span>' : '')
+        + '</div>';
+    }
     return '<tr>' +
       '<td><strong>'+esc(s.name)+'</strong></td>' +
-      '<td><code style="font-size:11px">'+esc(s.pve_storage_id||'')+'</code>'+(s.volume_name&&s.volume_name!==s.pve_storage_id?'<br><code style="font-size:10px;opacity:.6">'+esc(s.volume_name)+'</code>':'')+'</td>' +
+      '<td>'+dsCell+'</td>' +
       '<td>'+vmDisplay+'</td>' +
       '<td>'+esc(cronHuman(s.cron_expr))+'</td>' +
       '<td>'+(s.label?'<span class="corp-badge corp-badge-ha">'+esc(s.label)+'</span>':'<span style="color:var(--muted)">–</span>')+'</td>' +
@@ -4787,7 +4922,7 @@ function schedRetentionWarn() {
   if (!warnDiv || !warnMsg) return;
   var newRet  = parseInt((document.getElementById('sched_retention')||{}).value) || 0;
   var editId  = (document.getElementById('sched_edit_id')||{}).value || '';
-  var mid     = (document.getElementById('sched_mapping')||{}).value || '';
+  var mid     = _schedGetMappingIds()[0] || '';
   if (!editId || !newRet || !mid) { warnDiv.style.display = 'none'; return; }
   var existing = _schedulesCache.find(function(s){ return s.id === editId; });
   var oldRet   = existing ? (parseInt(existing.retention_count) || 0) : 0;
@@ -5235,12 +5370,8 @@ async function showAddScheduleForm() {
   document.getElementById('addScheduleForm').style.display = '';
   document.body.style.overflow = 'hidden';
   schedWizShowStep(1);
-  await populateMappingSelect('sched_mapping');
-  var mid = document.getElementById('sched_mapping').value;
-  if (mid) {
-    await loadVmsForSchedule(mid);
-    await updateSchedSMSection(mid, '');
-  }
+  await populateSchedDsList([]);
+  _schedWizUpdateMultiDsMode();
 }
 
 function editSchedule(id) {
@@ -5296,11 +5427,16 @@ async function showEditScheduleForm(s) {
   document.getElementById('addScheduleForm').style.display = '';
   document.body.style.overflow = 'hidden';
   schedWizShowStep(1);
-  await populateMappingSelect('sched_mapping');
-  document.getElementById('sched_mapping').value = s.mapping_id;
-  if (s.mapping_id) {
-    await loadVmsForSchedule(s.mapping_id, s.vmids || []);
-    await updateSchedSMSection(s.mapping_id, s.label || '');
+  // Resolve datastores: prefer enriched list, fall back to legacy mapping_id
+  var editMids = (s.datastores && s.datastores.length)
+    ? s.datastores.map(function(d){ return d.mapping_id; })
+    : (s.mapping_id ? [s.mapping_id] : []);
+  await populateSchedDsList(editMids);
+  _schedWizUpdateMultiDsMode();
+  var firstMid = editMids[0] || '';
+  if (firstMid) {
+    await loadVmsForSchedule(firstMid, s.vmids || []);
+    await updateSchedSMSection(firstMid, s.label || '');
   }
 }
 
@@ -5335,10 +5471,9 @@ function parseCronToForm(expr) {
 }
 
 async function saveSchedule() {
-  // Re-validate step 1 in case the user bypassed it
   var name = (document.getElementById('sched_name').value || '').trim();
-  var mid  = document.getElementById('sched_mapping').value;
-  if (!name || !mid) {
+  var mids = _schedGetMappingIds();
+  if (!name || !mids.length) {
     schedWizShowStep(1);
     toast(t('msg_fill_required'), 'error');
     return;
@@ -5490,8 +5625,8 @@ function schedWizNext() {
   var next = _schedWizStep + 1;
   if (_schedWizStep === 1) {
     var name = (document.getElementById('sched_name').value || '').trim();
-    var mid  = document.getElementById('sched_mapping').value;
-    if (!name || !mid) { toast(t('msg_fill_required'), 'error'); return; }
+    var mids = _schedGetMappingIds();
+    if (!name || !mids.length) { toast(t('msg_fill_required'), 'error'); return; }
   }
   if (_schedWizStep === 3 && !_schedWizHasSM) next = 5;
   if (next > 6) { saveSchedule(); return; }
@@ -5507,8 +5642,11 @@ function schedWizPrev() {
 
 function schedWizUpdateSummary() {
   var name = document.getElementById('sched_name').value || '—';
-  var mappingSel = document.getElementById('sched_mapping');
-  var mappingText = mappingSel.options[mappingSel.selectedIndex] ? mappingSel.options[mappingSel.selectedIndex].text : '—';
+  var midList = _schedGetMappingIds();
+  var mappingText = midList.map(function(mid){
+    var m = (_mappingsCache||[]).find(function(x){ return x.id === mid; });
+    return m ? (m.pve_storage_id + ' → ' + m.volume_name) : mid;
+  }).join(', ') || '—';
   var cronHuman = document.getElementById('sched_cron_human').textContent || '—';
   var retention = document.getElementById('sched_retention').value || '7';
   var consistencyVal = document.getElementById('sched_consistency').value;
@@ -5533,7 +5671,13 @@ function schedWizUpdateSummary() {
 
   var html = '<table style="width:100%;border-collapse:collapse">';
   html += row('Name', esc(name));
-  html += row('Datastore', esc(mappingText));
+  var dsHtml = midList.length > 1
+    ? midList.map(function(mid,i){
+        var m = (_mappingsCache||[]).find(function(x){ return x.id===mid; });
+        return '<div style="font-size:12px'+(i>0?';margin-top:2px':'')+'"><code>'+esc(m?m.pve_storage_id:mid)+'</code>'+(m?' → '+esc(m.volume_name):'')+'</div>';
+      }).join('')
+    : esc(mappingText);
+  html += row('Datastore' + (midList.length>1?'s':''), dsHtml);
   html += row('Schedule', esc(cronHuman));
   html += row('Retention', esc(retention) + ' snapshots');
   html += row('Consistency', esc(consistency));
@@ -5596,7 +5740,7 @@ async function testScheduleNotification() {
 
 async function updateSchedule(id) {
   var name            = document.getElementById('sched_name').value.trim();
-  var mapping_id      = document.getElementById('sched_mapping').value;
+  var mapping_ids     = _schedGetMappingIds();
   var cron_expr       = document.getElementById('sched_cron').value.trim();
   var retention_count = parseInt(document.getElementById('sched_retention').value)||7;
   var consistency     = document.getElementById('sched_consistency').value;
@@ -5607,11 +5751,11 @@ async function updateSchedule(id) {
   var sync_vmids = !!(document.getElementById('sched_sync_vmids') && document.getElementById('sched_sync_vmids').checked);
   var sel = document.getElementById('sched_vmids_select');
   var vmids = sync_vmids ? [] : Array.from(sel.selectedOptions).map(function(o){ return parseInt(o.value); }).filter(function(v){ return !isNaN(v); });
-  if (!name||!mapping_id||!cron_expr) { toast(t('msg_fill_required'),'error'); return; }
+  if (!name||!mapping_ids.length||!cron_expr) { toast(t('msg_fill_required'),'error'); return; }
   var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
   if (_sbtn) _sbtn.disabled = true;
   try {
-    await apiPost('schedules/update', Object.assign({id,name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload(), _schedSmTamperproofPayload()));
+    await apiPost('schedules/update', Object.assign({id,name,mapping_ids,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload(), _schedSmTamperproofPayload()));
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
@@ -5622,7 +5766,7 @@ async function updateSchedule(id) {
 
 async function addSchedule() {
   var name            = document.getElementById('sched_name').value.trim();
-  var mapping_id      = document.getElementById('sched_mapping').value;
+  var mapping_ids     = _schedGetMappingIds();
   var cron_expr       = document.getElementById('sched_cron').value.trim();
   var retention_count = parseInt(document.getElementById('sched_retention').value)||7;
   var consistency     = document.getElementById('sched_consistency').value;
@@ -5633,11 +5777,11 @@ async function addSchedule() {
   var sync_vmids = !!(document.getElementById('sched_sync_vmids') && document.getElementById('sched_sync_vmids').checked);
   var sel = document.getElementById('sched_vmids_select');
   var vmids = sync_vmids ? [] : Array.from(sel.selectedOptions).map(function(o){ return parseInt(o.value); }).filter(function(v){ return !isNaN(v); });
-  if (!name||!mapping_id||!cron_expr) { toast(t('msg_fill_required'),'error'); return; }
+  if (!name||!mapping_ids.length||!cron_expr) { toast(t('msg_fill_required'),'error'); return; }
   var _sbtn = document.querySelector('#addScheduleForm button.btn-primary');
   if (_sbtn) _sbtn.disabled = true;
   try {
-    await apiPost('schedules/add', Object.assign({name,mapping_id,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload(), _schedSmTamperproofPayload()));
+    await apiPost('schedules/add', Object.assign({name,mapping_ids,vmids,cron_expr,retention_count,consistency,label,pre_script,post_script,snapmirror_update,sync_vmids}, _schedNotifyPayload(), _schedTamperproofPayload(), _schedSmTamperproofPayload()));
     hideForm('addScheduleForm');
     var _c = document.querySelector('.content'); if (_c) _c.scrollTop = 0;
     loadSchedules();
@@ -10701,7 +10845,7 @@ actLogPoll();
 </div><!-- /createSnapshotForm -->
 
 <!-- ── Add/Edit Schedule Modal ───────────────────────────────────── -->
-<div id="addScheduleForm" role="dialog" aria-modal="true" aria-label="Schedule" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="addScheduleBackdropClick(event)">
+<div id="addScheduleForm" role="dialog" aria-modal="true" aria-label="Protection Plan" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="addScheduleBackdropClick(event)">
   <div style="max-width:960px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
 
     <!-- Header -->
@@ -10728,15 +10872,16 @@ actLogPoll();
       <!-- ── Step 1: Basics ── -->
       <div class="card setup-step-card" id="schedStep1">
         <div class="card-title">① <span data-i18n="sched_step1">Basics</span></div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Give this schedule a name and select the datastore (NFS volume) to protect.</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Give this protection plan a name and select the datastores to protect.</p>
         <div style="display:flex;flex-direction:column;gap:14px">
           <div class="form-group" style="margin:0">
             <label>Name</label>
             <input id="sched_name" placeholder="e.g. Nightly Backup">
           </div>
           <div class="form-group" style="margin:0">
-            <label>Datastore</label>
-            <select id="sched_mapping" onchange="updateSchedMapping(this.value)"></select>
+            <label>Datastores <span style="font-weight:400;color:var(--muted)">(select one or more)</span></label>
+            <div id="sched_ds_list" class="sched-ds-list"></div>
+            <div id="sched_ds_count" style="font-size:11px;color:var(--muted);margin-top:5px">0 datastores selected</div>
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:20px">
@@ -10853,7 +10998,10 @@ actLogPoll();
           </div>
           <div>
             <div style="margin-bottom:10px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Include VMs</div>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px">
+            <div id="sched_multi_ds_note" style="display:none;padding:10px 12px;background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.3);border-radius:6px;font-size:12px;color:var(--text);margin-bottom:10px">
+              Multiple datastores selected — VM auto-sync is automatic (each datastore's current VMs are included at run time).
+            </div>
+            <label id="sched_sync_vmids_row" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px">
               <input type="checkbox" id="sched_sync_vmids" onchange="toggleSchedSyncVmids()">
               <span>Automatically include all VMs in this datastore</span>
             </label>
