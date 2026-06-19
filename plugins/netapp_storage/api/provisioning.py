@@ -631,25 +631,30 @@ def _storage_unified():
     for r in (prov_rows or []):
         d = _ds_to_dict(r)
         d["source"] = "provisioned"
-        # Backfill vg_name from volume_mapping for auto-detected binds
-        if not d.get("vg_name") and d.get("protocol") in ("iscsi", "nvme"):
+        # Backfill fields from volume_mapping (provisioned table doesn't have them)
+        if d.get("protocol") in ("iscsi", "nvme"):
             vm_row = db.query_one(
-                "SELECT lvm_vg_name FROM netapp_volume_mapping "
-                "WHERE pve_storage_id=? LIMIT 1",
-                (d.get("pve_storage_id", ""),),
+                "SELECT id, lvm_vg_name, snapinfo_initialized FROM netapp_volume_mapping "
+                "WHERE pve_storage_id=? AND storage_protocol=? LIMIT 1",
+                (d.get("pve_storage_id", ""), d.get("protocol", "")),
             )
             if vm_row:
-                vg = dict(vm_row).get("lvm_vg_name", "")
-                if vg:
-                    d["vg_name"] = vg
-        # Backfill mapping_id for NFS provisioned — needed for Index scan
-        if d.get("protocol") == "nfs":
+                vm = dict(vm_row)
+                if not d.get("vg_name") and vm.get("lvm_vg_name"):
+                    d["vg_name"] = vm["lvm_vg_name"]
+                d["mapping_id"] = vm.get("id")
+                d["snapinfo_initialized"] = bool(vm.get("snapinfo_initialized", 0))
+            else:
+                d.setdefault("mapping_id", None)
+                d.setdefault("snapinfo_initialized", False)
+        elif d.get("protocol") == "nfs":
             vm_row = db.query_one(
                 "SELECT id FROM netapp_volume_mapping "
                 "WHERE pve_storage_id=? AND storage_protocol='nfs' LIMIT 1",
                 (d.get("pve_storage_id", ""),),
             )
             d["mapping_id"] = dict(vm_row)["id"] if vm_row else None
+            d["snapinfo_initialized"] = False
         # SnapMirror sub-object (columns were added by LEFT JOIN)
         if d.get("sm_id"):
             d["snapmirror"] = {
