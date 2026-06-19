@@ -6966,14 +6966,26 @@ function _jtOpenPopup(bucket, evt) {
     var status = j.status;
     var sColor = status==='done' ? '#56d364' : status==='cancelled' ? '#8b949e' : '#f08080';
     var jidEsc = j.id.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+    // Context line: VM, node, schedule/user, last log msg
+    var ctx = [];
+    if (j.vmid) ctx.push('VM ' + j.vmid);
+    if (j.node) ctx.push(j.node);
+    var by = (j.created_by || '').replace(/^schedule:/, 'Sched: ');
+    if (by) ctx.push(by);
+    var lastLog = (j.log && j.log.length) ? (j.log[j.log.length-1].msg || j.log[j.log.length-1]) : '';
+    if (lastLog) ctx.push(lastLog);
+
     return '<div onclick="_jtClosePopup();_jtNavigateToJob(\''+jidEsc+'\')"'
-      + ' style="padding:6px 14px;cursor:pointer;display:flex;align-items:center;gap:8px"'
+      + ' style="padding:5px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)"'
       + ' onmouseenter="this.style.background=\'rgba(255,255,255,.06)\'"'
       + ' onmouseleave="this.style.background=\'\'">'
+      + '<div style="display:flex;align-items:center;gap:7px">'
       + '<span style="width:7px;height:7px;border-radius:50%;background:'+sColor+';flex-shrink:0"></span>'
-      + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(label)
-        + (j.vmid ? ' <span style="color:#64748b;font-size:10px">VM '+esc(String(j.vmid))+'</span>' : '')+'</span>'
-      + '<span style="color:#475569;font-size:10px;white-space:nowrap;flex-shrink:0">'+fmtDateRel(j.created_at)+'</span>'
+      + '<span style="font-weight:600;flex:1">'+esc(label)+'</span>'
+      + '<span style="color:#475569;font-size:10px;white-space:nowrap">'+fmtDateRel(j.created_at)+'</span>'
+      + '</div>'
+      + (ctx.length ? '<div style="font-size:10px;color:#64748b;margin-top:2px;padding-left:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ctx.join(' · '))+'</div>' : '')
       + '</div>';
   }).join('');
 
