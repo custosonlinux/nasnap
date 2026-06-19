@@ -4753,7 +4753,13 @@ function _renderSchedules() {
     var _numDs = (s.datastores && s.datastores.length) ? s.datastores.length : 1;
     var vmDisplay = '<div class="vm-bubble-box">';
     if (_numDs > 1) {
-      vmDisplay += '<span style="color:var(--muted);font-size:11px">Auto — per datastore</span>';
+      vmDisplay += '<span class="badge" style="background:var(--primary);color:#fff;margin-right:4px" title="VMs are fetched per datastore before each run">Auto</span>';
+      vmDisplay += (s.vmids||[]).map(function(id){
+        return vmBadge(id, _schedVmNameMap[id]);
+      }).join('');
+      if (!(s.vmids||[]).length) {
+        vmDisplay += '<span style="color:var(--muted);font-size:11px">per datastore</span>';
+      }
     } else {
       if (s.sync_vmids) {
         vmDisplay += '<span class="badge" style="background:var(--primary);color:#fff;margin-right:4px" title="VMs are fetched from the datastore before each run">Auto</span>';

@@ -500,6 +500,16 @@ def send_schedule_consolidated_notification(schedule_name, overall_status,
         ds_detail_html  = ""
         ds_plain_parts  = []
 
+        def _vm_badge_email(vm):
+            vmid  = vm.get("vmid", "?")
+            name  = vm.get("name", "")
+            vtype = (vm.get("vm_type") or "qemu").upper()
+            lbl   = f"{vtype} {vmid}" + (f" — {name}" if name else "")
+            bg    = "#1d4ed8" if vtype == "QEMU" else "#6d28d9"
+            return (f'<span style="display:inline-block;background:{bg};color:#fff;'
+                    f'border-radius:4px;padding:1px 6px;font-size:11px;margin:1px 2px 1px 0">'
+                    f'{_esc(str(lbl))}</span>')
+
         for r in ds_results:
             s       = r.get("status", "failed")
             ds_name = r.get("pve_storage_id") or r.get("job_id", "?")
@@ -507,12 +517,31 @@ def send_schedule_consolidated_notification(schedule_name, overall_status,
             logs    = r.get("log_lines", [])
             col     = "#16a34a" if s == "done" else "#dc2626"
             label   = "Success" if s == "done" else "Failed"
+            vm_list = r.get("vm_list") or []
+            sm_info = r.get("snapmirror_info")
+
+            vm_cell = ""
+            if vm_list:
+                vm_cell = "".join(_vm_badge_email(v) for v in vm_list)
+            else:
+                vm_cell = '<span style="color:#9ca3af;font-size:11px">—</span>'
+
+            sm_cell = ""
+            if sm_info and sm_info.get("exists"):
+                sm_col   = "#16a34a" if sm_info.get("healthy") else "#dc2626"
+                sm_state = sm_info.get("state", "unknown")
+                sm_trig  = " · triggered" if sm_info.get("triggered") else ""
+                sm_cell  = f'<span style="color:{sm_col};font-size:11px">● {_esc(sm_state)}{_esc(sm_trig)}</span>'
+            elif sm_info and not sm_info.get("exists"):
+                sm_cell = '<span style="color:#9ca3af;font-size:11px">—</span>'
 
             ds_summary_html += (
                 f'<tr style="border-bottom:1px solid #e5e7eb">'
-                f'<td style="padding:8px 12px;font-size:13px;font-family:monospace">{_esc(ds_name)}</td>'
-                f'<td style="padding:8px 12px;font-size:13px;color:{col};font-weight:700">● {label}</td>'
-                f'<td style="padding:8px 12px;font-size:12px;font-family:monospace;color:#6b7280">{_esc(snap)}</td>'
+                f'<td style="padding:8px 12px;font-size:13px;font-family:monospace;vertical-align:top">{_esc(ds_name)}</td>'
+                f'<td style="padding:8px 12px;font-size:13px;color:{col};font-weight:700;white-space:nowrap;vertical-align:top">● {label}</td>'
+                f'<td style="padding:8px 12px;font-size:12px;font-family:monospace;color:#6b7280;vertical-align:top">{_esc(snap)}</td>'
+                f'<td style="padding:8px 12px;vertical-align:top">{vm_cell}</td>'
+                f'<td style="padding:8px 12px;vertical-align:top">{sm_cell}</td>'
                 f'</tr>'
             )
             ds_detail_html += (
@@ -551,6 +580,8 @@ def send_schedule_consolidated_notification(schedule_name, overall_status,
         <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Datastore</th>
         <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Status</th>
         <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Snapshot</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">VMs</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">SnapMirror</th>
       </tr>
       {ds_summary_html}
     </table>

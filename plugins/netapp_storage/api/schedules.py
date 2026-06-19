@@ -168,7 +168,8 @@ def _execute_single_ds(schedule, mapping_id, sched_name_safe, suppress_notify=Fa
     from ..core.snapshot_engine import start_snapshot_job, run_snapshot_sync
 
     db = get_db()
-    result = {"job_id": None, "status": "failed", "pve_storage_id": "", "snap_name": ""}
+    result = {"job_id": None, "status": "failed", "pve_storage_id": "", "snap_name": "",
+              "vmids": [], "vm_list": [], "snapmirror_info": None}
     job_id = str(uuid.uuid4())
     result["job_id"] = job_id
     try:
@@ -201,6 +202,7 @@ def _execute_single_ds(schedule, mapping_id, sched_name_safe, suppress_notify=Fa
                         )
             except Exception as exc:
                 log.warning(f"[netapp_storage] Schedule '{schedule['name']}' vmid sync failed: {exc}")
+        result["vmids"] = vmids
 
         node = ""
         cluster_id = mapping_row["pve_cluster_id"]
@@ -255,11 +257,47 @@ def _execute_single_ds(schedule, mapping_id, sched_name_safe, suppress_notify=Fa
         result["status"] = job_row["status"] if job_row else "failed"
         result["log_lines"] = json.loads(job_row["log_json"] or "[]") if job_row else []
 
-        # Read snap_name for consolidated notification
-        snap_row = db.query_one("SELECT snap_name FROM netapp_snapshots WHERE id IN "
-                                "(SELECT snapshot_id FROM netapp_jobs WHERE id=?)", (job_id,))
+        # Read snap_name, VM info, and SnapMirror info for consolidated notification
+        snap_row = db.query_one(
+            "SELECT snap_name, vmids_json, vm_types_json, manifest_json FROM netapp_snapshots "
+            "WHERE id IN (SELECT snapshot_id FROM netapp_jobs WHERE id=?)",
+            (job_id,),
+        )
         if snap_row:
             result["snap_name"] = snap_row["snap_name"]
+            if suppress_notify:
+                # Multi-DS: job ran synchronously so manifest is fully written
+                try:
+                    manifest = json.loads(snap_row["manifest_json"] or "{}")
+                    vms = manifest.get("vms", [])
+                    result["vm_list"] = [
+                        {"vmid": v.get("vmid"), "name": v.get("name", ""), "vm_type": v.get("vm_type", "qemu")}
+                        for v in vms if v.get("vmid") is not None
+                    ]
+                    result["vmids"] = [v["vmid"] for v in result["vm_list"]]
+                except Exception:
+                    pass
+                try:
+                    sm_rows = db.query(
+                        "SELECT * FROM netapp_snapmirror_relationships WHERE source_volume_uuid=?",
+                        (mapping_row["volume_uuid"],),
+                    )
+                    if sm_rows:
+                        rel = dict(sm_rows[0])
+                        result["snapmirror_info"] = {
+                            "exists":       True,
+                            "dest_cluster": rel.get("dest_cluster_name", ""),
+                            "dest_svm":     rel.get("dest_svm", ""),
+                            "dest_volume":  rel.get("dest_volume", ""),
+                            "state":        rel.get("state", ""),
+                            "healthy":      bool(rel.get("healthy", 1)),
+                            "lag_time":     rel.get("lag_time", ""),
+                            "triggered":    bool(schedule.get("snapmirror_update")),
+                        }
+                    else:
+                        result["snapmirror_info"] = {"exists": False}
+                except Exception:
+                    pass
 
     except Exception as exc:
         log.error(f"[netapp_storage] Schedule '{schedule['name']}' ds={mapping_id} setup error: {exc}")
@@ -290,6 +328,17 @@ def _execute_schedule(schedule):
         )
     except Exception as exc:
         log.error(f"[netapp_storage] Schedule '{schedule['name']}' last_run update failed: {exc}")
+
+    # For multi-DS plans: update vmids_json with the union of all snapshotted VMIDs
+    if multi_ds and schedule.get("sync_vmids"):
+        try:
+            all_vmids = sorted(set(v for r in results for v in (r.get("vmids") or [])))
+            db.execute(
+                "UPDATE netapp_snapshot_schedules SET vmids_json=? WHERE id=?",
+                (json.dumps(all_vmids), schedule["id"]),
+            )
+        except Exception as exc:
+            log.warning(f"[netapp_storage] Schedule '{schedule['name']}' multi-DS vmids update failed: {exc}")
 
     # Send one consolidated notification for multi-DS schedules
     if multi_ds and schedule.get("notify_enabled") and schedule.get("notify_recipients"):
