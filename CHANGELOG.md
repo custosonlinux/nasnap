@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.4.0] — 2026-06-19
+
+### Added
+
+- **Protection Plans (multi-datastore schedules)** — Veeam-style 1:N protection: one plan covers any number of datastores. Assigning multiple datastores to a plan runs one snapshot job per datastore sequentially with independent failure isolation — if one fails, the others continue. The Schedules tab is renamed "Protection" and the wizard title becomes "Protection Plan".
+- **Consolidated email notifications** — when a protection plan covers multiple datastores, NaSnap sends one consolidated email per plan run instead of one email per datastore. The email includes a summary table (Datastore | Status | Snapshot) and individual per-datastore job log sections in a dark terminal block.
+- **Snapshot job progress tracking** — the snapshot engine now updates `progress_pct` at eight milestones (VM fetch → manifest → pre-script → consistency applied → ONTAP snapshot → ONTAP poll → consistency released → done: 5% / 15% / 25% / 45% / 60% / 75% / 90% / 100%). The Activity Log progress bar now reflects real job progress.
+- **Activity Log linger** — when all jobs finish, the Activity Log panel stays visible for 10 seconds showing ✓ Done / ✗ Failed state per job instead of disappearing immediately. A new job during the linger window cancels the timer and switches back to active mode.
+
+### Fixed
+
+- **VMs not appearing in Protection view after first run** — for single-datastore plans with "Auto-sync VMs" enabled, the synced VMID list is now persisted back to the plan record after each run. This DB write was accidentally dropped during the multi-DS refactor, causing the VM column to always show "will be populated on first run".
+- **Multi-DS VM column** — plans with two or more datastores now show "Auto — per datastore" in the VM column instead of an empty or misleading badge list.
+
+---
+
 ## [1.3.0] — 2026-06-19
 
 ### Added

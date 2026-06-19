@@ -2,7 +2,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI (light theme available).
 
-**Current stable: 1.3.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.4.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -13,7 +13,7 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Snapshot** any VM or set of VMs on a shared ONTAP datastore — crash-consistent, app-consistent (QEMU guest agent), or suspend-based.
 - **Restore** individual VMs (SFSR for NFS, LV copy for SAN) or revert an entire datastore to a snapshot in seconds (volume revert).
 - **Clone** VMs from any snapshot to a new VMID with fresh MAC addresses.
-- **Schedule** automatic snapshots with retention policies, pre/post hooks, and email notifications.
+- **Protect datastores with Protection Plans** — assign multiple datastores to a single plan with unified scheduling, retention, hooks, and email notifications. Each datastore runs as an independent job (Veeam-style); a consolidated email summarises all results per plan run.
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
 - **Lock snapshots** with ONTAP Snapshot Locking (WORM / tamperproof) — set an expiry time that prevents deletion even by ONTAP admins, protecting against ransomware and accidental removal. Independent locking for source and SnapMirror destination.
 - **Provision** new SAN datastores end-to-end (iSCSI and NVMe-oF): ONTAP volume + LUN/namespace + iGroup/subsystem creation, host-side iSCSI/NVMe setup, LVM VG creation, and PVE storage registration — in a single wizard.
@@ -461,8 +461,8 @@ Each schedule can send email notifications on snapshot job completion. Configure
 
 Notification emails include:
 - **Status banner** — full-width, colour-coded: green (success), amber (success with warnings), red (failure).
-- **Summary table** — schedule name, snapshot name, datastore, status, and VM list as colour-coded badges.
-- **Dark terminal log block** — last 50 job log lines with `[INFO]` / `[WARN]` / `[ERR]` severity tags.
+- **Summary table** — plan name, status, and per-datastore result (Datastore | Status | Snapshot).
+- **Dark terminal log block** — job log lines per datastore with `[INFO]` / `[WARN]` / `[ERR]` severity tags. For multi-datastore plans, each datastore gets its own log section in a single consolidated email.
 - **Plain-text fallback** — included as a `text/plain` MIME part.
 
 ---
@@ -856,7 +856,13 @@ DEBUG=1 .venv/bin/python app.py
 - **Storage tab ⟳ Index button for SAN** — index scan and import is now available for iSCSI and NVMe-oF datastores (when snapmanifest is initialized).
 - **Startup auto-scan extended** — startup scan now includes SAN datastores with an initialized snapmanifest LV, in addition to NFS.
 
-### v1.4 — Planned
+### v1.4 — Released
+
+- **Protection Plans (multi-datastore schedules)** — Veeam-style 1:N protection: one plan covers any number of datastores. Sequential per-DS execution with independent failure isolation. Consolidated email per plan run with per-datastore log sections.
+- **Snapshot progress tracking** — the Activity Log progress bar now shows real progress through 8 engine milestones instead of staying at 0%.
+- **Activity Log linger** — the log panel stays visible for 10 seconds after job completion so you can read the result.
+
+### v1.5 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
