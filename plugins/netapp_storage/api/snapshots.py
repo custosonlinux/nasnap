@@ -524,9 +524,10 @@ def _create_snapshot():
     if err:
         return err
     data = request.get_json() or {}
-    for field in ("vmids", "mapping_id"):
-        if not data.get(field):
-            return {"error": f"Required field missing: {field}"}, 400
+    if not data.get("mapping_id"):
+        return {"error": "Required field missing: mapping_id"}, 400
+    if "vmids" not in data:
+        return {"error": "Required field missing: vmids"}, 400
 
     # User-provided name — only ONTAP-valid characters, max 80
     raw_name = data.get("name", "").strip()
@@ -538,8 +539,8 @@ def _create_snapshot():
     data["snap_name"] = safe_name
 
     vmids = data["vmids"]
-    if not isinstance(vmids, list) or not vmids:
-        return {"error": "vmids must be a non-empty list"}, 400
+    if not isinstance(vmids, list):
+        return {"error": "vmids must be a list"}, 400
 
     db = get_db()
 

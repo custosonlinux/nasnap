@@ -2919,7 +2919,10 @@ async function loadVmsForMapping(mappingId) {
   try {
     var d = await apiFetch('snapshots/vms-for-mapping?mapping_id='+encodeURIComponent(mappingId));
     var vms = d.vms || [];
-    if (!vms.length) { sel.innerHTML = '<option disabled>'+t('hint_no_vms')+'</option>'; return; }
+    if (!vms.length) {
+      sel.innerHTML = '<option value="" disabled selected>No VMs on this datastore — volume snapshot only</option>';
+      return;
+    }
     sel.innerHTML = vms.map(function(v) {
       return '<option value="'+v.vmid+'" selected>'+v.vmid+' – '+esc(v.name||'')+(v.node?' ('+esc(v.node)+')':'')+'</option>';
     }).join('');
