@@ -210,7 +210,99 @@
   .btn-warning { background: transparent; color: #f0a040; border-color: transparent; }
   .btn-warning:hover { background: rgba(229,112,0,.1); border-color: #f0a040; }
   .btn-sm { padding: 4px 10px; font-size: 11px; }
-  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .btn-icon { padding: 5px; width: 28px; height: 28px; justify-content: center; }
+  .btn-icon[data-tip] { position: relative; }
+  .btn-icon[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 7px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1c1c2e;
+    color: #e8e8f2;
+    padding: 4px 9px;
+    border-radius: 5px;
+    font-size: 11px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s;
+    z-index: 300;
+    font-weight: 400;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  }
+  .btn-icon[data-tip]::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #1c1c2e;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s;
+    z-index: 300;
+  }
+  .btn-icon[data-tip]:hover::after,
+  .btn-icon[data-tip]:hover::before { opacity: 1; }
+  .row-actions { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+
+  /* ── Activity Log Panel ──────────────────────────────────────── */
+  .act-log {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 500;
+    background: var(--card); border-top: 2px solid var(--border);
+    box-shadow: 0 -4px 20px rgba(0,0,0,.35);
+  }
+  .act-log-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 16px; cursor: pointer; user-select: none;
+    font-size: 12px; font-weight: 600;
+  }
+  .act-log-header:hover { background: rgba(255,255,255,.03); }
+  .act-log-pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #56d364; flex-shrink: 0;
+    animation: actPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes actPulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: .4; transform: scale(.7); }
+  }
+  .act-log-count {
+    background: var(--primary); color: #fff; font-size: 10px;
+    font-weight: 700; padding: 1px 6px; border-radius: 10px;
+  }
+  .act-log-hint { color: var(--muted); font-weight: 400; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .act-log-chevron { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .act-log-body {
+    max-height: 164px; overflow-y: auto;
+    border-top: 1px solid var(--border);
+  }
+  .act-log.act-log-min .act-log-body { display: none; }
+  .act-log-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 16px; font-size: 12px;
+    border-bottom: 1px solid rgba(139,148,158,.08);
+  }
+  .act-log-type {
+    font-weight: 600; color: var(--text); white-space: nowrap;
+    min-width: 140px;
+  }
+  .act-log-ctx { color: var(--muted); white-space: nowrap; }
+  .act-log-step {
+    flex: 1; color: var(--muted); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .act-log-prog-wrap {
+    width: 80px; height: 4px; background: rgba(139,148,158,.18);
+    border-radius: 2px; overflow: hidden; flex-shrink: 0;
+  }
+  .act-log-prog-fill {
+    height: 100%; background: var(--primary);
+    border-radius: 2px; transition: width .4s;
+  }
 
   /* ── Tables ──────────────────────────────────────────────────── */
   .table-scroll { overflow-x: auto; }
@@ -1323,14 +1415,14 @@ function applyI18n() {
           <div class="db-stat-sub">last 7 days</div>
         </div>
         <div class="db-stat">
-          <div class="db-stat-value" style="color:#f08080" id="db_snap_failed">–</div>
+          <div class="db-stat-value" id="db_snap_failed">–</div>
           <div class="db-stat-label">Failed</div>
           <div class="db-stat-sub">last 7 days</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#79c0ff" id="db_prot_ds">–</div>
           <div class="db-stat-label" data-i18n="db_protected">Protected</div>
-          <div class="db-stat-sub">Datastores</div>
+          <div class="db-stat-sub" id="db_prot_sub">Datastores</div>
         </div>
         <div class="db-stat">
           <div class="db-stat-value" style="color:#c4b5fd" id="db_active_scheds">–</div>
@@ -1968,6 +2060,19 @@ function applyI18n() {
 
   <div id="jobTrackersContainer"></div>
 
+  <!-- ════════════════ ACTIVITY LOG ════════════════ -->
+  <div id="activityLog" class="act-log" style="display:none" aria-live="polite">
+    <div class="act-log-header" onclick="actLogToggle()">
+      <span class="act-log-pulse"></span>
+      <span>Running Tasks</span>
+      <span class="act-log-count" id="actLogCount">0</span>
+      <span class="act-log-hint" id="actLogHint"></span>
+      <a href="#" onclick="event.stopPropagation();document.querySelector('[data-tab=jobs]').click()" style="font-size:11px;color:var(--primary);white-space:nowrap">→ Jobs</a>
+      <span class="act-log-chevron" id="actLogChevron">▲</span>
+    </div>
+    <div class="act-log-body" id="actLogBody"></div>
+  </div>
+
   <footer style="padding:0.55rem 1.25rem;border-top:1px solid var(--border);color:var(--muted);font-size:0.7rem;line-height:1.5;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;flex-shrink:0">
     <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;color:var(--accent)">
@@ -2255,10 +2360,10 @@ async function loadEndpoints() {
         '<td>'+esc(ep.username)+'</td>' +
         '<td>'+(ep.ssl_verify ? '<span class="badge badge-green">'+t('opt_ssl_yes_s')+'</span>' : '<span class="badge badge-orange">'+t('opt_ssl_no')+'</span>')+'</td>' +
         '<td><div class="row-actions">' +
-          '<button class="btn btn-ghost btn-sm" onclick="testEndpoint(\''+ep.id+'\',\''+esc(ep.name)+'\')">'+t('btn_test')+'</button>' +
-          '<button class="btn btn-ghost btn-sm" onclick="discoverOne(\''+ep.id+'\')">'+t('btn_detect')+'</button>' +
-          '<button class="btn btn-ghost btn-sm" onclick="showEditEndpointForm(\''+ep.id+'\')">'+t('act_edit')+'</button>' +
-          '<button class="btn btn-danger btn-sm" onclick="deleteEndpoint(\''+ep.id+'\',\''+esc(ep.name)+'\')">'+t('act_delete')+'</button>' +
+          _icoBtn('ghost',  t('btn_test'),   'testEndpoint(\''+ep.id+'\',\''+esc(ep.name)+'\')', 'check') +
+          _icoBtn('ghost',  t('btn_detect'), 'discoverOne(\''+ep.id+'\')', 'search') +
+          _icoBtn('ghost',  t('act_edit'),   'showEditEndpointForm(\''+ep.id+'\')', 'edit') +
+          _icoBtn('danger', t('act_delete'), 'deleteEndpoint(\''+ep.id+'\',\''+esc(ep.name)+'\')', 'trash') +
         '</div></td></tr>';
     }).join('');
   } catch(e) { toast(e.message,'error'); }
@@ -2419,9 +2524,9 @@ async function loadPveHosts() {
         '<td>'+(h.nfs_ip ? esc(h.nfs_ip) : '<span style="color:var(--muted)">—</span>')+'</td>' +
         '<td>'+(h.ssl_verify ? '<span class="badge badge-green">'+t('opt_ssl_yes_s')+'</span>' : '<span class="badge badge-orange">'+t('opt_ssl_no')+'</span>')+'</td>' +
         '<td><div class="row-actions">' +
-          '<button class="btn btn-ghost btn-sm" onclick="testPveHost(\''+h.id+'\',\''+esc(h.name)+'\')">'+t('btn_test')+'</button>' +
-          '<button class="btn btn-ghost btn-sm" onclick="showEditPveHostForm(\''+h.id+'\')">'+t('act_edit')+'</button>' +
-          '<button class="btn btn-danger btn-sm" onclick="deletePveHost(\''+h.id+'\',\''+esc(h.name)+'\')">'+t('act_delete')+'</button>' +
+          _icoBtn('ghost',  t('btn_test'),   'testPveHost(\''+h.id+'\',\''+esc(h.name)+'\')', 'check') +
+          _icoBtn('ghost',  t('act_edit'),   'showEditPveHostForm(\''+h.id+'\')', 'edit') +
+          _icoBtn('danger', t('act_delete'), 'deletePveHost(\''+h.id+'\',\''+esc(h.name)+'\')', 'trash') +
         '</div></td></tr>';
     }).join('');
   } catch(e) { toast(e.message,'error'); }
@@ -2982,17 +3087,17 @@ function _snapRowHtml(s) {
       }).join('')+'</div>';
   var actions = '';
   if (s.status === 'done') {
-    actions += '<button class="btn btn-ghost btn-sm" onclick="prepareRestore(\''+s.id+'\')">'+t('act_restore')+'</button>';
+    actions += _icoBtn('ghost', t('act_restore'), 'prepareRestore(\''+s.id+'\')', 'restore');
     if (!isNative) {
-      actions += '<button class="btn btn-ghost btn-sm" onclick="prepareClone(\''+s.id+'\')">'+t('act_clone')+'</button>';
+      actions += _icoBtn('ghost', t('act_clone'), 'prepareClone(\''+s.id+'\')', 'clone');
     } else {
-      actions += '<button class="btn btn-ghost btn-sm" onclick="prepareCloneNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')">'+t('act_clone')+'</button>';
+      actions += _icoBtn('ghost', t('act_clone'), 'prepareCloneNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')', 'clone');
     }
   }
   var delCall = isNative
     ? 'deleteSnapshotNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')'
     : 'deleteSnapshot(\''+s.id+'\',\''+esc(s.snap_name)+'\')';
-  actions += '<button class="btn btn-danger btn-sm" onclick="'+delCall+'">'+t('act_delete')+'</button>';
+  actions += _icoBtn('danger', t('act_delete'), delCall, 'trash');
   var sourceBadge = isNative
     ? '<span class="corp-badge corp-badge-stopped">'+t('badge_ontap')+'</span>'
     : (s.schedule_id ? '<span class="corp-badge corp-badge-ha">'+t('badge_schedule')+'</span>' : '<span style="color:var(--muted)">–</span>');
@@ -3162,6 +3267,7 @@ async function createSnapshot() {
     setTimeout(loadSnapshots, 2500);
     toast(t('msg_snap_started'),'success');
     if (_sc && _sc.job_id) trackJob(_sc.job_id, 'Snapshot: ' + (name || label || 'new'));
+    actLogStart();
   } catch(e) {
     toast(e.message,'error');
   } finally {
@@ -3237,6 +3343,135 @@ var _currentLogJobId = null;
 // ══════════════════════════════════════════════════════════════════════════
 
 var _rcVms       = [];
+
+// ── Icon button helpers ───────────────────────────────────────────────────────
+var _I = {
+  restore: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+  clone:   'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z',
+  trash:   'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
+  edit:    'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
+  run:     'M13 10V3L4 14h7v7l9-11h-7z',
+  pause:   'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z',
+  check:   'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+  search:  'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
+  log:     'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+  stop:    'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636',
+  resize:  'M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4',
+  addHost: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z',
+  link:    'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
+};
+function _ico(key, sz) {
+  sz = sz || 15;
+  return '<svg width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="'+_I[key]+'"/></svg>';
+}
+function _icoBtn(variant, tip, onclick, key) {
+  return '<button class="btn btn-icon btn-'+variant+'" data-tip="'+tip+'" title="'+tip+'" onclick="'+onclick+'">'
+    + _ico(key) + '</button>';
+}
+
+// ── Activity Log ─────────────────────────────────────────────────────────────
+var _actLogMin     = false;
+var _actLogTimer   = null;
+var _actLogBusy    = false;
+var _actLogWasActive = false;
+var _actJobLabels  = {
+  'snapshot':              'Snapshot',
+  'restore_sfsr':          'Restore (SFSR)',
+  'restore_revert':        'Restore (Vol Revert)',
+  'restore_lv':            'Restore (LV Copy)',
+  'restore_dr':            'DR Restore',
+  'clone':                 'Clone',
+  'clone_dr':              'DR Clone',
+  'provision':             'Provision Datastore',
+  'provision_remove':      'Remove Datastore',
+  'provision_resize':      'Resize Datastore',
+  'provision_add_host':    'Add Host',
+  'provision_remove_host': 'Remove Host',
+  'recovery_bind':         'Recovery Bind',
+  'dr_planned_failover':   'DR Planned Failover',
+  'dr_emergency_failover': 'DR Emergency Failover',
+  'scan_index':            'Scan Index',
+};
+
+function actLogToggle() {
+  _actLogMin = !_actLogMin;
+  var el = document.getElementById('activityLog');
+  if (el) el.classList.toggle('act-log-min', _actLogMin);
+  var ch = document.getElementById('actLogChevron');
+  if (ch) ch.textContent = _actLogMin ? '▼' : '▲';
+}
+
+function _actLogRender(activeJobs) {
+  var panel = document.getElementById('activityLog');
+  if (!panel) return;
+  if (!activeJobs.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  document.getElementById('actLogCount').textContent = activeJobs.length;
+  var firstJob = activeJobs[0];
+  var firstEntry = (firstJob.log && firstJob.log.length) ? firstJob.log[firstJob.log.length - 1] : null;
+  document.getElementById('actLogHint').textContent = firstEntry ? (firstEntry.msg || firstEntry) : '';
+  document.getElementById('actLogBody').innerHTML = activeJobs.map(function(j) {
+    var label = _actJobLabels[j.job_type] || j.job_type || 'Job';
+    var ctx   = [];
+    if (j.vmid) ctx.push('VM ' + j.vmid);
+    if (j.node && j.node !== j.vmid) ctx.push(j.node);
+    var ctxStr  = ctx.join(' · ') || (j.created_by || '');
+    var lastEntry = (j.log && j.log.length) ? j.log[j.log.length - 1] : null;
+    var lastLog = lastEntry ? (lastEntry.msg || lastEntry) : '';
+    var pct     = j.progress_pct || 0;
+    var cancelBtn = (j.status === 'cancelling')
+      ? '<span style="font-size:11px;color:var(--muted)">Cancelling…</span>'
+      : '<button class="btn btn-icon btn-warning" data-tip="Cancel" title="Cancel" onclick="cancelJob(\''+esc(j.id)+'\')">'+_ico('stop', 13)+'</button>';
+    return '<div class="act-log-row">'
+      + '<span class="act-log-type">'+esc(label)+'</span>'
+      + (ctxStr ? '<span class="act-log-ctx">'+esc(ctxStr)+'</span>' : '')
+      + '<span class="act-log-step">'+esc(lastLog)+'</span>'
+      + '<div class="act-log-prog-wrap"><div class="act-log-prog-fill" style="width:'+pct+'%"></div></div>'
+      + '<span style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:28px">'+pct+'%</span>'
+      + cancelBtn
+      + '</div>';
+  }).join('');
+}
+
+async function actLogPoll() {
+  if (_actLogBusy) return;
+  _actLogBusy = true;
+  var delay = 15000; // idle
+  try {
+    var results = await Promise.all([
+      apiFetch('jobs/status').catch(function(){ return []; }),
+      apiFetch('restore/jobs').catch(function(){ return []; })
+    ]);
+    var seen = {}, all = results[1].concat(results[0]);
+    var deduped = all.filter(function(j){ if (seen[j.id]) return false; seen[j.id] = true; return true; });
+    var active = deduped.filter(function(j){ return j.status === 'running' || j.status === 'cancelling'; });
+    _actLogRender(active);
+    if (active.length) {
+      delay = 3000; // fast poll while jobs are running
+      _actLogWasActive = true;
+      // Keep Jobs tab in sync if it's currently visible
+      if (document.querySelector('[data-tab=jobs].active')) {
+        deduped.sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
+        _allJobsCache = deduped;
+        renderJobsPage();
+      }
+    } else if (_actLogWasActive) {
+      // Jobs just finished → do one final full reload of the Jobs table
+      _actLogWasActive = false;
+      loadAllJobs();
+    }
+  } catch(e) { /* silent */ }
+  _actLogBusy = false;
+  _actLogTimer = setTimeout(actLogPoll, delay);
+}
+
+function actLogStart() {
+  // Cancel any pending timer and poll immediately (used after starting a job)
+  if (_actLogTimer) { clearTimeout(_actLogTimer); _actLogTimer = null; }
+  actLogPoll();
+}
+
 var _rcSearch    = '';
 var _rcSortCol   = 'lastSnap';
 var _rcSortDir   = -1;
@@ -3393,10 +3628,8 @@ function _renderRcRows() {
       '<td style="color:var(--muted)">'+cnt+'</td>'+
       '<td style="color:var(--muted)">'+fmtDateRel(v.lastSnap)+'</td>'+
       '<td><div class="row-actions">'+
-        '<button class="btn btn-secondary btn-sm" onclick="openRestoreWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')">'+
-          '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Restore</button>'+
-        '<button class="btn btn-ghost btn-sm" onclick="openCloneWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')">'+
-          '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Clone</button>'+
+        _icoBtn('secondary', t('act_restore'), 'openRestoreWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')', 'restore')+
+        _icoBtn('ghost',     t('act_clone'),   'openCloneWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')',   'clone')+
       '</div></td>'+
     '</tr>';
   }).join('');
@@ -3688,6 +3921,7 @@ async function doRestore() {
     var r = await apiPost('restore/start', payload);
     toast('Restore started','success');
     if (r.job_id) trackJob(r.job_id, 'Restore: ' + (_rwState.snapName || ''));
+    actLogStart();
     closeRestoreWizard();
   } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Restore'; }
 }
@@ -3865,6 +4099,7 @@ async function doClone() {
     var r = await apiPost('clone/start', payload);
     toast('Clone started','success');
     if (r.job_id) trackJob(r.job_id, 'Clone: VM ' + (newVmid || ''));
+    actLogStart();
     closeCloneWizard();
   } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Clone'; }
 }
@@ -3969,6 +4204,7 @@ async function doRestoreConfirmed() {
     hideRestoreConfirm();
     toast(t('msg_restore_started').replace('%s',''), 'success');
     if (d.job_id) trackJob(d.job_id, 'Restore: ' + (snap ? snap.snap_name : ''));
+    actLogStart();
   } catch(e) {
     toast(e.message, 'error', e.detail);
     btn.disabled = false;
@@ -4307,6 +4543,7 @@ async function startClone() {
     var d = await apiPost('clone/start', payload);
     toast(t('msg_clone_started').replace('%s',''), 'success');
     if (d.job_id) trackJob(d.job_id, 'Clone: VM ' + new_vmid);
+    actLogStart();
     _cloneSnap = null;
   } catch(e) { toast('Clone: ' + (e.message || e), 'error'); }
 }
@@ -4400,10 +4637,10 @@ function _renderSchedules() {
       '<td style="color:var(--muted)">'+lastRun+'</td>' +
       '<td>'+schedSmBadge(s.snapmirror)+'</td>' +
       '<td><div class="row-actions">' +
-        '<button class="btn btn-ghost btn-sm" onclick="toggleSchedule(\''+s.id+'\','+s.enabled+')">'+(s.enabled?t('act_deactivate'):t('act_activate'))+'</button>' +
-        '<button class="btn btn-primary btn-sm" onclick="runNow(\''+s.id+'\',\''+esc(s.name)+'\')">'+t('act_run_now')+'</button>' +
-        '<button class="btn btn-ghost btn-sm" onclick="editSchedule(\''+s.id+'\')">'+t('act_edit')+'</button>' +
-        '<button class="btn btn-danger btn-sm" onclick="deleteSchedule(\''+s.id+'\',\''+esc(s.name)+'\')">'+t('act_delete')+'</button>' +
+        _icoBtn(s.enabled?'ghost':'success', s.enabled?t('act_deactivate'):t('act_activate'), 'toggleSchedule(\''+s.id+'\','+s.enabled+')', s.enabled?'pause':'check') +
+        _icoBtn('primary', t('act_run_now'), 'runNow(\''+s.id+'\',\''+esc(s.name)+'\')', 'run') +
+        _icoBtn('ghost',   t('act_edit'),    'editSchedule(\''+s.id+'\')', 'edit') +
+        _icoBtn('danger',  t('act_delete'),  'deleteSchedule(\''+s.id+'\',\''+esc(s.name)+'\')', 'trash') +
       '</div></td></tr>';
   }).join('');
   ['name','volume','retention','status','lastRun'].forEach(function(c){
@@ -5404,6 +5641,7 @@ async function runNow(id, name) {
     await apiPost('schedules/run-now', {id:id});
     toast(t('msg_sched_running'),'success');
     setTimeout(loadAllJobs, 1500);
+    actLogStart();
   } catch(e) { toast(e.message,'error'); }
 }
 
@@ -5661,9 +5899,7 @@ function renderJobsPage() {
     var logHtml = '';
     if (j.log && j.log.length) {
       var jidEsc = esc(j.id);
-      logHtml = '<button class="btn btn-ghost btn-sm" onclick="showJobLog(\''+jidEsc+'\')">'
-        + '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>'
-        + 'Logs ('+j.log.length+')</button>';
+      logHtml = _icoBtn('ghost', 'Logs ('+j.log.length+')', 'showJobLog(\''+jidEsc+'\')', 'log');
     } else if (j.error) {
       logHtml = '<span style="color:var(--error);font-size:11px">'+esc(j.error)+'</span>';
     } else {
@@ -5673,8 +5909,8 @@ function renderJobsPage() {
     var actionsHtml = isActive
       ? (j.status === 'cancelling'
           ? '<span style="color:var(--muted);font-size:11px">'+t('badge_cancelling')+'…</span>'
-          : '<button class="btn btn-warning btn-sm" onclick="cancelJob(\''+j.id+'\')">'+t('act_cancel_job')+'</button>')
-      : '<button class="btn btn-danger btn-sm" onclick="deleteJob(\''+j.id+'\')">'+t('act_delete')+'</button>';
+          : _icoBtn('warning', t('act_cancel_job'), 'cancelJob(\''+j.id+'\')', 'stop'))
+      : _icoBtn('danger', t('act_delete'), 'deleteJob(\''+j.id+'\')', 'trash');
     return '<tr>' +
       '<td><span class="corp-badge corp-badge-ha">'+esc(j.job_type||'')+'</span></td>' +
       '<td><code style="font-size:12px">'+esc(String(j.vmid||'–'))+'</code></td>' +
@@ -6286,16 +6522,13 @@ function _renderStorageItems(items) {
       var actions;
       if (ds.source === 'provisioned') {
         var _provIdxBtn = (ds.mapping_id && (ds.protocol === 'nfs' || ds.snapinfo_initialized))
-          ? '<button class="btn btn-ghost btn-sm"'
-            + ' onclick="dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
-            + ' title="Read datastore index and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
+          ? _icoBtn('ghost', 'Scan index', 'dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'restore')
           : '';
         actions = _provIdxBtn
-          + '<button class="btn btn-success btn-sm" onclick="showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
-            + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+')">+ Host</button> '
-          + '<button class="btn btn-success btn-sm" onclick="showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
-            + (ds.size_bytes||0)+',\''+esc(ds.protocol||'')+'\')">Resize</button> '
-          + '<button class="btn btn-danger btn-sm" onclick="confirmRemoveDatastore(\''+ds.id+'\',\''+esc(ds.name)+'\')">Remove</button>';
+          + _icoBtn('success', '+ Host', 'showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
+            + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+')', 'addHost')
+          + _icoBtn('success', 'Resize', 'showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\',' + (ds.size_bytes||0) + ',\''+esc(ds.protocol||'')+'\')' , 'resize')
+          + _icoBtn('danger', 'Remove', 'confirmRemoveDatastore(\''+ds.id+'\',\''+esc(ds.name)+'\')', 'trash');
       } else {
         var _isSan = ds.protocol && ds.protocol !== 'nfs';
         var smBtn = '';
@@ -6307,16 +6540,11 @@ function _renderStorageItems(items) {
               + ' onclick="snapmanifestInit(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')" title="Setup snapmanifest">Setup snapmanifest</button> ';
         }
         var scanIdxBtn = (!_isSan || ds.snapinfo_initialized)
-          ? '<button class="btn btn-ghost btn-sm"'
-            + ' onclick="dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
-            + ' title="Read datastore index and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
+          ? _icoBtn('ghost', 'Scan index', 'dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'restore')
           : '';
         actions = smBtn + scanIdxBtn
-          + '<button class="btn btn-ghost btn-sm"'
-            + ' onclick="importToProvisioning(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
-            + ' title="Add to managed datastores">+ Manage</button> '
-          + '<button class="btn btn-danger btn-sm"'
-            + ' onclick="deleteMapping(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')" title="Remove from database">✕</button>';
+          + _icoBtn('ghost',  'Manage',              'importToProvisioning(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'link')
+          + _icoBtn('danger', 'Remove from database', 'deleteMapping(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'trash');
       }
       var _svmEp = [ds.svm_name, ds.endpoint_name].filter(Boolean).join(' · ');
       return '<tr>'
@@ -6382,8 +6610,17 @@ function _dbRenderSummary(summary, stale) {
   ids.forEach(function(id){ var el=document.getElementById(id); if(el) el.classList.toggle('db-stale',!!stale); });
   document.getElementById('db_snap_total').textContent    = s.snap_7d        ?? '–';
   document.getElementById('db_snap_done').textContent     = s.snap_7d_done   ?? '–';
-  document.getElementById('db_snap_failed').textContent   = s.snap_7d_failed ?? '–';
-  document.getElementById('db_prot_ds').textContent       = s.protected_datastores ?? '–';
+  var failedEl = document.getElementById('db_snap_failed');
+  var failedN = s.snap_7d_failed ?? null;
+  failedEl.textContent = failedN ?? '–';
+  failedEl.style.color = (failedN === null) ? '' : (failedN === 0 ? '#56d364' : '#f08080');
+  var totalDs = s.total_datastores ?? 0;
+  var protDs  = s.protected_datastores ?? 0;
+  var unprotDs = totalDs - protDs;
+  document.getElementById('db_prot_ds').textContent = protDs + ' / ' + totalDs;
+  document.getElementById('db_prot_ds').style.color = (totalDs > 0 && unprotDs > 0) ? '#f0a040' : '#79c0ff';
+  var protSub = document.getElementById('db_prot_sub');
+  if (protSub) protSub.textContent = unprotDs > 0 ? unprotDs + ' unprotected' : 'Datastores';
   document.getElementById('db_active_scheds').textContent = s.active_schedules    ?? '–';
   var smCard = document.getElementById('db_sm_card');
   if (s.sm_total > 0) {
@@ -6972,6 +7209,7 @@ async function submitProvWizard() {
     hideProvWizard();
     toast('Provisioning job started','success');
     if (r && r.job_id) trackJob(r.job_id, 'Provision: ' + (name || storageId));
+    actLogStart();
     loadProvDatastores();
   } catch(e) {
     toast(e.message,'error');
@@ -7032,6 +7270,7 @@ function showResizeDialog(dsId, dsName, currentBytes, protocol) {
       document.body.removeChild(overlay);
       toast('Resize job started','success');
       if (rRes && rRes.job_id) trackJob(rRes.job_id, 'Resize: ' + dsName);
+      actLogStart();
       loadProvDatastores();
     } catch(e) {
       errEl.textContent=e.message;
@@ -7073,6 +7312,7 @@ async function showAddHostDialog(dsId, dsName, existingHostIds) {
       var rAh=await apiPost('provisioning/datastores/add-host', {id: dsId, pve_host_id: hid});
       toast('Add-host job started','success');
       if (rAh && rAh.job_id) trackJob(rAh.job_id, 'Add host: ' + dsName);
+      actLogStart();
       loadProvDatastores();
     } catch(e) { toast(e.message,'error'); }
   };
@@ -7089,6 +7329,7 @@ async function confirmRemoveDatastore(id, name) {
     var rRm=await apiPost('provisioning/datastores/remove', {id:id, delete_ontap_objects:delOntap});
     toast('Removal job started','success');
     if (rRm && rRm.job_id) trackJob(rRm.job_id, 'Remove: ' + name);
+    actLogStart();
     loadProvDatastores();
   } catch(e) {
     var data = e.data || {};
@@ -8710,8 +8951,8 @@ async function drLoadPeerStatus() {
       +'</div></div>'
       +'<div style="display:flex;gap:.4rem">'
       +'<button class="btn btn-ghost btn-sm" onclick="drPushSync()">⬆ Sync now</button>'
-      +'<button class="btn btn-ghost btn-sm" onclick="drShowPeerConfigModal()">⚙ Edit</button>'
-      +'<button class="btn btn-danger btn-sm" onclick="drRemovePeer()">🗑 Remove</button>'
+      +_icoBtn('ghost',  t('act_edit'),   'drShowPeerConfigModal()', 'edit')
+      +_icoBtn('danger', t('act_delete'), 'drRemovePeer()', 'trash')
       +'</div>'
       +'</div></div>';
   } catch(e){ el.innerHTML='<div class="alert alert-danger" style="font-size:.85rem">'+esc(e.message)+'</div>'; }
@@ -9165,6 +9406,7 @@ async function drStartFailover() {
   try {
     var r=await apiPost('dr/plans/failover',{plan_id:_drCurrentPlanId,failover_type:ftype,entry_ids:selectedIds,snap_map:snapMap});
     toast('Failover started — see Jobs & Logs tab for progress','success');
+    actLogStart();
     setTimeout(function(){ document.querySelector('[data-tab="jobs"]').click(); setTimeout(loadAllJobs,800); },300);
   } catch(e){ toast(e.message,'error'); }
 }
@@ -9354,6 +9596,8 @@ function _renderJobTrackers() {
 applyI18n();
 loadUiSettings();
 loadDashboard();
+// Activity log: self-scheduling poll — 3s while jobs run, 15s idle
+actLogPoll();
 </script>
 <!-- ═══════════════════════ DEPLOY WIZARD MODAL ═══════════════════════ -->
 <div id="setupWizardModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="setupWizardBackdropClick(event)">
