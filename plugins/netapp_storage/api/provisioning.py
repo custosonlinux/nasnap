@@ -971,11 +971,21 @@ def _prov_ds_index():
     if not mapping:
         return {"error": "Mapping not found"}, 404
     mapping = dict(mapping)
-    if mapping.get("storage_protocol") in ("iscsi", "nvme") or not mapping.get("nfs_mount_path"):
-        return {"error": "Index only available for NFS datastores"}, 400
-    from ..core.datastore_index import DatastoreIndex
+    protocol = mapping.get("storage_protocol", "nfs")
     ph, pu, pp, pk = _ds_scan_creds(db, mapping)
-    idx = DatastoreIndex(ph, pu, pp, pk).read(mapping["nfs_mount_path"])
+    if protocol in ("iscsi", "nvme"):
+        vg = mapping.get("lvm_vg_name")
+        if not vg:
+            return {"error": "No VG name for SAN mapping"}, 400
+        if not mapping.get("snapinfo_initialized"):
+            return {"error": "snapmanifest LV not initialized — run Setup snapmanifest first"}, 400
+        from ..core.san_helpers import snapmanifest_read_index
+        idx = snapmanifest_read_index(ph, pu, pp, pk, vg)
+    else:
+        if not mapping.get("nfs_mount_path"):
+            return {"error": "No NFS mount path for mapping"}, 400
+        from ..core.datastore_index import DatastoreIndex
+        idx = DatastoreIndex(ph, pu, pp, pk).read(mapping["nfs_mount_path"])
     if idx is None:
         return {"index": None, "exists": False}
     return {"index": idx, "exists": True}
@@ -1004,19 +1014,31 @@ def _prov_ds_scan():
         return {"error": "Mapping not found"}, 404
     mapping_id = dict(mapping)["id"]
     mapping = dict(mapping)
-    if mapping.get("storage_protocol") in ("iscsi", "nvme") or not mapping.get("nfs_mount_path"):
-        return {"error": "Scan only supported for NFS datastores"}, 400
-
-    from ..core.datastore_index import DatastoreIndex
+    protocol = mapping.get("storage_protocol", "nfs")
     ph, pu, pp, pk = _ds_scan_creds(db, mapping)
-    ds_idx = DatastoreIndex(ph, pu, pp, pk)
-    mount = mapping["nfs_mount_path"]
-    index = ds_idx.read(mount)
 
-    if index is None:
-        vms = ds_idx.discover_vms(mount)
-        return {"imported": 0, "skipped": 0, "vms_found": len(vms),
-                "index_exists": False, "discovered_vms": vms}
+    if protocol in ("iscsi", "nvme"):
+        vg = mapping.get("lvm_vg_name")
+        if not vg:
+            return {"error": "No VG name for SAN mapping"}, 400
+        if not mapping.get("snapinfo_initialized"):
+            return {"error": "snapmanifest LV not initialized — run Setup snapmanifest first"}, 400
+        from ..core.san_helpers import snapmanifest_read_index
+        index = snapmanifest_read_index(ph, pu, pp, pk, vg)
+        if index is None:
+            return {"imported": 0, "skipped": 0, "vms_found": 0,
+                    "index_exists": False, "discovered_vms": []}
+    else:
+        if not mapping.get("nfs_mount_path"):
+            return {"error": "No NFS mount path for mapping"}, 400
+        from ..core.datastore_index import DatastoreIndex
+        ds_idx = DatastoreIndex(ph, pu, pp, pk)
+        mount = mapping["nfs_mount_path"]
+        index = ds_idx.read(mount)
+        if index is None:
+            vms = ds_idx.discover_vms(mount)
+            return {"imported": 0, "skipped": 0, "vms_found": len(vms),
+                    "index_exists": False, "discovered_vms": vms}
 
     imported, skipped, vm_count = _reconcile_index_into_db(db, mapping_id, mapping, index)
     return {
@@ -1029,39 +1051,52 @@ def _prov_ds_scan():
 
 
 def _prov_ds_scan_all():
-    """POST: scan all NFS datastores and reconcile their indexes into the DB."""
+    """POST: scan all datastores (NFS and SAN) and reconcile their indexes into the DB."""
     err = _require_admin()
     if err:
         return err
     db = get_db()
-    mappings = db.query(
+    nfs_rows = db.query(
         "SELECT * FROM netapp_volume_mapping "
-        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''")
+        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''") or []
+    san_rows = db.query(
+        "SELECT * FROM netapp_volume_mapping "
+        "WHERE storage_protocol IN ('iscsi','nvme') AND snapinfo_initialized=1 AND lvm_vg_name != ''") or []
     results = []
     from ..core.datastore_index import DatastoreIndex
-    for row in mappings:
+    from ..core.san_helpers import snapmanifest_read_index
+    seen: set = set()
+    for row in list(nfs_rows) + list(san_rows):
         m = dict(row)
         mid = m["id"]
+        sid = m.get("pve_storage_id", "")
+        if sid in seen:
+            continue
+        seen.add(sid)
+        protocol = m.get("storage_protocol", "nfs")
         try:
             ph, pu, pp, pk = _ds_scan_creds(db, m)
-            ds_idx = DatastoreIndex(ph, pu, pp, pk)
-            index = ds_idx.read(m["nfs_mount_path"])
+            if protocol in ("iscsi", "nvme"):
+                index = snapmanifest_read_index(ph, pu, pp, pk, m["lvm_vg_name"])
+            else:
+                index = DatastoreIndex(ph, pu, pp, pk).read(m["nfs_mount_path"])
             if index is None:
-                results.append({"mapping_id": mid, "pve_storage_id": m.get("pve_storage_id"),
-                                 "index_exists": False, "imported": 0})
+                results.append({"mapping_id": mid, "pve_storage_id": sid,
+                                 "protocol": protocol, "index_exists": False, "imported": 0})
                 continue
             imported, skipped, vm_count = _reconcile_index_into_db(db, mid, m, index)
             results.append({
                 "mapping_id": mid,
-                "pve_storage_id": m.get("pve_storage_id"),
+                "pve_storage_id": sid,
+                "protocol": protocol,
                 "index_exists": True,
                 "imported": imported,
                 "skipped": skipped,
                 "vms_found": vm_count,
             })
         except Exception as exc:
-            results.append({"mapping_id": mid, "pve_storage_id": m.get("pve_storage_id"),
-                             "error": str(exc)})
+            results.append({"mapping_id": mid, "pve_storage_id": sid,
+                             "protocol": protocol, "error": str(exc)})
     return {"results": results, "total_datastores": len(results)}
 
 
@@ -1089,30 +1124,37 @@ def _prov_plugin_settings():
 
 
 def _run_startup_scan():
-    """Scan all NFS datastores for .nasnap/index.json and reconcile DB. Runs in background."""
+    """Scan all NFS and SAN datastores for index and reconcile DB. Runs in background."""
     db = get_db()
-    mappings = db.query(
+    nfs_rows = db.query(
         "SELECT * FROM netapp_volume_mapping "
-        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''")
+        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''") or []
+    san_rows = db.query(
+        "SELECT * FROM netapp_volume_mapping "
+        "WHERE storage_protocol IN ('iscsi','nvme') AND snapinfo_initialized=1 AND lvm_vg_name != ''") or []
     from ..core.datastore_index import DatastoreIndex
+    from ..core.san_helpers import snapmanifest_read_index
     n_total = n_imported = 0
-    seen_storage_ids: set = set()
-    for row in (mappings or []):
+    seen: set = set()
+    for row in list(nfs_rows) + list(san_rows):
         m = dict(row)
         sid = m.get("pve_storage_id", "")
-        if sid in seen_storage_ids:
-            continue   # already scanned this datastore via another mapping entry
-        seen_storage_ids.add(sid)
+        if sid in seen:
+            continue
+        seen.add(sid)
         n_total += 1
+        protocol = m.get("storage_protocol", "nfs")
         try:
             ph, pu, pp, pk = _ds_scan_creds(db, m)
-            index = DatastoreIndex(ph, pu, pp, pk).read(m["nfs_mount_path"])
+            if protocol in ("iscsi", "nvme"):
+                index = snapmanifest_read_index(ph, pu, pp, pk, m["lvm_vg_name"])
+            else:
+                index = DatastoreIndex(ph, pu, pp, pk).read(m["nfs_mount_path"])
             if index:
                 imported, _, _ = _reconcile_index_into_db(db, m["id"], m, index)
                 n_imported += imported
         except Exception as exc:
-            log.warning(
-                f"[netapp_storage] startup scan {sid or m['id']}: {exc}")
+            log.warning(f"[netapp_storage] startup scan {sid or m['id']}: {exc}")
     log.info(
         f"[netapp_storage] Startup auto-scan complete: "
         f"{n_total} datastore(s) scanned, {n_imported} snapshot(s) imported")

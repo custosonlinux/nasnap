@@ -3267,7 +3267,7 @@ async function dsScanIndex(mappingId, name) {
       body.innerHTML = '<div style="padding:4px 0">'
         + '<div style="display:flex;align-items:center;gap:8px;padding:12px;background:rgba(240,173,78,.10);border:1px solid rgba(240,173,78,.3);border-radius:6px;margin-bottom:14px">'
         + '<span style="font-size:18px">⚠️</span>'
-        + '<div><strong>No index found</strong><div style="font-size:12px;color:var(--muted);margin-top:3px">The datastore has no <code>.nasnap/index.json</code> yet. '
+        + '<div><strong>No index found</strong><div style="font-size:12px;color:var(--muted);margin-top:3px">The datastore has no index yet. '
         + 'It will be created automatically on the next snapshot.</div></div></div>'
         + (vms.length ? '<div style="font-size:13px;color:var(--muted)">'+vms.length+' VM config file(s) discovered via filesystem scan.</div>' : '')
         + '</div>';
@@ -6270,10 +6270,10 @@ function _renderStorageItems(items) {
       // Actions per source type
       var actions;
       if (ds.source === 'provisioned') {
-        var _provIdxBtn = (ds.protocol === 'nfs' && ds.mapping_id)
+        var _provIdxBtn = (ds.mapping_id && (ds.protocol === 'nfs' || ds.snapinfo_initialized))
           ? '<button class="btn btn-ghost btn-sm"'
             + ' onclick="dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
-            + ' title="Read .nasnap/index.json and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
+            + ' title="Read datastore index and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
           : '';
         actions = _provIdxBtn
           + '<button class="btn btn-success btn-sm" onclick="showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
@@ -6291,10 +6291,10 @@ function _renderStorageItems(items) {
             : '<button class="btn btn-sm" style="font-size:10px;padding:2px 7px;background:var(--warning);color:#000;border:none"'
               + ' onclick="snapmanifestInit(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')" title="Setup snapmanifest">Setup snapmanifest</button> ';
         }
-        var scanIdxBtn = !_isSan
+        var scanIdxBtn = (!_isSan || ds.snapinfo_initialized)
           ? '<button class="btn btn-ghost btn-sm"'
             + ' onclick="dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
-            + ' title="Read .nasnap/index.json and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
+            + ' title="Read datastore index and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
           : '';
         actions = smBtn + scanIdxBtn
           + '<button class="btn btn-ghost btn-sm"'

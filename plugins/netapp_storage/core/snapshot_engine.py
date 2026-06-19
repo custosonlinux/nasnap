@@ -310,23 +310,34 @@ def _run_snapshot(job_id, params, username):
                 _sm_expiry = datetime.now(timezone.utc) + timedelta(days=int(params["sm_tamperproof_days"]))
                 sm_expiry_time = _sm_expiry.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-            # ── 7a. Update datastore index (NFS only) ──────────────────
+            # ── 7a. Update datastore index ─────────────────────────────
+            from .datastore_index import build_snap_entry, build_datastore_info
+            _snap_entry = build_snap_entry(
+                snap_name=snap_name,
+                schedule_name=snap_name_suffix,
+                consistency=consistency,
+                vm_entries=vm_entries,
+                expiry_time=expiry_time,
+            )
+            _ds_info = build_datastore_info(mapping, vm_entries)
             if not is_san and mapping.get("nfs_mount_path"):
                 try:
-                    from .datastore_index import DatastoreIndex, build_snap_entry, build_datastore_info
-                    _ds_idx = DatastoreIndex(pve_host, pve_user, pve_pass, pve_key)
-                    _snap_entry = build_snap_entry(
-                        snap_name=snap_name,
-                        schedule_name=snap_name_suffix,
-                        consistency=consistency,
-                        vm_entries=vm_entries,
-                        expiry_time=expiry_time,
-                    )
-                    _ds_info = build_datastore_info(mapping, vm_entries)
-                    _ds_idx.add_snapshot(mapping["nfs_mount_path"], _snap_entry, _ds_info)
+                    from .datastore_index import DatastoreIndex
+                    DatastoreIndex(pve_host, pve_user, pve_pass, pve_key).add_snapshot(
+                        mapping["nfs_mount_path"], _snap_entry, _ds_info)
                     jlog.log("Datastore index updated.")
                 except Exception as _idx_err:
                     jlog.log(f"WARNING: datastore index update failed ({_idx_err}) — continuing.")
+            elif is_san and mapping.get("snapinfo_initialized") and mapping.get("lvm_vg_name"):
+                try:
+                    from .san_helpers import snapmanifest_write_index
+                    snapmanifest_write_index(
+                        pve_host, pve_user, pve_pass, pve_key,
+                        mapping["lvm_vg_name"], "netapp_snapmanifest",
+                        _snap_entry, _ds_info, jlog=jlog,
+                    )
+                except Exception as _idx_err:
+                    jlog.log(f"WARNING: SAN datastore index update failed ({_idx_err}) — continuing.")
 
             job_uuid = client.create_snapshot(
                 mapping["volume_uuid"], snap_name,

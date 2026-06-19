@@ -258,6 +258,136 @@ def snapmanifest_read_manifest(ssh_host, ssh_user, ssh_pass, ssh_key,
                 log.warning(f"[netapp_storage] snapmanifest read deactivate failed: {exc}")
 
 
+# ── snapmanifest LV: index read/write ────────────────────────────────────────
+
+def snapmanifest_write_index(ssh_host, ssh_user, ssh_pass, ssh_key,
+                              vg_name, lv_name, snap_entry, datastore_info, jlog=None):
+    """Reads the current index.json from the snapmanifest LV, prepends snap_entry,
+    and writes it back atomically. Creates a fresh index if none exists yet.
+    Called just before the ONTAP snapshot so the index bakes into every snapshot.
+    """
+    from .datastore_index import _new_index, _now_iso
+
+    vg_q = shlex.quote(vg_name)
+    lv_q = shlex.quote(lv_name)
+    dev  = f"/dev/{vg_name}/{lv_name}"
+    mp   = f"/tmp/.pgsi_{_uuid.uuid4().hex[:10]}"
+    mp_q = shlex.quote(mp)
+
+    def _log(msg):
+        log.info(f"[netapp_storage] {msg}")
+        if jlog:
+            jlog.log(msg)
+
+    activated = False
+    mounted   = False
+    try:
+        ssh_run(ssh_host, ssh_user, ssh_pass,
+                f"lvchange -aey {vg_q}/{lv_q}", key_material=ssh_key)
+        activated = True
+
+        ssh_run(ssh_host, ssh_user, ssh_pass,
+                f"mkdir -p {mp_q} && mount {shlex.quote(dev)} {mp_q}",
+                key_material=ssh_key)
+        mounted = True
+
+        sentinel = "__NASNAP_NOT_FOUND__"
+        raw = ssh_run(ssh_host, ssh_user, ssh_pass,
+                      f"cat {mp_q}/index.json 2>/dev/null || printf {shlex.quote(sentinel)}",
+                      capture=True, key_material=ssh_key)
+        if sentinel in (raw or ""):
+            index = _new_index(datastore_info)
+        else:
+            try:
+                index = json.loads(raw)
+            except Exception:
+                index = _new_index(datastore_info)
+
+        index["vms_current"] = datastore_info.get("vms_current", [])
+        index["last_updated"] = _now_iso()
+        snapshots = index.get("snapshots", [])
+        snapshots.insert(0, snap_entry)
+        index["snapshots"] = snapshots
+
+        data = json.dumps(index, indent=2).encode()
+        tmp_q = shlex.quote(f"{mp}/index.json.tmp")
+        idx_q = shlex.quote(f"{mp}/index.json")
+        ssh_run(ssh_host, ssh_user, ssh_pass,
+                f"cat > {tmp_q}", stdin_data=data, key_material=ssh_key)
+        ssh_run(ssh_host, ssh_user, ssh_pass,
+                f"mv {tmp_q} {idx_q} && sync", key_material=ssh_key)
+        _log("Datastore index written to snapmanifest LV.")
+
+    finally:
+        if mounted:
+            try:
+                ssh_run(ssh_host, ssh_user, ssh_pass,
+                        f"umount {mp_q} 2>/dev/null; rmdir {mp_q} 2>/dev/null",
+                        key_material=ssh_key)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] snapmanifest index umount failed: {exc}")
+        if activated:
+            try:
+                ssh_run(ssh_host, ssh_user, ssh_pass,
+                        f"lvchange -an {vg_q}/{lv_q}", key_material=ssh_key)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] snapmanifest index deactivate failed: {exc}")
+
+
+def snapmanifest_read_index(ssh_host, ssh_user, ssh_pass, ssh_key,
+                             vg_name, lv_name="netapp_snapmanifest"):
+    """Reads index.json from the snapmanifest LV. Returns dict or None."""
+    vg_q = shlex.quote(vg_name)
+    lv_q = shlex.quote(lv_name)
+    dev  = f"/dev/{vg_name}/{lv_name}"
+    mp   = f"/tmp/.pgsi_{_uuid.uuid4().hex[:10]}"
+    mp_q = shlex.quote(mp)
+
+    out = ssh_run(ssh_host, ssh_user, ssh_pass,
+                  f"lvs {vg_q}/{lv_q} 2>/dev/null && echo EXISTS || echo MISSING",
+                  capture=True, key_material=ssh_key)
+    if "MISSING" in (out or ""):
+        return None
+
+    activated = False
+    mounted   = False
+    try:
+        ssh_run(ssh_host, ssh_user, ssh_pass,
+                f"lvchange -aey {vg_q}/{lv_q}", key_material=ssh_key)
+        activated = True
+
+        ssh_run(ssh_host, ssh_user, ssh_pass,
+                f"mkdir -p {mp_q} && mount -o ro {shlex.quote(dev)} {mp_q}",
+                key_material=ssh_key)
+        mounted = True
+
+        sentinel = "__NASNAP_NOT_FOUND__"
+        raw = ssh_run(ssh_host, ssh_user, ssh_pass,
+                      f"cat {mp_q}/index.json 2>/dev/null || printf {shlex.quote(sentinel)}",
+                      capture=True, key_material=ssh_key)
+        if sentinel in (raw or ""):
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
+    finally:
+        if mounted:
+            try:
+                ssh_run(ssh_host, ssh_user, ssh_pass,
+                        f"umount {mp_q} 2>/dev/null; rmdir {mp_q} 2>/dev/null",
+                        key_material=ssh_key)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] snapmanifest index read umount failed: {exc}")
+        if activated:
+            try:
+                ssh_run(ssh_host, ssh_user, ssh_pass,
+                        f"lvchange -an {vg_q}/{lv_q}", key_material=ssh_key)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] snapmanifest index read deactivate failed: {exc}")
+
+
 # ── iSCSI: Rescan + Device-Lookup ────────────────────────────────────────────
 
 def get_iscsi_initiator_iqn(ssh_host, ssh_user, ssh_pass, ssh_key):

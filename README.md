@@ -2,7 +2,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI (light theme available).
 
-**Current stable: 1.2.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.3.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -50,8 +50,8 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Storage Resize | ✅ grow & shrink | 🟡 Beta grow only | 🟡 Beta grow only |
 | Job Cancellation | ✅ | 🟡 Beta | 🟡 Beta |
 | Import VMs from Datastore (adopt existing volumes with VMs) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
-| Datastore Index (self-describing `.nasnap/index.json` per snapshot) | ✅ | ❌ n/a | ❌ n/a |
-| Startup auto-scan (reconcile index into DB on start) | ✅ | ❌ n/a | ❌ n/a |
+| Datastore Index (self-describing index per snapshot) | ✅ NFS | ✅ snapmanifest LV | ✅ snapmanifest LV |
+| Startup auto-scan (reconcile index into DB on start) | ✅ | ✅ | ✅ |
 | Dashboard (7-day stats, timeline, protection overview, alerts) | ✅ | ✅ | ✅ |
 | Full DR Failover (planned & emergency) | 🔵 In Development | 🔵 In Development | 🔵 In Development |
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
@@ -407,17 +407,26 @@ Every NFS snapshot taken by NaSnap is self-describing. Before each ONTAP snapsho
 }
 ```
 
+### Storage by protocol
+
+| Protocol | Index location | Mechanism |
+|---|---|---|
+| NFS | `<mount>/.nasnap/index.json` | SSH write to NFS mount before snapshot |
+| iSCSI | `netapp_snapmanifest` LV — `index.json` at LV root | LV activated → mounted → written → unmounted before snapshot |
+| NVMe-oF | `netapp_snapmanifest` LV — `index.json` at LV root | Same as iSCSI |
+
+For SAN, the snapmanifest LV must be initialized first (Storage tab → **Setup snapmanifest**). The index write uses a dedicated mount session separate from the manifest write so both files are current when the ONTAP snapshot fires.
+
 ### Scanning and importing
 
-- **Storage tab → ⟳ Index** — manually scan a single NFS datastore and import any snapshots not yet in the local database (marked `source = index_import`).
-- **Settings → Auto-scan on startup** — enable to automatically scan all NFS datastores on every NaSnap start. Useful after a fresh install or when taking over an existing environment.
+- **Storage tab → ⟳ Index** — manually scan any datastore (NFS or SAN) and import snapshots missing from the local database (marked `source = index_import`). For SAN, the snapmanifest LV must be initialized.
+- **Settings → Auto-scan on startup** — enable to automatically scan all datastores (NFS and SAN) on every NaSnap start. Useful after a fresh install or when taking over an existing environment.
 - **Restore & Clone** — snapshots imported from the index appear in the per-VM restore wizard alongside plugin-managed snapshots. An *Imported* badge identifies their origin, and the **Imported** filter in the header narrows the VM list to entries with at least one index-imported snapshot.
 - **Import VMs** — the VM import wizard now uses the datastore index as its primary snapshot source (faster, offline-capable). Falls back to the legacy manifest directory when no index is present.
 
 ### Format notes
 
-- The index is written atomically (`.tmp` → `mv`) to prevent partial reads during concurrent snapshot operations.
-- SAN datastores (iSCSI, NVMe-oF) do not use this mechanism — they use the snapmanifest LV instead.
+- The index is written atomically (`.tmp` → `mv` for NFS, same pattern on SAN) to prevent partial reads during concurrent snapshot operations.
 - A single ONTAP volume may appear in multiple `netapp_volume_mapping` rows (one per PVE host). NaSnap deduplicates by `volume_uuid` to avoid duplicate DB entries.
 
 ---
@@ -841,7 +850,13 @@ DEBUG=1 .venv/bin/python app.py
 - **Import Tool: index-first** — The VM import wizard now prefers the datastore index as its snapshot source (faster, works offline) and falls back to the legacy snapmanifest directory when no index is present. A source badge on each snapshot entry indicates the data origin.
 - **Snapshot timeline improvements** — Default zoom changed to Week. Timeline zoom now also filters the snapshot list below it. Added **All** button to show the full history. Added **Custom** date-range picker (popover button) to display any arbitrary time window.
 
-### v1.3 — Planned
+### v1.3 — Released
+
+- **Datastore Index for iSCSI and NVMe-oF** — the index feature (previously NFS-only) now covers SAN datastores. Before each snapshot, NaSnap mounts the `netapp_snapmanifest` LV, reads the existing `index.json`, prepends the new snapshot entry, and writes it back atomically. The index travels inside every ONTAP snapshot. Requires snapmanifest LV to be initialized.
+- **Storage tab ⟳ Index button for SAN** — index scan and import is now available for iSCSI and NVMe-oF datastores (when snapmanifest is initialized).
+- **Startup auto-scan extended** — startup scan now includes SAN datastores with an initialized snapmanifest LV, in addition to NFS.
+
+### v1.4 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
