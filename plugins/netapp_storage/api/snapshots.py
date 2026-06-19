@@ -445,15 +445,18 @@ def _list_snapshots():
     db_keys = set()   # (volume_uuid, snap_name) — for deduplication
     for r in rows:
         d = dict(r)
+        dedup_key = (d.get("volume_uuid", ""), d.get("snap_name", ""))
+        if dedup_key in db_keys:
+            continue   # same ONTAP snapshot imported under multiple mapping_ids — keep first
+        db_keys.add(dedup_key)
         d["vmids"] = json.loads(d.get("vmids_json") or "[]")
         try:
             manifest = json.loads(d.get("manifest_json") or "{}")
             d["vm_names"] = {str(v["vmid"]): v.get("name", "") for v in manifest.get("vms", [])}
         except Exception:
             d["vm_names"] = {}
-        d["source"] = "plugin"
+        d["source"] = d.get("source") or "plugin"
         d["san_optimized"] = bool(d.get("san_optimized", 0))
-        db_keys.add((d["volume_uuid"], d["snap_name"]))
         result.append(d)
 
     # ── 2. ONTAP-native snapshots (not in DB) ──────────────────────────

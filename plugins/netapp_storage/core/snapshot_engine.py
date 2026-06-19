@@ -309,6 +309,25 @@ def _run_snapshot(job_id, params, username):
             if params.get("sm_tamperproof_enabled") and int(params.get("sm_tamperproof_days") or 0) > 0:
                 _sm_expiry = datetime.now(timezone.utc) + timedelta(days=int(params["sm_tamperproof_days"]))
                 sm_expiry_time = _sm_expiry.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            # ── 7a. Update datastore index (NFS only) ──────────────────
+            if not is_san and mapping.get("nfs_mount_path"):
+                try:
+                    from .datastore_index import DatastoreIndex, build_snap_entry, build_datastore_info
+                    _ds_idx = DatastoreIndex(pve_host, pve_user, pve_pass, pve_key)
+                    _snap_entry = build_snap_entry(
+                        snap_name=snap_name,
+                        schedule_name=snap_name_suffix,
+                        consistency=consistency,
+                        vm_entries=vm_entries,
+                        expiry_time=expiry_time,
+                    )
+                    _ds_info = build_datastore_info(mapping, vm_entries)
+                    _ds_idx.add_snapshot(mapping["nfs_mount_path"], _snap_entry, _ds_info)
+                    jlog.log("Datastore index updated.")
+                except Exception as _idx_err:
+                    jlog.log(f"WARNING: datastore index update failed ({_idx_err}) — continuing.")
+
             job_uuid = client.create_snapshot(
                 mapping["volume_uuid"], snap_name,
                 comment=f"nasnap cluster={cluster_id} vms={','.join(str(v) for v in vmids)}",

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS netapp_snapshots (
     error           TEXT DEFAULT '',
     schedule_id     TEXT DEFAULT '',
     label           TEXT DEFAULT '',
+    source          TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     completed_at    TEXT DEFAULT ''
 );
@@ -167,14 +168,15 @@ CREATE TABLE IF NOT EXISTS netapp_provisioned_datastores (
 
 -- Plugin-wide config: role (PRIMARY/SECONDARY/STANDALONE)
 CREATE TABLE IF NOT EXISTS netapp_plugin_config (
-    id                  TEXT PRIMARY KEY DEFAULT 'default',
-    role                TEXT NOT NULL DEFAULT 'PRIMARY',     -- PRIMARY | SECONDARY | STANDALONE
-    role_forced         INTEGER NOT NULL DEFAULT 0,
-    config_volume_id    TEXT NOT NULL DEFAULT '',            -- legacy, unused in v3
-    config_storage_id   TEXT NOT NULL DEFAULT '',            -- legacy, unused in v3
-    config_pve_host_ids TEXT NOT NULL DEFAULT '[]',          -- legacy, unused in v3
-    last_role_check     TEXT NOT NULL DEFAULT '',
-    updated_at          TEXT NOT NULL DEFAULT ''
+    id                       TEXT PRIMARY KEY DEFAULT 'default',
+    role                     TEXT NOT NULL DEFAULT 'PRIMARY',     -- PRIMARY | SECONDARY | STANDALONE
+    role_forced              INTEGER NOT NULL DEFAULT 0,
+    config_volume_id         TEXT NOT NULL DEFAULT '',            -- legacy, unused in v3
+    config_storage_id        TEXT NOT NULL DEFAULT '',            -- legacy, unused in v3
+    config_pve_host_ids      TEXT NOT NULL DEFAULT '[]',          -- legacy, unused in v3
+    last_role_check          TEXT NOT NULL DEFAULT '',
+    updated_at               TEXT NOT NULL DEFAULT '',
+    auto_scan_on_startup     INTEGER NOT NULL DEFAULT 0
 );
 
 -- Direct peer-to-peer pairing (one row, id='default')

@@ -642,6 +642,14 @@ def _storage_unified():
                 vg = dict(vm_row).get("lvm_vg_name", "")
                 if vg:
                     d["vg_name"] = vg
+        # Backfill mapping_id for NFS provisioned — needed for Index scan
+        if d.get("protocol") == "nfs":
+            vm_row = db.query_one(
+                "SELECT id FROM netapp_volume_mapping "
+                "WHERE pve_storage_id=? AND storage_protocol='nfs' LIMIT 1",
+                (d.get("pve_storage_id", ""),),
+            )
+            d["mapping_id"] = dict(vm_row)["id"] if vm_row else None
         # SnapMirror sub-object (columns were added by LEFT JOIN)
         if d.get("sm_id"):
             d["snapmirror"] = {
@@ -848,6 +856,338 @@ def _storage_capacity():
     return cached
 
 
+# ── Datastore index scan / reindex ───────────────────────────────────────────
+
+def _ds_scan_creds(db, mapping):
+    """Returns (pve_host, user, password, key) for an accessible PVE host.
+
+    Tries the mapping's own pve_cluster_id first, then falls back to any
+    configured PVE host.  The NFS mount is on the PVE node, so any host that
+    has the datastore mounted will do.
+    """
+    candidate_ids = []
+    primary = (mapping or {}).get("pve_cluster_id", "")
+    if primary:
+        candidate_ids.append(primary)
+    other_rows = db.query(
+        "SELECT id FROM netapp_pve_hosts WHERE id!=? ORDER BY id LIMIT 10",
+        (primary,),
+    )
+    for r in (other_rows or []):
+        candidate_ids.append(r["id"])
+
+    last_err = None
+    for host_id in candidate_ids:
+        try:
+            pve = build_pve_client(db, host_id)
+            pu, pp, pk = get_ssh_creds(pve)
+            return pve.host, pu, pp, pk
+        except Exception as exc:
+            last_err = exc
+
+    raise RuntimeError(
+        f"No accessible PVE host found for index scan "
+        f"(tried {len(candidate_ids)}): {last_err}"
+    )
+
+
+def _reconcile_index_into_db(db, mapping_id, mapping, index):
+    """Inserts index snapshots missing from the local DB.
+
+    Returns (imported_count, skipped_count, vm_count).
+    """
+    from ..core.datastore_index import _now_iso
+    imported = skipped = vm_count = 0
+    pve_cluster_id = mapping.get("pve_cluster_id", "")
+
+    for snap in (index.get("snapshots") or []):
+        snap_name = snap.get("ontap_snapshot_name", "")
+        if not snap_name:
+            continue
+        # Skip if this snapshot already exists under this or any sibling mapping
+        # (same ONTAP volume → same volume_uuid → different mapping_id per PVE host)
+        existing = db.query_one(
+            """SELECT s.id FROM netapp_snapshots s
+               JOIN netapp_volume_mapping vm ON vm.id = s.mapping_id
+               WHERE s.snap_name=? AND vm.volume_uuid=(
+                   SELECT volume_uuid FROM netapp_volume_mapping WHERE id=? LIMIT 1)""",
+            (snap_name, mapping_id),
+        )
+        if existing:
+            skipped += 1
+            continue
+
+        vms = snap.get("vms") or []
+        vmids = [int(v["vmid"]) for v in vms if v.get("vmid") is not None]
+        vm_count += len(vms)
+        taken_at = snap.get("taken_at") or _now_iso()
+        consistency = "app" if snap.get("consistent") else "crash"
+        manifest = json.dumps({
+            "schema": "nasnap-index-v1",
+            "snapshot_name": snap_name,
+            "created_at": taken_at,
+            "consistency": consistency,
+            "vms": [{"vmid": v["vmid"], "name": v.get("name", "")} for v in vms],
+        })
+        db.execute(
+            """INSERT INTO netapp_snapshots
+               (id, mapping_id, snap_name, consistency, pve_cluster_id, node,
+                vmids_json, vm_types_json, manifest_path, manifest_json,
+                status, source, created_at, completed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,'done','index_import',?,?)""",
+            (
+                str(_uuid.uuid4()), mapping_id, snap_name,
+                consistency, pve_cluster_id, "",
+                json.dumps(vmids), "{}",
+                f"index_import:{mapping_id}", manifest,
+                taken_at, taken_at,
+            ),
+        )
+        imported += 1
+
+    return imported, skipped, vm_count
+
+
+def _prov_ds_index():
+    """GET: return the raw .nasnap/index.json for a mapping.
+
+    Accepts ?mapping_id=<id> or ?pve_storage_id=<sid> as lookup key.
+    """
+    from flask import request
+    err = _require_admin()
+    if err:
+        return err
+    mapping_id     = request.args.get("mapping_id") or (request.get_json(force=True) or {}).get("mapping_id")
+    pve_storage_id = request.args.get("pve_storage_id")
+    db = get_db()
+    if mapping_id:
+        mapping = db.query_one("SELECT * FROM netapp_volume_mapping WHERE id=?", (mapping_id,))
+    elif pve_storage_id:
+        mapping = db.query_one(
+            "SELECT * FROM netapp_volume_mapping WHERE pve_storage_id=? LIMIT 1",
+            (pve_storage_id,))
+    else:
+        return {"error": "mapping_id or pve_storage_id required"}, 400
+    if not mapping:
+        return {"error": "Mapping not found"}, 404
+    mapping = dict(mapping)
+    if mapping.get("storage_protocol") in ("iscsi", "nvme") or not mapping.get("nfs_mount_path"):
+        return {"error": "Index only available for NFS datastores"}, 400
+    from ..core.datastore_index import DatastoreIndex
+    ph, pu, pp, pk = _ds_scan_creds(db, mapping)
+    idx = DatastoreIndex(ph, pu, pp, pk).read(mapping["nfs_mount_path"])
+    if idx is None:
+        return {"index": None, "exists": False}
+    return {"index": idx, "exists": True}
+
+
+def _prov_ds_scan():
+    """POST: read .nasnap/index.json from a datastore and reconcile missing snapshots into DB."""
+    from flask import request
+    err = _require_admin()
+    if err:
+        return err
+    body = request.get_json(force=True) or {}
+    mapping_id     = body.get("mapping_id")
+    pve_storage_id = body.get("pve_storage_id")
+    db = get_db()
+    if mapping_id:
+        mapping = db.query_one("SELECT * FROM netapp_volume_mapping WHERE id=?", (mapping_id,))
+    elif pve_storage_id:
+        mapping = db.query_one(
+            "SELECT * FROM netapp_volume_mapping "
+            "WHERE pve_storage_id=? AND storage_protocol='nfs' LIMIT 1",
+            (pve_storage_id,))
+    else:
+        return {"error": "mapping_id or pve_storage_id required"}, 400
+    if not mapping:
+        return {"error": "Mapping not found"}, 404
+    mapping_id = dict(mapping)["id"]
+    mapping = dict(mapping)
+    if mapping.get("storage_protocol") in ("iscsi", "nvme") or not mapping.get("nfs_mount_path"):
+        return {"error": "Scan only supported for NFS datastores"}, 400
+
+    from ..core.datastore_index import DatastoreIndex
+    ph, pu, pp, pk = _ds_scan_creds(db, mapping)
+    ds_idx = DatastoreIndex(ph, pu, pp, pk)
+    mount = mapping["nfs_mount_path"]
+    index = ds_idx.read(mount)
+
+    if index is None:
+        vms = ds_idx.discover_vms(mount)
+        return {"imported": 0, "skipped": 0, "vms_found": len(vms),
+                "index_exists": False, "discovered_vms": vms}
+
+    imported, skipped, vm_count = _reconcile_index_into_db(db, mapping_id, mapping, index)
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "vms_found": vm_count,
+        "index_exists": True,
+        "snapshots_in_index": len(index.get("snapshots") or []),
+    }
+
+
+def _prov_ds_scan_all():
+    """POST: scan all NFS datastores and reconcile their indexes into the DB."""
+    err = _require_admin()
+    if err:
+        return err
+    db = get_db()
+    mappings = db.query(
+        "SELECT * FROM netapp_volume_mapping "
+        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''")
+    results = []
+    from ..core.datastore_index import DatastoreIndex
+    for row in mappings:
+        m = dict(row)
+        mid = m["id"]
+        try:
+            ph, pu, pp, pk = _ds_scan_creds(db, m)
+            ds_idx = DatastoreIndex(ph, pu, pp, pk)
+            index = ds_idx.read(m["nfs_mount_path"])
+            if index is None:
+                results.append({"mapping_id": mid, "pve_storage_id": m.get("pve_storage_id"),
+                                 "index_exists": False, "imported": 0})
+                continue
+            imported, skipped, vm_count = _reconcile_index_into_db(db, mid, m, index)
+            results.append({
+                "mapping_id": mid,
+                "pve_storage_id": m.get("pve_storage_id"),
+                "index_exists": True,
+                "imported": imported,
+                "skipped": skipped,
+                "vms_found": vm_count,
+            })
+        except Exception as exc:
+            results.append({"mapping_id": mid, "pve_storage_id": m.get("pve_storage_id"),
+                             "error": str(exc)})
+    return {"results": results, "total_datastores": len(results)}
+
+
+def _prov_plugin_settings():
+    """GET/POST plugin-level settings stored in netapp_plugin_config."""
+    from flask import request
+    err = _require_admin()
+    if err:
+        return err
+    db = get_db()
+    if request.method == 'GET':
+        cfg = db.query_one(
+            "SELECT auto_scan_on_startup FROM netapp_plugin_config WHERE id='default'")
+        return {"auto_scan_on_startup": bool(cfg["auto_scan_on_startup"]) if cfg else False}
+    body = request.get_json(force=True) or {}
+    val = 1 if body.get("auto_scan_on_startup") else 0
+    existing = db.query_one("SELECT id FROM netapp_plugin_config WHERE id='default'")
+    if existing:
+        db.execute(
+            "UPDATE netapp_plugin_config SET auto_scan_on_startup=? WHERE id='default'", (val,))
+    else:
+        db.execute(
+            "INSERT INTO netapp_plugin_config (id, auto_scan_on_startup) VALUES ('default', ?)", (val,))
+    return {"auto_scan_on_startup": bool(val)}
+
+
+def _run_startup_scan():
+    """Scan all NFS datastores for .nasnap/index.json and reconcile DB. Runs in background."""
+    db = get_db()
+    mappings = db.query(
+        "SELECT * FROM netapp_volume_mapping "
+        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''")
+    from ..core.datastore_index import DatastoreIndex
+    n_total = n_imported = 0
+    seen_storage_ids: set = set()
+    for row in (mappings or []):
+        m = dict(row)
+        sid = m.get("pve_storage_id", "")
+        if sid in seen_storage_ids:
+            continue   # already scanned this datastore via another mapping entry
+        seen_storage_ids.add(sid)
+        n_total += 1
+        try:
+            ph, pu, pp, pk = _ds_scan_creds(db, m)
+            index = DatastoreIndex(ph, pu, pp, pk).read(m["nfs_mount_path"])
+            if index:
+                imported, _, _ = _reconcile_index_into_db(db, m["id"], m, index)
+                n_imported += imported
+        except Exception as exc:
+            log.warning(
+                f"[netapp_storage] startup scan {sid or m['id']}: {exc}")
+    log.info(
+        f"[netapp_storage] Startup auto-scan complete: "
+        f"{n_total} datastore(s) scanned, {n_imported} snapshot(s) imported")
+
+
+def _prov_ds_reindex():
+    """POST: rebuild .nasnap/index.json from DB snapshot records for a mapping."""
+    from flask import request
+    err = _require_admin()
+    if err:
+        return err
+    body = request.get_json(force=True) or {}
+    mapping_id = body.get("mapping_id")
+    if not mapping_id:
+        return {"error": "mapping_id required"}, 400
+    db = get_db()
+    mapping = db.query_one("SELECT * FROM netapp_volume_mapping WHERE id=?", (mapping_id,))
+    if not mapping:
+        return {"error": "Mapping not found"}, 404
+    mapping = dict(mapping)
+    if mapping.get("storage_protocol") in ("iscsi", "nvme") or not mapping.get("nfs_mount_path"):
+        return {"error": "Reindex only supported for NFS datastores"}, 400
+
+    rows = db.query(
+        "SELECT snap_name, consistency, vmids_json, manifest_json, created_at "
+        "FROM netapp_snapshots WHERE mapping_id=? AND status='done' "
+        "ORDER BY created_at DESC",
+        (mapping_id,),
+    )
+    from ..core.datastore_index import DatastoreIndex, build_datastore_info, _new_index, _now_iso
+    snapshots = []
+    for row in rows:
+        r = dict(row)
+        vms = []
+        try:
+            mf = json.loads(r.get("manifest_json") or "{}")
+            for v in mf.get("vms", []):
+                vmid = v.get("vmid")
+                if vmid is not None:
+                    vms.append({
+                        "vmid": vmid,
+                        "name": v.get("name", ""),
+                        "config_path": f"{vmid}/{vmid}.conf",
+                        "config_sha256": "",
+                    })
+        except Exception:
+            for vmid in (json.loads(r.get("vmids_json") or "[]") or []):
+                vms.append({"vmid": vmid, "name": "", "config_path": f"{vmid}/{vmid}.conf",
+                            "config_sha256": ""})
+        snapshots.append({
+            "ontap_snapshot_name": r["snap_name"],
+            "taken_at": r.get("created_at", ""),
+            "schedule_name": "",
+            "consistent": r.get("consistency") in ("app", "suspend"),
+            "locked": False,
+            "lock_expires": None,
+            "vms": vms,
+        })
+
+    ds_info = {
+        "datastore_name": mapping.get("pve_storage_id", ""),
+        "datastore_type": "nfs",
+        "ontap_svm": mapping.get("svm_name", ""),
+        "ontap_volume": mapping.get("volume_name", ""),
+        "ontap_volume_uuid": mapping.get("volume_uuid", ""),
+    }
+    index = _new_index(ds_info)
+    index["snapshots"] = snapshots
+    index["last_updated"] = _now_iso()
+
+    ph, pu, pp, pk = _ds_scan_creds(db, mapping)
+    DatastoreIndex(ph, pu, pp, pk).write(mapping["nfs_mount_path"], index)
+    return {"written": len(snapshots), "mapping_id": mapping_id}
+
+
 def register_routes():
     from nasnap_core.api.plugins import register_plugin_route
     register_plugin_route(PLUGIN_ID, "storage/unified",                    _storage_unified)
@@ -862,6 +1202,11 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "provisioning/pve-hosts",             _prov_pve_hosts)
     register_plugin_route(PLUGIN_ID, "provisioning/svms",                  _prov_svms)
     register_plugin_route(PLUGIN_ID, "provisioning/nfs-lifs",              _prov_nfs_lifs)
+    register_plugin_route(PLUGIN_ID, "provisioning/datastores/index",      _prov_ds_index)
+    register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan",       _prov_ds_scan)
+    register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan-all",   _prov_ds_scan_all)
+    register_plugin_route(PLUGIN_ID, "provisioning/datastores/reindex",    _prov_ds_reindex)
+    register_plugin_route(PLUGIN_ID, "provisioning/plugin-settings",       _prov_plugin_settings)
 
 
 # ── Job helpers ───────────────────────────────────────────────────────────────

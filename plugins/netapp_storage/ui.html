@@ -1445,12 +1445,41 @@ function applyI18n() {
       <div class="card snap-timeline-card" style="padding:0;margin-bottom:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px">
           <span style="font-weight:600;font-size:13px;color:var(--text)">Timeline</span>
-          <div style="display:flex;gap:4px" id="tl_zoom_btns">
+          <div style="display:flex;gap:4px;align-items:center" id="tl_zoom_btns">
             <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('hour')" data-zoom="hour">Hour</button>
             <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('day')" data-zoom="day">Day</button>
-            <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('week')" data-zoom="week">Week</button>
-            <button class="btn btn-primary btn-sm" onclick="tlSetZoom('month')" data-zoom="month">Month</button>
+            <button class="btn btn-primary btn-sm" onclick="tlSetZoom('week')" data-zoom="week">Week</button>
+            <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('month')" data-zoom="month">Month</button>
             <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('year')" data-zoom="year">Year</button>
+            <button class="btn btn-ghost btn-sm" onclick="tlSetZoom('all')" data-zoom="all">All</button>
+            <!-- Custom range button + popover -->
+            <div style="position:relative">
+              <button id="tl_custom_btn" class="btn btn-ghost btn-sm" onclick="tlToggleCustomPicker(event)" data-zoom="custom">Custom</button>
+              <div id="tl_custom_picker"
+                style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:400;
+                       background:var(--card);border:1px solid var(--border);border-radius:8px;
+                       box-shadow:0 8px 32px rgba(0,0,0,.4);padding:14px 16px;min-width:220px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--text)">Date range</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <label style="font-size:11px;color:var(--muted)">From
+                    <input type="date" id="tl_from_date"
+                      style="display:block;width:100%;margin-top:3px;padding:4px 7px;font-size:12px;
+                             border:1px solid var(--border);border-radius:4px;
+                             background:var(--bg);color:var(--text);box-sizing:border-box">
+                  </label>
+                  <label style="font-size:11px;color:var(--muted)">To
+                    <input type="date" id="tl_to_date"
+                      style="display:block;width:100%;margin-top:3px;padding:4px 7px;font-size:12px;
+                             border:1px solid var(--border);border-radius:4px;
+                             background:var(--bg);color:var(--text);box-sizing:border-box">
+                  </label>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:12px">
+                  <button class="btn btn-primary btn-sm" style="flex:1" onclick="tlApplyRange()">Apply</button>
+                  <button class="btn btn-ghost btn-sm" onclick="tlClearRange()">Clear</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div id="snap_timeline" style="padding:0 8px 10px;min-height:70px;box-sizing:border-box"></div>
@@ -1533,6 +1562,10 @@ function applyI18n() {
           <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">SnapMirror Secondary</button>
         </div>
         <input id="rcSearch" type="text" placeholder="Filter by VM name, ID or datastore…" oninput="rcFilterChanged()" style="flex:1;min-width:140px;max-width:220px;margin-left:4px">
+        <div style="display:flex;gap:4px">
+          <button id="rcImportAll" class="btn btn-ghost btn-sm" onclick="rcSetImportFilter('all')" title="Show all snapshots" style="font-size:11px">All</button>
+          <button id="rcImportOnly" class="btn btn-ghost btn-sm" onclick="rcSetImportFilter('imported')" title="Show only VMs with index-imported snapshots" style="font-size:11px">Imported</button>
+        </div>
         <button class="btn btn-ghost btn-sm" onclick="_rcSource==='secondary'?rcDrRelChanged():loadRcVmList()">
           <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh
         </button>
@@ -1811,6 +1844,16 @@ function applyI18n() {
           <div id="drToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleDrEnabled()">
             <div id="drToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
             <div id="drToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:10px 0 4px;margin-top:8px;border-top:1px solid var(--border)">
+          <div>
+            <div style="font-weight:500;font-size:13px">Auto-scan datastore indexes on startup</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">When NaSnap starts, scan all NFS datastores for <code>.nasnap/index.json</code> and import any missing snapshots into the local database.</div>
+          </div>
+          <div id="autoScanToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleAutoScan()">
+            <div id="autoScanToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
+            <div id="autoScanToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
           </div>
         </label>
       </div>
@@ -2167,7 +2210,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); loadServerSettings(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -3033,6 +3076,7 @@ function renderSnapshots() {
   var source = document.getElementById('snap_filter_source').value;
   var ds     = document.getElementById('snap_filter_datastore').value;
 
+  var _win = _tlEffectiveWindow();
   var filtered = _allSnapshots.filter(function(s) {
     if (source && s.source !== source) return false;
     var sDs = s.pve_storage_id || s.volume_name || '';
@@ -3041,6 +3085,11 @@ function renderSnapshots() {
                sDs.toLowerCase().indexOf(text) < 0 &&
                (s.label||'').toLowerCase().indexOf(text) < 0 &&
                !Object.values(s.vm_names||{}).some(function(n){ return (n||'').toLowerCase().indexOf(text) >= 0; })) return false;
+    if (_win.from !== null || _win.to !== null) {
+      var ts = s.created_at ? Date.parse(s.created_at) : 0;
+      if (_win.from !== null && ts < _win.from) return false;
+      if (_win.to   !== null && ts > _win.to)   return false;
+    }
     return true;
   });
 
@@ -3191,6 +3240,56 @@ var _rcSortDir   = -1;
 var _rcSource    = 'primary';
 var _rcDrRelId   = '';
 var _rcDrMappingId = '';
+var _rcImportFilter = 'all';
+
+function rcSetImportFilter(f) {
+  _rcImportFilter = f;
+  var all = document.getElementById('rcImportAll');
+  var imp = document.getElementById('rcImportOnly');
+  if (all) { all.className = f === 'all' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; all.style.fontSize='11px'; }
+  if (imp) { imp.className = f === 'imported' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; imp.style.fontSize='11px'; }
+  _renderRcRows();
+}
+
+async function dsScanIndex(mappingId, name) {
+  var modal = document.getElementById('dsScanIndexModal');
+  var title = document.getElementById('dsScanIndexTitle');
+  var body  = document.getElementById('dsScanIndexBody');
+  if (!modal) return;
+  if (title) title.textContent = name;
+  body.innerHTML = '<div style="text-align:center;padding:24px"><span class="spinner"></span>'
+    + '<div style="margin-top:10px;color:var(--muted);font-size:13px">Scanning index…</div></div>';
+  modal.style.display = 'flex';
+  try {
+    var r = await apiPost('provisioning/datastores/scan', {mapping_id: mappingId});
+    if (!r.index_exists) {
+      var vms = r.discovered_vms || [];
+      body.innerHTML = '<div style="padding:4px 0">'
+        + '<div style="display:flex;align-items:center;gap:8px;padding:12px;background:rgba(240,173,78,.10);border:1px solid rgba(240,173,78,.3);border-radius:6px;margin-bottom:14px">'
+        + '<span style="font-size:18px">⚠️</span>'
+        + '<div><strong>No index found</strong><div style="font-size:12px;color:var(--muted);margin-top:3px">The datastore has no <code>.nasnap/index.json</code> yet. '
+        + 'It will be created automatically on the next snapshot.</div></div></div>'
+        + (vms.length ? '<div style="font-size:13px;color:var(--muted)">'+vms.length+' VM config file(s) discovered via filesystem scan.</div>' : '')
+        + '</div>';
+    } else {
+      var imp = r.imported || 0, skip = r.skipped || 0, vmsF = r.vms_found || 0;
+      var color = imp > 0 ? 'rgba(86,211,100,.12)' : 'rgba(139,148,158,.10)';
+      var border = imp > 0 ? 'rgba(86,211,100,.3)' : 'var(--border)';
+      body.innerHTML = '<div style="padding:4px 0">'
+        + '<div style="display:flex;align-items:center;gap:8px;padding:12px;background:'+color+';border:1px solid '+border+';border-radius:6px;margin-bottom:14px">'
+        + '<span style="font-size:20px">'+(imp>0?'✅':'ℹ️')+'</span>'
+        + '<div><strong>'+(imp>0?imp+' snapshot(s) imported':'Already up to date')+'</strong>'
+        + '<div style="font-size:12px;color:var(--muted);margin-top:3px">'
+        + skip+' already in DB · '+(r.snapshots_in_index||0)+' in index · '+vmsF+' VMs'
+        + '</div></div></div>'
+        + (imp>0?'<div style="font-size:12px;color:var(--muted)">Refresh <em>Restore &amp; Clone</em> to see imported snapshots.</div>':'')
+        + '</div>';
+      if (imp > 0) loadRcVmList();
+    }
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--error);padding:8px 0">Error: '+esc(e.message)+'</div>';
+  }
+}
 
 function loadRcVmList() {
   apiFetch('snapshots').then(function(snaps){
@@ -3214,9 +3313,10 @@ function renderRcVmList() {
           dsName: s.pve_storage_id || s.volume_name || s.mapping_id,
           protocol: _snapProtoLabel(s), isSan: _snapIsSan(s),
           sanOpt: !!s.san_optimized, pveClusterId: s.pve_cluster_id || '',
-          snapCount: 0, lastSnap: null, lastSnapId: null,
+          snapCount: 0, lastSnap: null, lastSnapId: null, hasImported: false,
         };
       }
+      if (s.source === 'index_import') vmMap[key].hasImported = true;
       vmMap[key].snapCount++;
       if (!vmMap[key].lastSnap || (s.created_at||'') > vmMap[key].lastSnap) {
         vmMap[key].lastSnap   = s.created_at;
@@ -3258,6 +3358,7 @@ function _renderRcRows() {
   if (!tbody) return;
   var q = (_rcSearch||'').toLowerCase();
   var rows = _rcVms.filter(function(v){
+    if (_rcImportFilter === 'imported' && !v.hasImported) return false;
     if (!q) return true;
     return String(v.vmid).indexOf(q)>=0
       || (v.name||'').toLowerCase().indexOf(q)>=0
@@ -3275,11 +3376,12 @@ function _renderRcRows() {
   tbody.innerHTML = rows.map(function(v){
     var cnt = v.snapCount===1 ? '1 snapshot' : v.snapCount+' snapshots';
     var drBadge = v.isDR ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(88,166,255,.15);color:#58A6FF;border:1px solid rgba(88,166,255,.3);margin-right:4px">DR</span>' : '';
+    var importBadge = v.hasImported ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border);margin-right:4px" title="At least one snapshot was imported from datastore index">Imported</span>' : '';
     var protoBg = _rcProtoBg[v.protocol] || '#888';
     var protoBadge = '<span class="badge" style="background:'+protoBg+';color:#fff;font-size:10px">'+esc(v.protocol)+'</span>';
     return '<tr>'+
       '<td><code style="font-size:12px">'+v.vmid+'</code></td>'+
-      '<td>'+drBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
+      '<td>'+drBadge+importBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
       '<td><code style="font-size:11px">'+esc(v.dsName)+'</code></td>'+
       '<td>'+protoBadge+'</td>'+
       '<td style="color:var(--muted)">'+cnt+'</td>'+
@@ -3368,7 +3470,8 @@ var _rwState = { vmid:null, name:'', mappingId:'', relId:'', isDR:false, isSan:f
 function openRestoreWizard(vmid, preSnapId) {
   var vm = _rcVms.find(function(v){ return v.vmid===vmid; });
   if (!vm) { toast('VM not found in snapshot history','error'); return; }
-  _rwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, relId:vm.relId||'', isDR:!!vm.isDR,
+  _rwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, dsName:vm.dsName||'',
+               relId:vm.relId||'', isDR:!!vm.isDR,
                isSan:vm.isSan, sanOpt:vm.sanOpt||false, pveClusterId:vm.pveClusterId, snap:null, snapName:'', step:1 };
   document.getElementById('rw_vm_hdr').textContent = (vm.name||'VM')+' (ID: '+vmid+(vm.isDR?' · DR Secondary':'')+ ')';
   rwPopulateSnaps(preSnapId);
@@ -3400,9 +3503,20 @@ async function rwPopulateSnaps(preSnapId) {
     rwRebuildMethod();
     return;
   }
+  // Include snapshots where this VM is listed, OR snapshots with no vmids recorded
+  // (= "all VMs" scheduled snapshots that snap the whole volume).
+  // Match by pve_storage_id so snapshots imported under any of the multiple
+  // mapping entries for the same datastore are all visible.
   var done = _allSnapshots.filter(function(s){
-    return s.status==='done' && s.mapping_id===_rwState.mappingId &&
-      s.vmids && s.vmids.indexOf(_rwState.vmid)>=0;
+    if (s.status !== 'done') return false;
+    var sameDs = _rwState.dsName
+      ? s.pve_storage_id === _rwState.dsName
+      : s.mapping_id === _rwState.mappingId;
+    if (!sameDs) return false;
+    var hasVmids = s.vmids && s.vmids.length > 0;
+    if (!hasVmids) return true;                          // "all VMs" snap — always include
+    return s.vmids.indexOf(_rwState.vmid) >= 0
+        || s.vmids.indexOf(String(_rwState.vmid)) >= 0; // guard against string/int mismatch
   });
   var plugin = done.filter(function(s){ return s.source!=='ontap_native'; });
   var native  = done.filter(function(s){ return s.source==='ontap_native'; });
@@ -3410,7 +3524,8 @@ async function rwPopulateSnaps(preSnapId) {
   sel.innerHTML = all.length
     ? all.map(function(s){
         var pfx = s.source==='ontap_native'?'[ONTAP] ':'';
-        return '<option value="'+s.id+'">'+pfx+esc(s.snap_name)+' ('+fmtDate(s.created_at)+')</option>';
+        var allVm = (!s.vmids || !s.vmids.length) ? ' · all VMs' : '';
+        return '<option value="'+s.id+'">'+pfx+esc(s.snap_name)+' ('+fmtDate(s.created_at)+allVm+')</option>';
       }).join('')
     : '<option value="">— no snapshots —</option>';
   if (preSnapId) sel.value = String(preSnapId);
@@ -4492,17 +4607,92 @@ function schedSmTamperproofWarn() {
 }
 
 // ── Timeline Ribbon ────────────────────────────────────────────────────────
-var _tlZoom         = 'month';
+var _tlZoom         = 'week';
 var _tlSnapMap      = {};
 var _tlLastFiltered = [];
+// Only used for 'custom' range from date inputs; preset zooms are computed dynamically.
+var _tlTimeFrom     = null;
+var _tlTimeTo       = null;
+
+// Milliseconds to look back for each zoom preset (also used in renderTimeline)
+var _tlZoomMs     = { hour: 4*3600e3, day: 864e5, week: 6048e5, month: 2592e6, year: 31536e6 };
+var _tlZoomFutMs  = { hour: 900e3, day: 864e5/4, week: 864e5, month: 864e5*7, year: 864e5*45 };
+var _tlTickStepMs = { hour: 30*60e3, day: 6*3600e3, week: 864e5, month: 5*864e5, year: 60*864e5 };
+
+function _tlEffectiveWindow() {
+  // Returns {from, to} ms — the active filter window.  from/to may be null (unbounded).
+  if (_tlZoom === 'all')    return { from: null,                              to: null };
+  if (_tlZoom === 'custom') return { from: _tlTimeFrom,                       to: _tlTimeTo };
+  return { from: Date.now() - (_tlZoomMs[_tlZoom] || 6048e5),                to: null };
+}
 
 function tlSetZoom(z) {
   _tlZoom = z;
-  document.querySelectorAll('#tl_zoom_btns button').forEach(function(b) {
+  _tlTimeFrom = null;
+  _tlTimeTo   = null;
+  document.querySelectorAll('#tl_zoom_btns button[data-zoom]').forEach(function(b) {
     var active = b.getAttribute('data-zoom') === z;
     b.className = 'btn btn-sm ' + (active ? 'btn-primary' : 'btn-ghost');
   });
+  _tlClosePicker();
   renderTimeline(_tlLastFiltered);
+  filterSnapshots();
+}
+
+function tlToggleCustomPicker(e) {
+  e.stopPropagation();
+  var p = document.getElementById('tl_custom_picker');
+  if (!p) return;
+  var open = p.style.display !== 'none';
+  if (open) { _tlClosePicker(); return; }
+  p.style.display = 'block';
+  // close on outside click
+  setTimeout(function() {
+    document.addEventListener('click', _tlOutsideClick, {once: true, capture: true});
+  }, 0);
+}
+
+function _tlOutsideClick(e) {
+  var p = document.getElementById('tl_custom_picker');
+  if (p && !p.contains(e.target)) _tlClosePicker();
+  else document.addEventListener('click', _tlOutsideClick, {once: true, capture: true});
+}
+
+function _tlClosePicker() {
+  var p = document.getElementById('tl_custom_picker');
+  if (p) p.style.display = 'none';
+}
+
+function tlApplyRange() {
+  var fi = document.getElementById('tl_from_date');
+  var ti = document.getElementById('tl_to_date');
+  var fv = fi && fi.value;
+  var tv = ti && ti.value;
+  if (!fv && !tv) { tlClearRange(); return; }
+  _tlTimeFrom = fv ? new Date(fv).getTime()           : null;
+  _tlTimeTo   = tv ? new Date(tv).getTime() + 86399e3 : null;
+  _tlZoom = 'custom';
+  // Update button label to show active range
+  var lbl = (fv || '…') + ' – ' + (tv || '…');
+  var btn = document.getElementById('tl_custom_btn');
+  if (btn) btn.textContent = lbl;
+  document.querySelectorAll('#tl_zoom_btns button[data-zoom]').forEach(function(b) {
+    b.className = 'btn btn-sm ' + (b.getAttribute('data-zoom') === 'custom' ? 'btn-primary' : 'btn-ghost');
+  });
+  _tlClosePicker();
+  renderTimeline(_tlLastFiltered);
+  filterSnapshots();
+}
+
+function tlClearRange() {
+  var fi = document.getElementById('tl_from_date');
+  var ti = document.getElementById('tl_to_date');
+  if (fi) fi.value = '';
+  if (ti) ti.value = '';
+  var btn = document.getElementById('tl_custom_btn');
+  if (btn) btn.textContent = 'Custom';
+  _tlClosePicker();
+  tlSetZoom('all');
 }
 
 function renderTimeline(filtered) {
@@ -4516,10 +4706,24 @@ function renderTimeline(filtered) {
   var plotW = W - padL - padR;
 
   var now = Date.now();
-  var zoomMs   = { hour: 4*3600e3, day: 864e5,    week: 6048e5, month: 2592e6,  year: 31536e6  };
-  var futureMs = { hour: 900e3,   day: 864e5/4,  week: 864e5,  month: 864e5*7, year: 864e5*45 };
-  var tStart = now - (zoomMs[_tlZoom]   || 2592e6);
-  var tEnd   = now + (futureMs[_tlZoom] || 864e5*7);
+  var tStart, tEnd, tickStep;
+  var win = _tlEffectiveWindow();
+  if (_tlZoom === 'all' || _tlZoom === 'custom') {
+    var times = filtered.map(function(s){ return s.created_at ? Date.parse(s.created_at) : 0; }).filter(Boolean);
+    var oldest = times.length ? Math.min.apply(null, times) : now - 6048e5;
+    tStart = (win.from !== null) ? win.from : oldest - 864e5;
+    tEnd   = (win.to   !== null) ? win.to + 3600e3 : now + 864e5/4;
+    var rangeMs = tEnd - tStart;
+    var niceSteps = [30*60e3, 3600e3, 6*3600e3, 864e5, 3*864e5, 7*864e5, 14*864e5, 30*864e5, 60*864e5, 90*864e5, 180*864e5, 365*864e5];
+    tickStep = niceSteps[niceSteps.length - 1];
+    for (var ni = 0; ni < niceSteps.length; ni++) {
+      if (rangeMs / niceSteps[ni] <= 8) { tickStep = niceSteps[ni]; break; }
+    }
+  } else {
+    tStart = now - (_tlZoomMs[_tlZoom]    || 6048e5);
+    tEnd   = now + (_tlZoomFutMs[_tlZoom] || 864e5);
+    tickStep = _tlTickStepMs[_tlZoom] || 5*864e5;
+  }
 
   function toX(ts) { return padL + (ts - tStart) / (tEnd - tStart) * plotW; }
 
@@ -4529,17 +4733,19 @@ function renderTimeline(filtered) {
   svgParts.push('<line x1="'+padL+'" y1="'+axisY+'" x2="'+(padL+plotW)+'" y2="'+axisY+'" stroke="var(--border)" stroke-width="1"/>');
 
   // Tick marks + labels
-  var tickSteps = { hour: 30*60e3, day: 6*3600e3, week: 864e5, month: 5*864e5, year: 60*864e5 };
-  var tickStep  = tickSteps[_tlZoom] || 5*864e5;
   var firstTick = Math.ceil(tStart / tickStep) * tickStep;
   for (var tk = firstTick; tk <= tEnd; tk += tickStep) {
     var tx = toX(tk);
     if (tx < padL || tx > padL + plotW) continue;
     var txS = tx.toFixed(1);
     var td  = new Date(tk);
-    var lbl = (_tlZoom === 'hour' || _tlZoom === 'day')
+    var useTime = (_tlZoom === 'hour' || _tlZoom === 'day')
+      || ((_tlZoom === 'all' || _tlZoom === 'custom') && tickStep < 864e5);
+    var lbl = useTime
       ? td.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
-      : td.toLocaleDateString([], {month:'short', day:'numeric'});
+      : (tickStep >= 30*864e5
+          ? td.toLocaleDateString([], {month:'short', year:'2-digit'})
+          : td.toLocaleDateString([], {month:'short', day:'numeric'}));
     svgParts.push('<line x1="'+txS+'" y1="'+axisY+'" x2="'+txS+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
     svgParts.push('<text x="'+txS+'" y="'+(axisY+14)+'" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="sans-serif">'+esc(lbl)+'</text>');
   }
@@ -6064,8 +6270,13 @@ function _renderStorageItems(items) {
       // Actions per source type
       var actions;
       if (ds.source === 'provisioned') {
-        actions =
-          '<button class="btn btn-success btn-sm" onclick="showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
+        var _provIdxBtn = (ds.protocol === 'nfs' && ds.mapping_id)
+          ? '<button class="btn btn-ghost btn-sm"'
+            + ' onclick="dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
+            + ' title="Read .nasnap/index.json and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
+          : '';
+        actions = _provIdxBtn
+          + '<button class="btn btn-success btn-sm" onclick="showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
             + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+')">+ Host</button> '
           + '<button class="btn btn-success btn-sm" onclick="showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
             + (ds.size_bytes||0)+',\''+esc(ds.protocol||'')+'\')">Resize</button> '
@@ -6080,7 +6291,12 @@ function _renderStorageItems(items) {
             : '<button class="btn btn-sm" style="font-size:10px;padding:2px 7px;background:var(--warning);color:#000;border:none"'
               + ' onclick="snapmanifestInit(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')" title="Setup snapmanifest">Setup snapmanifest</button> ';
         }
-        actions = smBtn
+        var scanIdxBtn = !_isSan
+          ? '<button class="btn btn-ghost btn-sm"'
+            + ' onclick="dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
+            + ' title="Read .nasnap/index.json and import missing snapshots into DB" style="font-size:11px">⟳ Index</button> '
+          : '';
+        actions = smBtn + scanIdxBtn
           + '<button class="btn btn-ghost btn-sm"'
             + ' onclick="importToProvisioning(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')"'
             + ' title="Add to managed datastores">+ Manage</button> '
@@ -7273,16 +7489,42 @@ async function impOnDsChange() {
 
   if (proto === 'nfs') {
     document.getElementById('impSnapRow').style.display = '';
-    var snapSel = document.getElementById('impSnap');
+    var snapSel  = document.getElementById('impSnap');
+    var infoEl   = document.getElementById('impSnapInfo');
+    var sid      = _impState.ds.sid;
     snapSel.innerHTML = '<option value="">Loading snapshots…</option>';
+    if (infoEl) infoEl.innerHTML = '';
+    // Phase 5: try .nasnap/index.json first; fall back to manifest directory
+    var usedIndex = false;
     try {
-      var r     = await apiFetch('provisioning/recovery/manifests?ds_id=' + encodeURIComponent(dsId));
-      var snaps = r.snapshots || [];
-      snapSel.innerHTML = snaps.length
-        ? snaps.map(function(s){ return '<option value="'+esc(s.snap_name)+'">'+esc(s.snap_name)+'</option>'; }).join('')
-        : '<option value="">No manifests found</option>';
-    } catch(e) {
-      snapSel.innerHTML = '<option value="">Error: ' + esc(e.message) + '</option>';
+      var idxResp = await apiFetch(
+        'provisioning/datastores/index?pve_storage_id=' + encodeURIComponent(sid));
+      if (idxResp.exists && idxResp.index && (idxResp.index.snapshots||[]).length) {
+        var idxSnaps = idxResp.index.snapshots;
+        snapSel.innerHTML = idxSnaps.map(function(s) {
+          var label = s.ontap_snapshot_name
+            + (s.schedule_name ? ' – ' + s.schedule_name : '')
+            + (s.taken_at ? ' (' + s.taken_at.replace('T',' ').replace('Z','') + ')' : '');
+          return '<option value="'+esc(s.ontap_snapshot_name)+'">'+esc(label)+'</option>';
+        }).join('');
+        if (infoEl) infoEl.innerHTML =
+          '<span title="Snapshot list read from .nasnap/index.json">'
+          + '&#x1F4C4; from index &middot; '+idxSnaps.length+' snapshots</span>';
+        usedIndex = true;
+      }
+    } catch(_) {}
+    if (!usedIndex) {
+      try {
+        var r     = await apiFetch('provisioning/recovery/manifests?ds_id=' + encodeURIComponent(dsId));
+        var snaps = r.snapshots || [];
+        snapSel.innerHTML = snaps.length
+          ? snaps.map(function(s){ return '<option value="'+esc(s.snap_name)+'">'+esc(s.snap_name)+'</option>'; }).join('')
+          : '<option value="">No manifests found</option>';
+        if (infoEl && snaps.length)
+          infoEl.innerHTML = '<span style="color:var(--muted)">from manifest files &middot; '+snaps.length+' entries</span>';
+      } catch(e) {
+        snapSel.innerHTML = '<option value="">Error: ' + esc(e.message) + '</option>';
+      }
     }
   } else {
     // SAN: no snapshot chooser — just show info row
@@ -8991,6 +9233,32 @@ async function toggleDrEnabled() {
   } catch(e) { toast('Failed to save setting', 'error'); }
 }
 
+var _autoScanEnabled = false;
+
+function _applyAutoScanToggle(enabled) {
+  var track = document.getElementById('autoScanToggleTrack');
+  var thumb = document.getElementById('autoScanToggleThumb');
+  if (track) track.style.background = enabled ? 'var(--primary)' : 'var(--border)';
+  if (thumb) thumb.style.transform  = enabled ? 'translateX(20px)' : '';
+}
+
+async function loadAutoScanSetting() {
+  try {
+    var r = await apiFetch('provisioning/plugin-settings');
+    _autoScanEnabled = !!r.auto_scan_on_startup;
+    _applyAutoScanToggle(_autoScanEnabled);
+  } catch(e) {}
+}
+
+async function toggleAutoScan() {
+  var next = !_autoScanEnabled;
+  try {
+    await apiPost('provisioning/plugin-settings', {auto_scan_on_startup: next});
+    _autoScanEnabled = next;
+    _applyAutoScanToggle(next);
+  } catch(e) { toast('Failed to save setting', 'error'); }
+}
+
 // ── Job Tracker ────────────────────────────────────────────────────────────
 var _activeJobs = {};
 
@@ -9695,7 +9963,7 @@ loadDashboard();
           </div>
           <div class="form-group" id="impSnapRow" style="display:none">
             <label>
-              Snapshot Manifest
+              Snapshot
               <span style="display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px">
                 Only VM configuration files (.conf) are read from this snapshot — disk data stays on the NetApp datastore unchanged.
               </span>
@@ -9703,6 +9971,7 @@ loadDashboard();
             <select class="form-control" id="impSnap">
               <option value="">— loading… —</option>
             </select>
+            <div id="impSnapInfo" style="margin-top:5px;font-size:11px;color:var(--muted)"></div>
           </div>
           <div class="form-group" id="impSnapSanRow" style="display:none">
             <label>
@@ -11002,6 +11271,23 @@ loadDashboard();
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg)">
       <button class="btn btn-ghost" onclick="closeNativeCloneModal()">Cancel</button>
       <button id="ncm_submit" class="btn btn-primary" onclick="doNativeClone()">Start Clone</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ Datastore Index Scan Modal ═══════════════════════ -->
+<div id="dsScanIndexModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="max-width:480px;width:100%;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        Scan Index: <span id="dsScanIndexTitle" style="font-weight:400;color:var(--muted)"></span>
+      </div>
+      <button onclick="document.getElementById('dsScanIndexModal').style.display='none'" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">&#x2715;</button>
+    </div>
+    <div id="dsScanIndexBody" style="padding:20px;min-height:80px"></div>
+    <div style="display:flex;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--border);background:var(--bg)">
+      <button class="btn btn-ghost" onclick="document.getElementById('dsScanIndexModal').style.display='none'">Close</button>
     </div>
   </div>
 </div>

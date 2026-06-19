@@ -107,6 +107,7 @@ def _init_db():
         _add_column_if_missing(db, "netapp_snapshots", "label", "TEXT DEFAULT ''")
         _add_column_if_missing(db, "netapp_snapshots", "ontap_snap_uuid", "TEXT DEFAULT ''")
         _add_column_if_missing(db, "netapp_snapshots", "error", "TEXT DEFAULT ''")
+        _add_column_if_missing(db, "netapp_snapshots", "source", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(db, "netapp_snapshot_schedules", "label", "TEXT DEFAULT ''")
         _add_column_if_missing(db, "netapp_snapshot_schedules", "snapmirror_update",    "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_snapshot_schedules", "notify_enabled",       "INTEGER NOT NULL DEFAULT 0")
@@ -145,6 +146,9 @@ def _init_db():
         _add_column_if_missing(db, "netapp_dr_sites", "last_test_result",       "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(db, "netapp_dr_sites", "sync_password_encrypted","TEXT NOT NULL DEFAULT ''")
 
+        # Datastore index auto-scan
+        _add_column_if_missing(db, "netapp_plugin_config", "auto_scan_on_startup", "INTEGER NOT NULL DEFAULT 0")
+
         # SAN extension (iSCSI / NVMe-oF)
         _add_column_if_missing(db, "netapp_volume_mapping", "storage_protocol",     "TEXT NOT NULL DEFAULT 'nfs'")
         _add_column_if_missing(db, "netapp_volume_mapping", "lun_uuid",              "TEXT NOT NULL DEFAULT ''")
@@ -171,6 +175,26 @@ def _add_column_if_missing(db, table, column, col_def):
             log.info(f"[netapp_storage] Added column {table}.{column}")
     except Exception as e:
         log.warning(f"[netapp_storage] Migration {table}.{column} failed: {e}")
+
+
+def _maybe_startup_scan():
+    """Run index auto-scan in background if configured."""
+    try:
+        db = get_db()
+        cfg = db.query_one(
+            "SELECT auto_scan_on_startup FROM netapp_plugin_config WHERE id='default'")
+        if cfg and cfg["auto_scan_on_startup"]:
+            import threading
+            def _bg():
+                try:
+                    from .api.provisioning import _run_startup_scan
+                    _run_startup_scan()
+                except Exception as e:
+                    log.warning(f"[netapp_storage] Startup auto-scan failed: {e}")
+            threading.Thread(target=_bg, daemon=True).start()
+            log.info("[netapp_storage] Startup auto-scan scheduled")
+    except Exception as e:
+        log.warning(f"[netapp_storage] Startup auto-scan check failed: {e}")
 
 
 def register(app):
@@ -201,5 +225,6 @@ def register(app):
     reg_dr()
     reg_dashboard()
     start_scheduler()
+    _maybe_startup_scan()
 
     log.info(f"[PLUGINS] {PLUGIN_NAME} registriert (UI: /api/plugins/netapp_storage/api/ui)")
