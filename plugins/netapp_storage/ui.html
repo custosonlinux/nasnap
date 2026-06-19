@@ -2972,7 +2972,8 @@ function schedDsToggle(el) {
   _schedDsUpdateCount();
   var ids = _schedGetMappingIds();
   if (ids.length) {
-    updateSchedMapping(ids[0]);
+    updateSchedMapping(ids[0]); // VMs / node context from first DS
+    _schedCheckSmForAll(ids);   // SnapMirror: any of the selected DSes
   } else {
     var sel = document.getElementById('sched_vmids_select');
     if (sel) sel.innerHTML = '<option disabled>← Select datastore first</option>';
@@ -2980,6 +2981,31 @@ function schedDsToggle(el) {
     schedWizUpdateSMPill();
   }
   _schedWizUpdateMultiDsMode();
+}
+
+async function _schedCheckSmForAll(mappingIds) {
+  // Enable the SnapMirror step as soon as ANY selected datastore has a relationship.
+  _schedWizHasSM = false;
+  schedWizUpdateSMPill();
+  try {
+    var results = await Promise.all(mappingIds.map(function(mid) {
+      return apiFetch('snapmirror/policy-labels?mapping_id=' + encodeURIComponent(mid)).catch(function(){ return {}; });
+    }));
+    var smResult = results.find(function(d){ return d && d.has_relationship; });
+    if (smResult) {
+      _schedWizHasSM = true;
+      document.getElementById('sched_sm_info').innerHTML = _smInfoHtml(smResult);
+      var labels = smResult.labels || [];
+      var labelSel = document.getElementById('sched_label');
+      if (labelSel) {
+        labelSel.innerHTML = '<option value="">— no label —</option>' +
+          labels.map(function(l){ return '<option value="'+esc(l)+'">'+esc(l)+'</option>'; }).join('');
+      }
+    } else {
+      document.getElementById('sched_label').innerHTML = '<option value="">— no label —</option>';
+    }
+  } catch(e) { /* silent */ }
+  schedWizUpdateSMPill();
 }
 
 function _schedWizUpdateMultiDsMode() {
@@ -5442,7 +5468,24 @@ async function showEditScheduleForm(s) {
   var firstMid = editMids[0] || '';
   if (firstMid) {
     await loadVmsForSchedule(firstMid, s.vmids || []);
-    await updateSchedSMSection(firstMid, s.label || '');
+    if (editMids.length > 1) {
+      await _schedCheckSmForAll(editMids);
+      // Restore preselected label after multi-check (overrides blank default)
+      var preLabel = s.label || '';
+      if (preLabel) {
+        var labelSel = document.getElementById('sched_label');
+        if (labelSel) {
+          var opt = Array.from(labelSel.options).find(function(o){ return o.value === preLabel; });
+          if (!opt) {
+            labelSel.innerHTML += '<option value="'+esc(preLabel)+'" selected>'+esc(preLabel)+'</option>';
+          } else {
+            opt.selected = true;
+          }
+        }
+      }
+    } else {
+      await updateSchedSMSection(firstMid, s.label || '');
+    }
   }
 }
 
@@ -5598,7 +5641,7 @@ function schedWizUpdateSMPill() {
     pill.style.opacity = '0.4';
     pill.style.cursor = 'not-allowed';
     pill.style.pointerEvents = 'none';
-    pill.title = 'No SnapMirror relationship for this datastore';
+    pill.title = 'No SnapMirror relationship for any selected datastore';
   }
 }
 
