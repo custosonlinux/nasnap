@@ -6752,7 +6752,8 @@ function _dbRenderJobs(jobsData, stale) {
 }
 
 // ── Job Timeline (Dashboard) ─────────────────────────────────────────────────
-var _jtJobMap = {};
+var _jtJobMap    = {};
+var _jtBucketMap = {};
 
 function _dbRenderJobTimeline(jobsData) {
   var container = document.getElementById('db_job_timeline');
@@ -6761,13 +6762,31 @@ function _dbRenderJobTimeline(jobsData) {
   if (W < 80) { requestAnimationFrame(function(){ _dbRenderJobTimeline(jobsData); }); return; }
 
   var jobs = Array.isArray(jobsData) ? jobsData : [];
-  var now    = Date.now();
-  var tStart = now - 7 * 864e5;
-  var tEnd   = now + 864e5 * 0.15;
+  var now      = Date.now();
+  var tStart   = now - 7 * 864e5;
+  var tEnd     = now + 864e5 * 0.15;
+  var bucketMs = 6 * 3600e3; // 6-hour clusters → max 28 bubbles across 7 days
 
-  var padL = 10, padR = 10, padT = 8, axisY = 40, H = 56;
+  var padL = 10, padR = 10, padT = 8, axisY = 42, H = 58;
   var plotW = W - padL - padR;
   function toX(ts) { return padL + (ts - tStart) / (tEnd - tStart) * plotW; }
+
+  // Cluster jobs into 6-hour buckets
+  _jtJobMap    = {};
+  _jtBucketMap = {};
+  jobs.forEach(function(j) {
+    if (!j.created_at) return;
+    var status = j.status;
+    if (status !== 'done' && status !== 'failed' && status !== 'error' && status !== 'cancelled') return;
+    var ts = Date.parse(j.created_at);
+    if (ts < tStart || ts > now) return;
+    _jtJobMap[j.id] = j;
+    var bk = Math.floor(ts / bucketMs);
+    if (!_jtBucketMap[bk]) _jtBucketMap[bk] = { jobs:[], hasFailed:false, hasSuccess:false };
+    _jtBucketMap[bk].jobs.push(j);
+    if (status === 'failed' || status === 'error') _jtBucketMap[bk].hasFailed = true;
+    else if (status === 'done')                    _jtBucketMap[bk].hasSuccess = true;
+  });
 
   var svgParts = [];
 
@@ -6790,45 +6809,46 @@ function _dbRenderJobTimeline(jobsData) {
   svgParts.push('<line x1="'+nowX+'" y1="'+padT+'" x2="'+nowX+'" y2="'+(axisY+4)+'" stroke="var(--accent,#e07800)" stroke-width="1.5" stroke-dasharray="3,3"/>');
   svgParts.push('<text x="'+nowX+'" y="'+(axisY+13)+'" text-anchor="middle" font-size="9" fill="var(--accent,#e07800)" font-weight="600" font-family="sans-serif">now</text>');
 
-  // Job dots
-  _jtJobMap = {};
+  // Cluster bubbles
   var dotsHtml = [];
-  // Track x-positions to offset overlapping dots vertically
-  var xBuckets = {};
-  jobs.forEach(function(j) {
-    if (!j.created_at) return;
-    var status = j.status;
-    if (status !== 'done' && status !== 'failed' && status !== 'error' && status !== 'cancelled') return;
-    var ts = Date.parse(j.created_at);
-    if (ts < tStart || ts > now) return;
-    var x = toX(ts);
-    if (x < padL - 4 || x > padL + plotW + 4) return;
+  var hasDots  = false;
+  Object.keys(_jtBucketMap).forEach(function(bk) {
+    var bucket = _jtBucketMap[bk];
+    var count  = bucket.jobs.length;
+    // Position at center of bucket, clamped to now
+    var centerTs = parseInt(bk) * bucketMs + bucketMs / 2;
+    var x = toX(Math.min(centerTs, now));
+    if (x < padL - 10 || x > padL + plotW + 10) return;
+    hasDots = true;
 
-    _jtJobMap[j.id] = j;
-    var fill  = (status === 'done') ? '#56d364' : (status === 'cancelled') ? 'var(--muted)' : '#f08080';
-    var stroke = (status === 'done') ? 'rgba(86,211,100,.3)' : (status === 'cancelled') ? 'rgba(139,148,158,.3)' : 'rgba(240,128,128,.3)';
+    var fill   = bucket.hasFailed ? 'rgba(240,128,128,.15)' : 'rgba(86,211,100,.15)';
+    var stroke = bucket.hasFailed ? '#f08080' : '#56d364';
+    var r      = count === 1 ? 5.5 : (count < 10 ? 8 : 10);
     var cx = x.toFixed(1);
-    // Stack vertically if x is crowded (bucket by 10px)
-    var bk = Math.round(x / 10);
-    if (!xBuckets[bk]) xBuckets[bk] = 0;
-    var cy = (axisY - 10 - xBuckets[bk] * 11).toFixed(1);
-    xBuckets[bk]++;
+    var cy = (axisY - r - 6).toFixed(1);
 
-    var jidEsc = j.id.replace(/'/g, "\\'");
-    var label = _actJobLabels[j.job_type] || j.job_type || 'Job';
-    var tip = esc(label) + (j.vmid ? ' · VM '+j.vmid : '') + '&#10;' + esc(fmtDateRel(j.created_at));
     dotsHtml.push(
-      '<circle cx="'+cx+'" cy="'+cy+'" r="5"'
-      +' fill="'+fill+'" stroke="'+stroke+'" stroke-width="3"'
-      +' onmouseenter="_jtHover(\''+jidEsc+'\',event)"'
+      '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'"'
+      +' fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"'
+      +' onmouseenter="_jtHoverBucket('+bk+',event)"'
       +' onmouseleave="_jtUnhover()"'
-      +' onclick="_jtClick(\''+jidEsc+'\')"'
+      +' onclick="_jtClickBucket('+bk+',event)"'
       +' style="cursor:pointer"/>'
     );
+    // Count label for clusters
+    if (count > 1) {
+      var fontSize = count < 10 ? 8 : 7;
+      dotsHtml.push(
+        '<text x="'+cx+'" y="'+(parseFloat(cy)+fontSize*0.38).toFixed(1)+'"'
+        +' text-anchor="middle" dominant-baseline="middle"'
+        +' font-size="'+fontSize+'" font-weight="700" fill="'+stroke+'" font-family="sans-serif"'
+        +' style="pointer-events:none">'+count+'</text>'
+      );
+    }
   });
 
-  if (!Object.keys(_jtJobMap).length) {
-    svgParts.push('<text x="'+(padL+plotW/2).toFixed(1)+'" y="'+(axisY-14)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="sans-serif">No completed jobs in the last 7 days</text>');
+  if (!hasDots) {
+    svgParts.push('<text x="'+(padL+plotW/2).toFixed(1)+'" y="'+(axisY-16)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="sans-serif">No completed jobs in the last 7 days</text>');
   }
 
   svgParts.push(dotsHtml.join(''));
@@ -6836,38 +6856,60 @@ function _dbRenderJobTimeline(jobsData) {
     + svgParts.join('') + '</svg>';
 }
 
-function _jtHover(id, evt) {
-  var j = _jtJobMap[id];
-  if (!j) return;
+function _jtLogSnippet(j) {
+  if (!j.log || !j.log.length) return '';
+  var entries = j.log.slice(-3);
+  return '<div style="margin-top:7px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px">'
+    + entries.map(function(l) {
+        var msg = l.msg || l;
+        var ts  = l.ts ? new Date(l.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+        return '<div style="display:flex;gap:5px;font-size:10px;line-height:1.4">'
+          + (ts ? '<span style="color:#475569;flex-shrink:0">'+esc(ts)+'</span>' : '')
+          + '<span style="color:#94a3b8">'+esc(msg)+'</span></div>';
+      }).join('')
+    + (j.log.length > 3 ? '<div style="font-size:10px;color:#475569;margin-top:2px">… '+(j.log.length-3)+' earlier entries</div>' : '')
+    + '</div>';
+}
+
+function _jtHoverBucket(bk, evt) {
+  var bucket = _jtBucketMap[bk];
+  if (!bucket) return;
   var tt = document.getElementById('tlTooltip');
   if (!tt) return;
-  var label  = _actJobLabels[j.job_type] || j.job_type || 'Job';
-  var status = j.status;
-  var sColor = (status === 'done') ? '#56d364' : (status === 'cancelled') ? '#8b949e' : '#f08080';
+  var count   = bucket.jobs.length;
+  var nDone   = bucket.jobs.filter(function(j){ return j.status==='done'; }).length;
+  var nFailed = bucket.jobs.filter(function(j){ return j.status==='failed'||j.status==='error'; }).length;
 
-  // Last 3 log entries
-  var logHtml = '';
-  if (j.log && j.log.length) {
-    var entries = j.log.slice(-3);
-    logHtml = '<div style="margin-top:7px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px">'
-      + entries.map(function(l) {
-          var msg = l.msg || l;
-          var ts  = l.ts ? new Date(l.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
-          return '<div style="display:flex;gap:5px;font-size:10px;line-height:1.4">'
-            + (ts ? '<span style="color:#475569;flex-shrink:0">'+esc(ts)+'</span>' : '')
-            + '<span style="color:#94a3b8">'+esc(msg)+'</span></div>';
-        }).join('')
-      + (j.log.length > 3 ? '<div style="font-size:10px;color:#475569;margin-top:2px">… '+( j.log.length - 3)+' earlier entries</div>' : '')
-      + '</div>';
+  if (count === 1) {
+    // Single job — full detail
+    var j      = bucket.jobs[0];
+    var label  = _actJobLabels[j.job_type] || j.job_type || 'Job';
+    var status = j.status;
+    var sColor = status==='done' ? '#56d364' : status==='cancelled' ? '#8b949e' : '#f08080';
+    tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+esc(label)+'</div>'
+      + (j.vmid ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">VM '+esc(String(j.vmid))+(j.node?' · '+esc(j.node):'')+'</div>' : '')
+      + '<div style="margin-top:3px;font-size:11px">'+fmtDateRel(j.created_at)+'</div>'
+      + (j.created_by ? '<div style="color:#64748b;font-size:10px;margin-top:1px">by '+esc(j.created_by)+'</div>' : '')
+      + '<div style="margin-top:3px"><span style="background:rgba(0,0,0,.25);color:'+sColor+';padding:1px 7px;border-radius:4px;font-size:11px">'+esc(status)+'</span></div>'
+      + _jtLogSnippet(j)
+      + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to go to job</div>';
+  } else {
+    // Cluster summary
+    var centerTs = parseInt(bk) * 6*3600e3;
+    var window6h = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'})
+                 + '–' + new Date(centerTs + 6*3600e3).toLocaleTimeString([],{hour:'2-digit'});
+    var summary  = '<div style="margin-top:4px;font-size:11px">';
+    if (nDone)   summary += '<span style="color:#56d364">● '+nDone+' done</span>  ';
+    if (nFailed) summary += '<span style="color:#f08080">● '+nFailed+' failed</span>';
+    summary += '</div>';
+    // Most recent job log snippet
+    var newest = bucket.jobs.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); })[0];
+    tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+count+' Jobs</div>'
+      + '<div style="color:#64748b;font-size:10px;margin-top:1px">'+esc(window6h)+'</div>'
+      + summary
+      + _jtLogSnippet(newest)
+      + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to see list</div>';
   }
-
-  tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+esc(label)+'</div>'
-    + (j.vmid ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">VM '+esc(String(j.vmid))+(j.node?' · '+esc(j.node):'')+'</div>' : '')
-    + '<div style="margin-top:3px;font-size:11px">'+fmtDateRel(j.created_at)+'</div>'
-    + (j.created_by ? '<div style="color:#64748b;font-size:10px;margin-top:1px">by '+esc(j.created_by)+'</div>' : '')
-    + '<div style="margin-top:3px"><span style="background:rgba(0,0,0,.25);color:'+sColor+';padding:1px 7px;border-radius:4px;font-size:11px">'+esc(status)+'</span></div>'
-    + logHtml
-    + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to go to job</div>';
   _tlPositionTooltip(evt);
 }
 
@@ -6876,11 +6918,18 @@ function _jtUnhover() {
   if (tt) tt.style.display = 'none';
 }
 
-function _jtClick(id) {
-  // Switch to Jobs tab
+function _jtClickBucket(bk, evt) {
+  evt.stopPropagation();
+  _jtClosePopup();
+  var bucket = _jtBucketMap[bk];
+  if (!bucket) return;
+  if (bucket.jobs.length === 1) { _jtNavigateToJob(bucket.jobs[0].id); return; }
+  _jtOpenPopup(bucket, evt);
+}
+
+function _jtNavigateToJob(id) {
   var jobsTab = document.querySelector('[data-tab=jobs]');
   if (jobsTab) jobsTab.click();
-  // Find the job in cache, jump to its page, highlight it
   setTimeout(function() {
     var idx = _allJobsCache.findIndex(function(j){ return j.id === id; });
     if (idx < 0) { loadAllJobs().then(function(){ _jtScrollToJob(id); }); return; }
@@ -6890,14 +6939,75 @@ function _jtClick(id) {
   }, 180);
 }
 
+// Keep _jtClick as alias for backwards compat (used by actLogPoll indirectly)
+function _jtClick(id) { _jtNavigateToJob(id); }
+
 function _jtScrollToJob(id) {
   var row = document.querySelector('tr[data-job-id="'+id+'"]');
   if (!row) return;
   row.scrollIntoView({behavior:'smooth', block:'center'});
   row.classList.remove('job-row-flash');
-  void row.offsetWidth; // reflow to restart animation
+  void row.offsetWidth;
   row.classList.add('job-row-flash');
   setTimeout(function(){ row.classList.remove('job-row-flash'); }, 1900);
+}
+
+function _jtOpenPopup(bucket, evt) {
+  var popup = document.createElement('div');
+  popup.id = 'jtClusterPopup';
+  popup.style.cssText = 'position:fixed;z-index:9200;background:#1e293b;color:#e2e8f0;'
+    + 'border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:6px 0;'
+    + 'font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.5);'
+    + 'max-height:300px;overflow-y:auto;min-width:230px;left:-9999px;top:-9999px';
+
+  var sorted = bucket.jobs.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
+  var rows = sorted.map(function(j) {
+    var label  = _actJobLabels[j.job_type] || j.job_type || 'Job';
+    var status = j.status;
+    var sColor = status==='done' ? '#56d364' : status==='cancelled' ? '#8b949e' : '#f08080';
+    var jidEsc = j.id.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div onclick="_jtClosePopup();_jtNavigateToJob(\''+jidEsc+'\')"'
+      + ' style="padding:6px 14px;cursor:pointer;display:flex;align-items:center;gap:8px"'
+      + ' onmouseenter="this.style.background=\'rgba(255,255,255,.06)\'"'
+      + ' onmouseleave="this.style.background=\'\'">'
+      + '<span style="width:7px;height:7px;border-radius:50%;background:'+sColor+';flex-shrink:0"></span>'
+      + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(label)
+        + (j.vmid ? ' <span style="color:#64748b;font-size:10px">VM '+esc(String(j.vmid))+'</span>' : '')+'</span>'
+      + '<span style="color:#475569;font-size:10px;white-space:nowrap;flex-shrink:0">'+esc(fmtDateRel(j.created_at))+'</span>'
+      + '</div>';
+  }).join('');
+
+  popup.innerHTML = '<div style="padding:5px 14px 5px;font-size:10px;color:#475569;'
+    + 'border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">'
+    + '<span>'+bucket.jobs.length+' jobs in this window</span>'
+    + '<span onclick="_jtClosePopup()" style="cursor:pointer;font-size:13px;color:#64748b;padding:0 2px">✕</span></div>'
+    + rows;
+
+  document.body.appendChild(popup);
+
+  // Position near click, keep on screen
+  requestAnimationFrame(function() {
+    var pw = popup.offsetWidth || 230, ph = popup.offsetHeight || 200;
+    var x  = evt.clientX + 12, y = evt.clientY - ph / 2;
+    if (x + pw > window.innerWidth  - 8) x = evt.clientX - pw - 12;
+    if (y + ph > window.innerHeight - 8) y = window.innerHeight - ph - 8;
+    if (y < 8) y = 8;
+    popup.style.left = x + 'px';
+    popup.style.top  = y + 'px';
+  });
+
+  document.addEventListener('click', _jtClosePopup, {capture:true, once:true});
+  document.addEventListener('keydown', _jtPopupEsc);
+}
+
+function _jtPopupEsc(e) {
+  if (e.key === 'Escape') _jtClosePopup();
+}
+
+function _jtClosePopup() {
+  var p = document.getElementById('jtClusterPopup');
+  if (p) p.parentNode.removeChild(p);
+  document.removeEventListener('keydown', _jtPopupEsc);
 }
 
 var _DB_SYSTEMS_CACHE_KEY = 'nasnap_db_systems_cache';
