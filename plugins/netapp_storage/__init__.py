@@ -207,7 +207,8 @@ def register(app):
     from .api.schedules import register_routes as reg_schedules, start_scheduler
     from .api.clone import register_routes as reg_clone
     from .api.snapmirror import register_routes as reg_snapmirror
-    from .api.settings import register_routes as reg_settings
+    from .api.settings import register_routes as reg_settings, start_db_backup_scheduler
+    from .api.file_restore import register_routes as reg_sfr, start_sfr_cleanup
     from .api.provisioning import register_routes as reg_provisioning
     from .api.recovery import register_routes as reg_recovery
     from .api.setup import register_routes as reg_setup
@@ -225,7 +226,10 @@ def register(app):
     reg_setup()
     reg_dr()
     reg_dashboard()
+    reg_sfr()
     start_scheduler()
     _maybe_startup_scan()
+    start_db_backup_scheduler()
+    start_sfr_cleanup()
 
     log.info(f"[PLUGINS] {PLUGIN_NAME} registriert (UI: /api/plugins/netapp_storage/api/ui)")

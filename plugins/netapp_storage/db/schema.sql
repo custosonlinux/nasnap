@@ -306,3 +306,48 @@ CREATE TABLE IF NOT EXISTS netapp_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_netapp_audit_ts   ON netapp_audit_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_netapp_audit_user ON netapp_audit_log(user);
+
+-- ── Automated DB Backup ─────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS netapp_db_backup_config (
+    id                  TEXT PRIMARY KEY DEFAULT 'default',
+    enabled             INTEGER NOT NULL DEFAULT 0,
+    cron_expr           TEXT NOT NULL DEFAULT '0 2 * * *',
+    target_type         TEXT NOT NULL DEFAULT '',          -- 'sftp'|'cifs'|'nfs_datastore'
+    sftp_host           TEXT NOT NULL DEFAULT '',
+    sftp_port           INTEGER NOT NULL DEFAULT 22,
+    sftp_user           TEXT NOT NULL DEFAULT '',
+    sftp_password_enc   TEXT NOT NULL DEFAULT '',
+    sftp_path           TEXT NOT NULL DEFAULT '',
+    cifs_host           TEXT NOT NULL DEFAULT '',
+    cifs_share          TEXT NOT NULL DEFAULT '',
+    cifs_user           TEXT NOT NULL DEFAULT '',
+    cifs_domain         TEXT NOT NULL DEFAULT '',
+    cifs_password_enc   TEXT NOT NULL DEFAULT '',
+    cifs_path           TEXT NOT NULL DEFAULT '',
+    nfs_ds_id           TEXT NOT NULL DEFAULT '',          -- netapp_provisioned_datastores.id
+    nfs_subdir          TEXT NOT NULL DEFAULT '.nasnap/db_backups',
+    keep_copies         INTEGER NOT NULL DEFAULT 7,
+    last_run_at         TEXT NOT NULL DEFAULT '',
+    last_run_status     TEXT NOT NULL DEFAULT '',          -- ''|'success'|'failed'
+    last_run_error      TEXT NOT NULL DEFAULT ''
+);
+
+-- ── Single File Restore sessions ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS netapp_sfr_sessions (
+    id           TEXT PRIMARY KEY,
+    vmid         TEXT NOT NULL DEFAULT '',
+    node         TEXT NOT NULL DEFAULT '',
+    mapping_id   TEXT NOT NULL DEFAULT '',
+    pve_host_id  TEXT NOT NULL DEFAULT '',
+    storage_id   TEXT NOT NULL DEFAULT '',
+    snap_name    TEXT NOT NULL DEFAULT '',
+    disk_file    TEXT NOT NULL DEFAULT '',
+    nbd_device   TEXT NOT NULL DEFAULT '',
+    mount_path   TEXT NOT NULL DEFAULT '',
+    partition    TEXT NOT NULL DEFAULT '',
+    guest_os     TEXT NOT NULL DEFAULT 'linux',
+    created_at   TEXT NOT NULL DEFAULT '',
+    last_active  TEXT NOT NULL DEFAULT ''
+);

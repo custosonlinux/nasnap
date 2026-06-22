@@ -17,6 +17,8 @@ import email.mime.text
 import email.mime.multipart
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 
 # Plugin directory (two levels up from this file: api/ → netapp_storage/)
@@ -955,12 +957,189 @@ def _update_apply():
                 pass
 
 
+# ── Automated DB Backup ───────────────────────────────────────────────────────
+
+def _ensure_backup_config_row(db):
+    if not db.query_one("SELECT id FROM netapp_db_backup_config WHERE id='default'"):
+        db.execute("INSERT INTO netapp_db_backup_config (id) VALUES ('default')")
+
+
+def _backup_config_get():
+    err = _require_admin()
+    if err:
+        return err
+    db = get_db()
+    _ensure_backup_config_row(db)
+    row = dict(db.query_one("SELECT * FROM netapp_db_backup_config WHERE id='default'"))
+
+    # Compute next scheduled run via croniter (if available)
+    cron_next = ''
+    try:
+        from croniter import croniter
+        cron_next = croniter(row.get('cron_expr', '0 2 * * *'),
+                             datetime.now()).get_next(datetime).strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        pass
+
+    return jsonify({
+        'enabled':           bool(row.get('enabled')),
+        'cron_expr':         row.get('cron_expr', '0 2 * * *'),
+        'cron_next':         cron_next,
+        'target_type':       row.get('target_type', ''),
+        'sftp_host':         row.get('sftp_host', ''),
+        'sftp_port':         row.get('sftp_port', 22),
+        'sftp_user':         row.get('sftp_user', ''),
+        'sftp_path':         row.get('sftp_path', ''),
+        'has_sftp_password': bool(row.get('sftp_password_enc')),
+        'cifs_host':         row.get('cifs_host', ''),
+        'cifs_share':        row.get('cifs_share', ''),
+        'cifs_user':         row.get('cifs_user', ''),
+        'cifs_domain':       row.get('cifs_domain', ''),
+        'cifs_path':         row.get('cifs_path', ''),
+        'has_cifs_password': bool(row.get('cifs_password_enc')),
+        'nfs_ds_id':         row.get('nfs_ds_id', ''),
+        'nfs_subdir':        row.get('nfs_subdir', '.nasnap/db_backups'),
+        'keep_copies':       row.get('keep_copies', 7),
+        'last_run_at':       row.get('last_run_at', ''),
+        'last_run_status':   row.get('last_run_status', ''),
+        'last_run_error':    row.get('last_run_error', ''),
+    })
+
+
+def _backup_config_save():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    db = get_db()
+    _ensure_backup_config_row(db)
+
+    cron_expr = data.get('cron_expr', '0 2 * * *').strip()
+    try:
+        from croniter import croniter
+        croniter(cron_expr)
+    except Exception:
+        return jsonify({'error': f'Invalid cron expression: {cron_expr}'}), 400
+
+    fields = {
+        'enabled':     1 if data.get('enabled') else 0,
+        'cron_expr':   cron_expr,
+        'target_type': data.get('target_type', '').strip(),
+        'sftp_host':   data.get('sftp_host', '').strip(),
+        'sftp_port':   int(data.get('sftp_port') or 22),
+        'sftp_user':   data.get('sftp_user', '').strip(),
+        'sftp_path':   data.get('sftp_path', '').strip(),
+        'cifs_host':   data.get('cifs_host', '').strip(),
+        'cifs_share':  data.get('cifs_share', '').strip(),
+        'cifs_user':   data.get('cifs_user', '').strip(),
+        'cifs_domain': data.get('cifs_domain', '').strip(),
+        'cifs_path':   data.get('cifs_path', '').strip(),
+        'nfs_ds_id':   data.get('nfs_ds_id', '').strip(),
+        'nfs_subdir':  data.get('nfs_subdir', '.nasnap/db_backups').strip() or '.nasnap/db_backups',
+        'keep_copies': max(1, int(data.get('keep_copies') or 7)),
+    }
+
+    if data.get('sftp_password'):
+        fields['sftp_password_enc'] = db._encrypt(data['sftp_password'])
+    if data.get('cifs_password'):
+        fields['cifs_password_enc'] = db._encrypt(data['cifs_password'])
+
+    set_clause = ', '.join(f"{k}=?" for k in fields)
+    db.execute(f"UPDATE netapp_db_backup_config SET {set_clause} WHERE id='default'",
+               list(fields.values()))
+    log.info("[netapp_storage] DB backup config saved")
+    return jsonify({'success': True})
+
+
+def _backup_run_now():
+    err = _require_admin()
+    if err:
+        return err
+    db = get_db()
+    _ensure_backup_config_row(db)
+    row = dict(db.query_one("SELECT * FROM netapp_db_backup_config WHERE id='default'"))
+
+    if not row.get('target_type'):
+        return jsonify({'success': False, 'error': 'No backup target configured'}), 400
+
+    cfg = dict(row)
+    if cfg.get('sftp_password_enc'):
+        cfg['sftp_password'] = db._decrypt(cfg['sftp_password_enc'])
+    if cfg.get('cifs_password_enc'):
+        cfg['cifs_password'] = db._decrypt(cfg['cifs_password_enc'])
+
+    from ..core.db_backup import DbBackupRunner
+    result = DbBackupRunner().run(cfg, db)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    status  = 'success' if result.get('success') else 'failed'
+    db.execute(
+        "UPDATE netapp_db_backup_config "
+        "SET last_run_at=?, last_run_status=?, last_run_error=? WHERE id='default'",
+        (now_iso, status, result.get('error', '')),
+    )
+    return jsonify(result)
+
+
+def _check_and_run_backup():
+    """Called from the backup scheduler thread every minute."""
+    try:
+        from nasnap_core.core.db import get_db as _get_db
+        db = _get_db()
+        row = db.query_one("SELECT * FROM netapp_db_backup_config WHERE id='default'")
+        if not row:
+            return
+        cfg = dict(row)
+        if not cfg.get('enabled') or not cfg.get('target_type'):
+            return
+
+        from croniter import croniter
+        now  = datetime.now()
+        prev = croniter(cfg.get('cron_expr', '0 2 * * *'), now).get_prev(datetime)
+
+        last_run = cfg.get('last_run_at', '')
+        if last_run:
+            last_dt = datetime.fromisoformat(last_run.rstrip('Z').split('+')[0])
+            if prev <= last_dt:
+                return  # already ran for this slot
+
+        if cfg.get('sftp_password_enc'):
+            cfg['sftp_password'] = db._decrypt(cfg['sftp_password_enc'])
+        if cfg.get('cifs_password_enc'):
+            cfg['cifs_password'] = db._decrypt(cfg['cifs_password_enc'])
+
+        from ..core.db_backup import DbBackupRunner
+        result  = DbBackupRunner().run(cfg, db)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        status  = 'success' if result.get('success') else 'failed'
+        db.execute(
+            "UPDATE netapp_db_backup_config "
+            "SET last_run_at=?, last_run_status=?, last_run_error=? WHERE id='default'",
+            (now_iso, status, result.get('error', '')),
+        )
+        log.info(f"[netapp_storage] Scheduled DB backup: {status} — {result.get('filename','')}")
+    except Exception as exc:
+        log.warning(f"[netapp_storage] DB backup scheduler error: {exc}")
+
+
+def start_db_backup_scheduler():
+    def _loop():
+        while True:
+            time.sleep(60)
+            _check_and_run_backup()
+    threading.Thread(target=_loop, daemon=True, name="nasnap-db-backup").start()
+    log.info("[netapp_storage] DB backup scheduler started")
+
+
 def register_routes():
-    register_plugin_route(PLUGIN_ID, 'settings/smtp',           _smtp_get)
-    register_plugin_route(PLUGIN_ID, 'settings/smtp/save',      _smtp_save)
-    register_plugin_route(PLUGIN_ID, 'settings/smtp/test',      _smtp_test)
-    register_plugin_route(PLUGIN_ID, 'settings/notify-test',    _notify_test)
-    register_plugin_route(PLUGIN_ID, 'settings/export',         _db_export)
-    register_plugin_route(PLUGIN_ID, 'settings/import',         _db_import)
-    register_plugin_route(PLUGIN_ID, 'settings/update/info',    _update_info)
-    register_plugin_route(PLUGIN_ID, 'settings/update/apply',   _update_apply)
+    register_plugin_route(PLUGIN_ID, 'settings/smtp',              _smtp_get)
+    register_plugin_route(PLUGIN_ID, 'settings/smtp/save',         _smtp_save)
+    register_plugin_route(PLUGIN_ID, 'settings/smtp/test',         _smtp_test)
+    register_plugin_route(PLUGIN_ID, 'settings/notify-test',       _notify_test)
+    register_plugin_route(PLUGIN_ID, 'settings/export',            _db_export)
+    register_plugin_route(PLUGIN_ID, 'settings/import',            _db_import)
+    register_plugin_route(PLUGIN_ID, 'settings/update/info',       _update_info)
+    register_plugin_route(PLUGIN_ID, 'settings/update/apply',      _update_apply)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-config',  _backup_config_get)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-save',    _backup_config_save)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-run-now', _backup_run_now)

@@ -266,6 +266,67 @@ def ssh_run(host, user, password, cmd, capture=False, stdin_data=None, timeout=6
                 pass
 
 
+class SshSession:
+    """Persistent SSH connection via paramiko.
+
+    Opens one TCP+SSH session and reuses it for many exec_command calls.
+    Each call costs ~1-2 ms (channel open) vs ~3-8 ms with subprocess+ControlMaster.
+    Use as context manager:  with SshSession(host, user, pw) as s: s.run(cmd)
+    """
+
+    def __init__(self, host, user, password, key_material="", timeout=15):
+        import paramiko
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        kw = dict(hostname=host, username=user, timeout=timeout,
+                  look_for_keys=False, allow_agent=False)
+        if key_material:
+            import io
+            for cls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
+                try:
+                    kw["pkey"] = cls.from_private_key(io.StringIO(key_material))
+                    break
+                except Exception:
+                    pass
+            else:
+                raise RuntimeError("Could not load SSH key material")
+        else:
+            sys_key = _find_system_ssh_key()
+            if sys_key:
+                kw["key_filename"] = sys_key
+            else:
+                kw["password"] = password
+        client.connect(**kw)
+        self._client = client
+
+    def run(self, cmd, timeout=120):
+        """Execute cmd, return stdout as str. Raises RuntimeError on non-zero exit.
+
+        stdout is drained BEFORE recv_exit_status to prevent a paramiko channel
+        deadlock: if stdout data exceeds the SSH window size (2 MB default) the
+        remote process blocks on write, and recv_exit_status() waits forever.
+        """
+        _, out_fh, err_fh = self._client.exec_command(cmd, timeout=timeout)
+        stdout = out_fh.read().decode("utf-8", errors="replace")  # drain before exit status
+        rc     = out_fh.channel.recv_exit_status()
+        if rc != 0:
+            stderr = err_fh.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"SSH command failed (rc={rc}): {stderr[:300]}")
+        return stdout
+
+    def close(self):
+        try:
+            self._client.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
 class JobLogger:
     """Appends log lines to netapp_jobs.log_json."""
 

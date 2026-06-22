@@ -6,6 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.5.0] — 2026-06-22
+
+### Added
+
+- **Single File Restore (SFR)** — restore individual files from ONTAP snapshots directly into a running VM without full restore. A Total Commander–style two-panel modal shows the snapshot filesystem (left) and the VM filesystem (right). Features: partition detection with filesystem icons, file browser with Name/Size/Date columns, ↓ Download, ↓ tar.gz, F5 Copy→VM, F8 Delete.
+  - **Linux VMs**: large files (>4 MB) transferred via chunked QGA write (SSH reads 1 MB blocks, Python splits into ~30 KB pieces that fit PVE's base64 limit, assembled in-VM via `cat`). No VM network connection required — all data flows through the QGA socket on the PVE host.
+  - **Windows VMs**: drive browser ("This PC" view), PowerShell-based file listing (locale-independent), small file copy via QGA. Drive navigation uses backslash paths with proper JS escaping.
+  - **OS auto-detection**: detects Windows via QGA `uname` exception ("Failed to execute child process") with `cmd.exe` fallback probe, prevents false "linux" result.
+  - **Transfer cancellation**: Abort button cancels the running copy at the next 1 MB block boundary (<2 s latency). Closing the modal or the browser tab also cancels the transfer and unmounts cleanly (`beforeunload` + `fetch keepalive`).
+  - **Auto-close progress bar**: after a successful transfer the progress bar auto-hides after 3 seconds.
+  - **Session cleanup daemon**: expired SFR sessions (>30 min inactivity) are automatically unmounted and cleaned up in the background.
+  - New API routes under `file-restore/`: `sessions/create`, `sessions/mount`, `sessions/umount`, `sessions/ls`, `sessions/copy`, `sessions/copy-status`, `sessions/copy-cancel`, `sessions/close`, `sessions/download`, `sessions/download-tar`.
+  - New DB table `netapp_sfr_sessions`.
+  - Requires: `paramiko`, `qemu-nbd` on PVE hosts, QEMU Guest Agent running in target VM.
+
+- **Snapshot Timeline — bucket clustering** — snapshot dots are now clustered into time buckets (size scales with zoom: 5 min at hour-view, 6 h at week-view, 1 day at month-view). Multiple snapshots at the same time no longer overlap. Bubble size grows with count (r=5.5 for 1, r=8 for <10, r=10 for ≥10), count shown as label inside the bubble.
+- **Snapshot Timeline — Dashboard-consistent colors and interaction** — the timeline now uses the same color logic, hover tooltips, and click behavior as the Dashboard Activity timeline:
+  - **Green** (`#56d364`): all snapshots in the window succeeded
+  - **Orange** (`#f0a040`): some failures, failure rate < 50 %
+  - **Red** (`#f08080`): any scheduled snapshot failed, or failure rate ≥ 50 %
+  - **Grey** (muted): ONTAP-native snapshots only (no failure tracking)
+  - Hover on single bubble: full snapshot detail + "Click to go to snapshot"
+  - Hover on cluster: count header, time window, ● N done / ● N failed / ● N native breakdown, failure rate or scheduled-failure warning
+  - Click single: scrolls to snapshot in table with flash highlight
+  - Click cluster: opens positioned popup list (identical layout to Dashboard job popup) — each entry clickable, ✕ close, click-outside and Escape close
+
+---
+
 ## [1.4.0] — 2026-06-19
 
 ### Added

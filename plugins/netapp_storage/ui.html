@@ -1995,6 +1995,167 @@ function applyI18n() {
         </div>
       </div>
 
+      <!-- ═══════════════ AUTOMATED BACKUP SCHEDULE ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>Automated Backup Schedule</span>
+      </div>
+      <div class="card" id="dbBackupCard">
+        <!-- Enable toggle -->
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:4px 0 12px;border-bottom:1px solid var(--border);margin-bottom:14px">
+          <div>
+            <div style="font-weight:500;font-size:13px">Enable automated database backups</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Automatically export and transfer the plugin configuration database on a cron schedule.</div>
+          </div>
+          <div id="dbBakToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="dbBakToggleEnabled()">
+            <div id="dbBakToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
+            <div id="dbBakToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
+          </div>
+        </label>
+
+        <!-- Schedule picker (same style as Protection Plans) -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="flex:0 0 auto;margin:0">
+            <label>Frequency</label>
+            <select id="dbBakFreq" onchange="dbBakUpdateSchedUI()">
+              <option value="hourly">Hourly</option>
+              <option value="daily" selected>Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="interval">Every N Hours</option>
+            </select>
+          </div>
+          <div id="dbBakTimeGroup" class="form-group" style="flex:0 0 auto;margin:0">
+            <label>At time</label>
+            <input id="dbBakTime" type="time" value="02:00" style="width:110px" onchange="dbBakUpdateSchedUI()">
+          </div>
+          <div id="dbBakDowGroup" class="form-group" style="flex:0 0 auto;margin:0;display:none">
+            <label>Weekday</label>
+            <select id="dbBakDow" onchange="dbBakUpdateSchedUI()">
+              <option value="1">Monday</option><option value="2">Tuesday</option>
+              <option value="3">Wednesday</option><option value="4">Thursday</option>
+              <option value="5">Friday</option><option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+          <div id="dbBakDomGroup" class="form-group" style="flex:0 0 auto;margin:0;display:none">
+            <label>Day of month</label>
+            <select id="dbBakDom" onchange="dbBakUpdateSchedUI()"></select>
+          </div>
+          <div id="dbBakIntervalGroup" class="form-group" style="flex:0 0 auto;margin:0;display:none">
+            <label>Interval</label>
+            <select id="dbBakIntervalVal" onchange="dbBakUpdateSchedUI()">
+              <option value="1">every hour</option><option value="2">every 2 hours</option>
+              <option value="3">every 3 hours</option><option value="4">every 4 hours</option>
+              <option value="6">every 6 hours</option><option value="8">every 8 hours</option>
+              <option value="12">every 12 hours</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;margin:0">
+            <label>Keep copies</label>
+            <input id="dbBakKeep" type="number" min="1" max="365" value="7" style="width:80px">
+          </div>
+        </div>
+        <p class="hint" style="margin-top:8px;margin-bottom:14px">
+          Schedule: <strong id="dbBakCronHuman" style="color:var(--text)">Daily at 02:00</strong>
+          <input id="dbBakCronExpr" type="hidden" value="0 2 * * *">
+        </p>
+
+        <div class="form-grid" style="gap:10px 16px">
+          <!-- Target type -->
+          <div class="form-group" style="margin:0;grid-column:1/-1">
+            <label>Backup target</label>
+            <select id="dbBakTargetType" onchange="dbBakUpdateFields()" style="width:220px">
+              <option value="">— select —</option>
+              <option value="sftp">SFTP</option>
+              <option value="cifs">CIFS / SMB</option>
+              <option value="nfs_datastore">NFS Datastore (NaSnap managed)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- SFTP fields -->
+        <div id="dbBakFieldsSftp" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+          <div class="form-grid" style="gap:10px 16px">
+            <div class="form-group" style="margin:0">
+              <label>Host</label>
+              <input id="dbBakSftpHost" placeholder="backup.example.com">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Port</label>
+              <input id="dbBakSftpPort" type="number" value="22" min="1" max="65535" style="width:90px">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Username</label>
+              <input id="dbBakSftpUser" placeholder="backup">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Password</label>
+              <input id="dbBakSftpPass" type="password" placeholder="leave blank to keep stored">
+            </div>
+            <div class="form-group" style="margin:0;grid-column:1/-1">
+              <label>Remote directory</label>
+              <input id="dbBakSftpPath" placeholder="/backups/nasnap">
+            </div>
+          </div>
+        </div>
+
+        <!-- CIFS fields -->
+        <div id="dbBakFieldsCifs" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+          <div class="form-grid" style="gap:10px 16px">
+            <div class="form-group" style="margin:0">
+              <label>Host</label>
+              <input id="dbBakCifsHost" placeholder="fileserver.example.com">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Share</label>
+              <input id="dbBakCifsShare" placeholder="backups">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Domain</label>
+              <input id="dbBakCifsDomain" placeholder="WORKGROUP (optional)">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Username</label>
+              <input id="dbBakCifsUser" placeholder="backup-user">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Password</label>
+              <input id="dbBakCifsPass" type="password" placeholder="leave blank to keep stored">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Subdirectory (optional)</label>
+              <input id="dbBakCifsPath" placeholder="nasnap\backups">
+            </div>
+          </div>
+        </div>
+
+        <!-- NFS Datastore fields -->
+        <div id="dbBakFieldsNfsDs" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+          <div class="form-grid" style="gap:10px 16px">
+            <div class="form-group" style="margin:0">
+              <label>Datastore</label>
+              <select id="dbBakNfsDsId" style="min-width:240px">
+                <option value="">Loading…</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Subdirectory</label>
+              <input id="dbBakNfsSubdir" value=".nasnap/db_backups">
+            </div>
+          </div>
+          <p class="hint" style="margin-top:6px">Files are written via SSH to the PVE host that manages this datastore. No additional credentials needed.</p>
+        </div>
+
+        <!-- Status + actions -->
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+          <div id="dbBakLastStatus" style="font-size:12px;color:var(--muted)">Last backup: —</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="dbBakRunNow()" id="dbBakRunBtn">Run now</button>
+            <button class="btn btn-primary btn-sm" onclick="dbBakSave()" id="dbBakSaveBtn">Save</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══════════════ PLUGIN UPDATE ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>Plugin Update</span>
@@ -2340,7 +2501,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -3479,6 +3640,7 @@ var _rcVms       = [];
 var _I = {
   restore: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
   clone:   'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z',
+  files:   'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z',
   trash:   'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
   edit:    'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
   run:     'M13 10V3L4 14h7v7l9-11h-7z',
@@ -3785,6 +3947,14 @@ function _renderRcRows() {
     var importBadge = v.hasImported ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border);margin-right:4px" title="At least one snapshot was imported from datastore index">Imported</span>' : '';
     var protoBg = _rcProtoBg[v.protocol] || '#888';
     var protoBadge = '<span class="badge" style="background:'+protoBg+';color:#fff;font-size:10px">'+esc(v.protocol)+'</span>';
+    var osKey = v.vmid + '_' + v.mappingId;
+    var osCell = v.isSan ? '' :
+      '<span id="osicon_'+osKey+'" title="" style="cursor:default;opacity:.3;display:inline-flex;align-items:center" aria-label="checking">'+_sfrSvgLinux+'</span>';
+    var sfrBtn = v.isSan ? '' :
+      '<button id="sfrbtn_'+osKey+'" class="btn btn-ghost btn-icon" title="Single File Restore" '
+      +'onclick="openSfrModal('+v.vmid+',\''+esc(v.name)+'\',\''+esc(v.mappingId)+'\')" disabled style="opacity:.4;cursor:not-allowed">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
+      +'</button>';
     return '<tr>'+
       '<td><code style="font-size:12px">'+v.vmid+'</code></td>'+
       '<td>'+drBadge+importBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
@@ -3792,12 +3962,19 @@ function _renderRcRows() {
       '<td>'+protoBadge+'</td>'+
       '<td style="color:var(--muted)">'+cnt+'</td>'+
       '<td style="color:var(--muted)">'+fmtDateRel(v.lastSnap)+'</td>'+
-      '<td><div class="row-actions">'+
+      '<td><div class="row-actions" style="gap:2px">'+
+        osCell+
         _icoBtn('secondary', t('act_restore'), 'openRestoreWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')', 'restore')+
         _icoBtn('ghost',     t('act_clone'),   'openCloneWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')',   'clone')+
+        sfrBtn+
       '</div></td>'+
     '</tr>';
   }).join('');
+  // Lazy-load QGA / OS info for each non-SAN VM
+  rows.forEach(function(v){
+    if (v.isSan) return;
+    _sfrLoadVmOsInfo(v.vmid, v.mappingId);
+  });
   ['vmid','name','dsName','proto','count','lastSnap'].forEach(function(c){
     var span = document.getElementById('rcs_'+c);
     var th   = span && span.parentElement;
@@ -5053,6 +5230,7 @@ function schedSmTamperproofWarn() {
 // ── Timeline Ribbon ────────────────────────────────────────────────────────
 var _tlZoom         = 'week';
 var _tlSnapMap      = {};
+var _tlBucketMap    = {};
 var _tlLastFiltered = [];
 // Only used for 'custom' range from date inputs; preset zooms are computed dynamically.
 var _tlTimeFrom     = null;
@@ -5137,6 +5315,13 @@ function tlClearRange() {
   if (btn) btn.textContent = 'Custom';
   _tlClosePicker();
   tlSetZoom('all');
+}
+
+function _tlBucketColor(bucket) {
+  if (!bucket.failedCount) return '#56d364';           // all good → green
+  if (bucket.scheduledFailed) return '#f08080';        // any scheduled failure → red
+  var failRate = bucket.failedCount / bucket.snaps.filter(function(i){ return !i.s || i.s.source !== 'ontap_native'; }).length;
+  return failRate >= 0.5 ? '#f08080' : '#f0a040';     // ≥50% failed → red, else orange
 }
 
 function renderTimeline(filtered) {
@@ -5242,38 +5427,98 @@ function renderTimeline(filtered) {
     }
   }
 
-  // Snapshot dots
-  _tlSnapMap = {};
-  var dotsHtml = [];
+  // Bucket size scales with the visible range — prevents dot overlap
+  var rangeMs  = tEnd - tStart;
+  var bucketMs = rangeMs <= 2*3600e3  ? 5*60e3        // ≤2 h  → 5 min
+               : rangeMs <= 2*864e5   ? 3600e3         // ≤2 d  → 1 h
+               : rangeMs <= 14*864e5  ? 6*3600e3       // ≤2 w  → 6 h
+               : rangeMs <= 60*864e5  ? 864e5          // ≤2 mo → 1 d
+               : 7*864e5;                              //  >2 mo → 1 w
+
+  // Cluster snapshots (done + failed) into buckets
+  var tlSnaps = filtered.filter(function(s){
+    return (s.status === 'done' || s.status === 'failed') && s.created_at;
+  });
+  _tlSnapMap   = {};
+  _tlBucketMap = {};
   var leftClipped = 0;
-  doneSnaps.forEach(function(s) {
+  tlSnaps.forEach(function(s) {
     var ts = Date.parse(s.created_at);
-    if (ts < tStart) { leftClipped++; return; }
     if (ts > now) return;
-    var x = toX(ts);
-    if (x < padL - 4 || x > padL + plotW + 4) return;
     var isNative = s.source === 'ontap_native';
     var key = isNative
       ? ('n_' + (s.ontap_snap_uuid||'') + '_' + (s.mapping_id||''))
       : ('p_' + String(s.id));
     _tlSnapMap[key] = s;
-    var cx = x.toFixed(1), cy = (axisY - 12).toFixed(1);
-    var fill = isNative ? 'var(--muted)' : 'var(--accent,#e07800)';
-    dotsHtml.push(
-      '<circle cx="'+cx+'" cy="'+cy+'" r="4.5"'
-      +' fill="'+fill+'" stroke="var(--bg-card,#fff)" stroke-width="1.5"'
-      +' onmouseenter="tlHoverKey(\''+key+'\',event)"'
-      +' onmouseleave="tlUnhover()"'
-      +' onclick="tlClick(\''+key+'\')"'
-      +' style="cursor:pointer"/>'
-    );
+    if (ts < tStart) { leftClipped++; return; }
+    var bk = Math.floor(ts / bucketMs);
+    if (!_tlBucketMap[bk]) _tlBucketMap[bk] = {
+      snaps:[], hasNative:false, hasPlugin:false,
+      failedCount:0, scheduledFailed:false, hasSuccess:false,
+      _bucketMs:bucketMs
+    };
+    _tlBucketMap[bk].snaps.push({ key: key, s: s });
+    if (isNative) {
+      _tlBucketMap[bk].hasNative = true;
+    } else {
+      _tlBucketMap[bk].hasPlugin = true;
+      if (s.status === 'failed') {
+        _tlBucketMap[bk].failedCount++;
+        if (s.schedule_id) _tlBucketMap[bk].scheduledFailed = true;
+      } else {
+        _tlBucketMap[bk].hasSuccess = true;
+      }
+    }
   });
 
-  // Overflow indicator
+  // Draw bucket bubbles
+  var dotsHtml = [];
+  var hasDots  = false;
+  Object.keys(_tlBucketMap).forEach(function(bk) {
+    var bucket = _tlBucketMap[bk];
+    var count  = bucket.snaps.length;
+    var centerTs = parseInt(bk) * bucketMs + bucketMs / 2;
+    var x = toX(Math.min(centerTs, now));
+    if (x < padL - 10 || x > padL + plotW + 10) return;
+    hasDots = true;
+
+    var stroke, fillBg;
+    if (!bucket.hasPlugin) {
+      // native-only → muted grey (no failure tracking)
+      stroke = 'var(--muted)'; fillBg = 'rgba(128,128,128,.12)';
+    } else {
+      stroke = _tlBucketColor(bucket);
+      fillBg = stroke === '#56d364' ? 'rgba(86,211,100,.15)'
+             : stroke === '#f08080' ? 'rgba(240,128,128,.15)'
+             : 'rgba(240,160,64,.15)';
+    }
+    var r  = count === 1 ? 5.5 : count < 10 ? 8 : 10;
+    var cx = x.toFixed(1);
+    var cy = (axisY - r - 6).toFixed(1);
+
+    dotsHtml.push(
+      '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'"'
+      +' fill="'+fillBg+'" stroke="'+stroke+'" stroke-width="1.5"'
+      +' onmouseenter="_tlHoverBucket('+bk+',event)"'
+      +' onmouseleave="tlUnhover()"'
+      +' onclick="_tlClickBucket('+bk+',event)"'
+      +' style="cursor:pointer"/>'
+    );
+    if (count > 1) {
+      var fs = count < 10 ? 7 : 6;
+      dotsHtml.push(
+        '<text x="'+cx+'" y="'+(parseFloat(cy)+fs*0.38).toFixed(1)+'"'
+        +' text-anchor="middle" dominant-baseline="middle"'
+        +' font-size="'+fs+'" font-weight="700" fill="'+stroke+'" font-family="sans-serif"'
+        +' style="pointer-events:none">'+count+'</text>'
+      );
+    }
+  });
+
   if (leftClipped > 0) {
     svgParts.push('<text x="'+(padL+2)+'" y="'+(axisY-14)+'" font-size="9" fill="var(--muted)" font-family="sans-serif">+'+leftClipped+' earlier</text>');
   }
-  if (!doneSnaps.length) {
+  if (!hasDots && !doneSnaps.length) {
     svgParts.push('<text x="'+(padL+plotW/2).toFixed(1)+'" y="'+(axisY-14)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="sans-serif">No snapshots in this range</text>');
   }
 
@@ -5322,6 +5567,124 @@ function _tlPositionTooltip(evt) {
 function tlUnhover() {
   var tt = document.getElementById('tlTooltip');
   if (tt) tt.style.display = 'none';
+}
+
+function _tlHoverBucket(bk, evt) {
+  var bucket = _tlBucketMap[bk];
+  if (!bucket) return;
+  var tt = document.getElementById('tlTooltip');
+  if (!tt) return;
+  var count = bucket.snaps.length;
+
+  if (count === 1) {
+    // Single snapshot — full detail (like dashboard single-job hover)
+    var item = bucket.snaps[0];
+    var s = item.s;
+    var isNative = s.source === 'ontap_native';
+    var dsLabel  = s.pve_storage_id || s.volume_name || '';
+    var vmHtml   = (!isNative && s.vmids && s.vmids.length)
+      ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">VMs: '+s.vmids.map(String).join(', ')+'</div>' : '';
+    tt.innerHTML = '<div style="font-weight:600;font-family:monospace;font-size:11px;word-break:break-all">'+esc(s.snap_name)+'</div>'
+      + (dsLabel ? '<div style="color:#94a3b8;margin-top:2px">'+esc(dsLabel)+'</div>' : '')
+      + '<div style="margin-top:2px">'+fmtDateRel(s.created_at)+'</div>'
+      + (isNative ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">ONTAP native</div>' : '')
+      + vmHtml
+      + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to go to snapshot</div>';
+  } else {
+    // Cluster — summary (identical pattern to dashboard cluster hover)
+    var bkMs     = bucket._bucketMs || 6*3600e3;
+    var centerTs = parseInt(bk) * bkMs;
+    var t1 = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'});
+    var t2 = new Date(centerTs + bkMs).toLocaleTimeString([],{hour:'2-digit'});
+    var nDone   = bucket.snaps.filter(function(i){ return i.s.status==='done'; }).length;
+    var nFailed = bucket.snaps.filter(function(i){ return i.s.status==='failed'; }).length;
+    var nNative = bucket.snaps.filter(function(i){ return i.s.source==='ontap_native'; }).length;
+    var bubbleColor = bucket.hasPlugin ? _tlBucketColor(bucket) : 'var(--muted)';
+    var failColor   = bubbleColor === '#f0a040' ? '#f0a040' : '#f08080';
+    var summary  = '<div style="margin-top:4px;font-size:11px">';
+    if (nDone)   summary += '<span style="color:#56d364">● '+nDone+' done</span>  ';
+    if (nFailed) summary += '<span style="color:'+failColor+'">● '+nFailed+' failed</span>  ';
+    if (nNative) summary += '<span style="color:var(--muted)">● '+nNative+' native</span>';
+    summary += '</div>';
+    if (nFailed && bucket.scheduledFailed) summary += '<div style="font-size:10px;color:#f08080;margin-top:2px">⚠ Scheduled snapshot(s) failed</div>';
+    else if (nFailed && bubbleColor==='#f0a040') summary += '<div style="font-size:10px;color:#f0a040;margin-top:2px">'+Math.round(bucket.failedCount/bucket.snaps.length*100)+'% failure rate</div>';
+    tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+count+' Snapshots</div>'
+      + '<div style="color:#64748b;font-size:10px;margin-top:1px">'+esc(t1+'–'+t2)+'</div>'
+      + summary
+      + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to see list</div>';
+  }
+  _tlPositionTooltip(evt);
+}
+
+function _tlClickBucket(bk, evt) {
+  evt.stopPropagation();
+  _tlClosePopup();
+  var bucket = _tlBucketMap[bk];
+  if (!bucket) return;
+  if (bucket.snaps.length === 1) { tlClick(bucket.snaps[0].key); return; }
+  _tlOpenPopup(bucket, evt);
+}
+
+function _tlOpenPopup(bucket, evt) {
+  var popup = document.createElement('div');
+  popup.id = 'tlClusterPopup';
+  popup.style.cssText = 'position:fixed;z-index:9200;background:var(--card);color:var(--text);'
+    + 'border:1px solid var(--border);border-radius:8px;padding:6px 0;'
+    + 'font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);'
+    + 'max-height:300px;overflow-y:auto;min-width:240px;left:-9999px;top:-9999px';
+
+  var sorted = bucket.snaps.slice().sort(function(a,b){ return (b.s.created_at||'').localeCompare(a.s.created_at||''); });
+  var rows = sorted.map(function(item) {
+    var s        = item.s;
+    var isNative = s.source === 'ontap_native';
+    var dotColor = isNative ? 'var(--muted)'
+                 : s.status === 'failed' ? '#f08080'
+                 : '#56d364';
+    var dsLabel  = s.pve_storage_id || s.volume_name || '';
+    var keyEsc   = item.key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div onclick="_tlClosePopup();tlClick(\''+keyEsc+'\')"'
+      + ' style="padding:5px 14px;cursor:pointer;border-bottom:1px solid var(--border)"'
+      + ' onmouseenter="this.style.background=\'var(--bg)\'"'
+      + ' onmouseleave="this.style.background=\'\'">'
+      + '<div style="display:flex;align-items:center;gap:7px">'
+      + '<span style="width:7px;height:7px;border-radius:50%;background:'+dotColor+';flex-shrink:0"></span>'
+      + '<span style="font-weight:600;flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.snap_name)+'</span>'
+      + '<span style="color:var(--muted);font-size:10px;white-space:nowrap">'+fmtDateRel(s.created_at)+'</span>'
+      + '</div>'
+      + (dsLabel ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;padding-left:14px">'+esc(dsLabel)+'</div>' : '')
+      + '</div>';
+  }).join('');
+
+  popup.innerHTML = '<div style="padding:5px 14px 5px;font-size:10px;color:var(--muted);'
+    + 'border-bottom:1px solid var(--border);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">'
+    + '<span>'+bucket.snaps.length+' snapshots in this window</span>'
+    + '<span onclick="_tlClosePopup()" style="cursor:pointer;font-size:13px;color:var(--muted);padding:0 2px">✕</span></div>'
+    + rows;
+
+  document.body.appendChild(popup);
+
+  requestAnimationFrame(function() {
+    var pw = popup.offsetWidth || 240, ph = popup.offsetHeight || 200;
+    var x  = evt.clientX + 12, y = evt.clientY - ph / 2;
+    if (x + pw > window.innerWidth  - 8) x = evt.clientX - pw - 12;
+    if (y + ph > window.innerHeight - 8) y = window.innerHeight - ph - 8;
+    if (y < 8) y = 8;
+    popup.style.left = x + 'px';
+    popup.style.top  = y + 'px';
+  });
+
+  document.addEventListener('click', _tlClosePopup, {capture:true, once:true});
+  document.addEventListener('keydown', _tlPopupEsc);
+}
+
+function _tlPopupEsc(e) {
+  if (e.key === 'Escape') _tlClosePopup();
+}
+
+function _tlClosePopup() {
+  var p = document.getElementById('tlClusterPopup');
+  if (p) p.parentNode.removeChild(p);
+  document.removeEventListener('keydown', _tlPopupEsc);
 }
 
 function tlClick(key) {
@@ -6495,6 +6858,13 @@ function formatLag(s) {
 }
 function esc(s) {
   return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// For paths embedded inside JS string literals inside HTML onclick attributes:
+// JS-escape \ and ' first, then HTML-escape " and & for the attribute context.
+function jse(s) {
+  return String(s==null?'':s)
+    .replace(/\\/g,'\\\\').replace(/'/g,"\\'")
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
@@ -9335,7 +9705,6 @@ function pluginApplyUpdate(branch) {
   document.querySelectorAll('.subtab').forEach(function(el){
     el.addEventListener('click', function(){
       if (el.dataset.tab === 'settings') {
-        // Populate current version immediately (no network call needed)
         fetch(API + '/settings/update/info')
           .then(function(r){ return r.json(); })
           .then(function(d){
@@ -10023,6 +10392,202 @@ async function toggleAutoScan() {
     _autoScanEnabled = next;
     _applyAutoScanToggle(next);
   } catch(e) { toast('Failed to save setting', 'error'); }
+}
+
+// ── DB Backup Schedule ────────────────────────────────────────────────────
+var _dbBakEnabled = false;
+var _dbBakHasSftpPass = false;
+var _dbBakHasCifsPass = false;
+
+async function loadDbBackupConfig() {
+  try {
+    var d = await apiFetch('settings/db-backup-config');
+    _dbBakEnabled     = !!d.enabled;
+    _dbBakHasSftpPass = !!d.has_sftp_password;
+    _dbBakHasCifsPass = !!d.has_cifs_password;
+
+    _applyDbBakToggle(_dbBakEnabled);
+    var el = function(id){ return document.getElementById(id); };
+
+    // populate day-of-month selector once
+    var domSel = document.getElementById('dbBakDom');
+    if (domSel && !domSel.options.length) {
+      for (var d2=1; d2<=28; d2++) domSel.add(new Option(d2+'.', d2, d2===1, d2===1));
+    }
+    dbBakParseCron(d.cron_expr || '0 2 * * *');
+
+    el('dbBakKeep').value    = d.keep_copies || 7;
+    el('dbBakTargetType').value = d.target_type || '';
+    el('dbBakSftpHost').value   = d.sftp_host  || '';
+    el('dbBakSftpPort').value   = d.sftp_port  || 22;
+    el('dbBakSftpUser').value   = d.sftp_user  || '';
+    el('dbBakSftpPath').value   = d.sftp_path  || '';
+    el('dbBakCifsHost').value   = d.cifs_host  || '';
+    el('dbBakCifsShare').value  = d.cifs_share || '';
+    el('dbBakCifsDomain').value = d.cifs_domain|| '';
+    el('dbBakCifsUser').value   = d.cifs_user  || '';
+    el('dbBakCifsPath').value   = d.cifs_path  || '';
+    el('dbBakNfsSubdir').value  = d.nfs_subdir || '.nasnap/db_backups';
+
+    dbBakUpdateFields();
+    if (d.target_type === 'nfs_datastore') _dbBakLoadNfsDatastores(d.nfs_ds_id);
+
+    // Last run status
+    var statusEl = el('dbBakLastStatus');
+    if (statusEl) {
+      if (d.last_run_at) {
+        var icon = d.last_run_status === 'success' ? '✓' : (d.last_run_status === 'failed' ? '✗' : '–');
+        var col  = d.last_run_status === 'success' ? 'var(--success)' : (d.last_run_status === 'failed' ? 'var(--danger)' : 'var(--muted)');
+        var ts   = d.last_run_at.replace('T', ' ').substring(0, 16) + ' UTC';
+        statusEl.innerHTML = 'Last backup: <span style="color:' + col + ';font-weight:600">' + icon + '</span> ' + esc(ts) +
+          (d.last_run_error ? ' — <span style="color:var(--danger);font-size:11px">' + esc(d.last_run_error.substring(0, 80)) + '</span>' : '');
+      } else {
+        statusEl.textContent = 'Last backup: never';
+      }
+    }
+  } catch(e) { /* settings tab may not have run yet */ }
+}
+
+function _applyDbBakToggle(enabled) {
+  var track = document.getElementById('dbBakToggleTrack');
+  var thumb = document.getElementById('dbBakToggleThumb');
+  if (track) track.style.background = enabled ? 'var(--primary)' : 'var(--border)';
+  if (thumb) thumb.style.transform  = enabled ? 'translateX(20px)' : '';
+}
+
+function dbBakToggleEnabled() {
+  _dbBakEnabled = !_dbBakEnabled;
+  _applyDbBakToggle(_dbBakEnabled);
+}
+
+function dbBakUpdateFields() {
+  var type = (document.getElementById('dbBakTargetType')||{}).value || '';
+  var ids = ['dbBakFieldsSftp', 'dbBakFieldsCifs', 'dbBakFieldsNfsDs'];
+  ids.forEach(function(id){ var el = document.getElementById(id); if(el) el.style.display='none'; });
+  var map = {sftp:'dbBakFieldsSftp', cifs:'dbBakFieldsCifs', nfs_datastore:'dbBakFieldsNfsDs'};
+  if (map[type]) {
+    document.getElementById(map[type]).style.display = '';
+    if (type === 'nfs_datastore') _dbBakLoadNfsDatastores();
+  }
+}
+
+function _dbBakLoadNfsDatastores(selectedId) {
+  var sel = document.getElementById('dbBakNfsDsId');
+  if (!sel) return;
+  apiFetch('provisioning/datastores')
+    .then(function(d){
+      var datastores = (d.provisioned || []).filter(function(ds){ return (ds.protocol||'').toLowerCase() === 'nfs' || !ds.protocol; });
+      sel.innerHTML = datastores.length
+        ? datastores.map(function(ds){
+            return '<option value="' + esc(ds.id) + '"' + (ds.id === selectedId ? ' selected' : '') + '>' + esc(ds.name || ds.pve_storage_id) + '</option>';
+          }).join('')
+        : '<option value="">No NFS datastores available</option>';
+    })
+    .catch(function(){ sel.innerHTML = '<option value="">Error loading datastores</option>'; });
+}
+
+function dbBakUpdateSchedUI() {
+  var freq = (document.getElementById('dbBakFreq')||{}).value || 'daily';
+  var timeEl = document.getElementById('dbBakTime');
+  var parts = ((timeEl && timeEl.value)||'02:00').split(':');
+  var h = parseInt(parts[0])||0, m = parseInt(parts[1])||0;
+  var show = function(id, vis){ var e=document.getElementById(id); if(e) e.style.display=vis?'':'none'; };
+  show('dbBakTimeGroup',     freq !== 'interval');
+  show('dbBakDowGroup',      freq === 'weekly');
+  show('dbBakDomGroup',      freq === 'monthly');
+  show('dbBakIntervalGroup', freq === 'interval');
+  var cron;
+  if      (freq === 'hourly')   cron = m + ' * * * *';
+  else if (freq === 'daily')    cron = m + ' ' + h + ' * * *';
+  else if (freq === 'weekly')   cron = m + ' ' + h + ' * * ' + ((document.getElementById('dbBakDow')||{}).value||'1');
+  else if (freq === 'monthly')  cron = m + ' ' + h + ' ' + ((document.getElementById('dbBakDom')||{}).value||'1') + ' * *';
+  else                          cron = '0 */' + ((document.getElementById('dbBakIntervalVal')||{}).value||'6') + ' * * *';
+  var hidden = document.getElementById('dbBakCronExpr');
+  if (hidden) hidden.value = cron;
+  var human = document.getElementById('dbBakCronHuman');
+  if (human) human.textContent = cronHuman(cron);
+}
+
+function dbBakParseCron(expr) {
+  var p = (expr||'').split(' ');
+  if (p.length !== 5) return;
+  var m=p[0], h=p[1], dom=p[2], mon=p[3], dow=p[4];
+  var freq, hv=0, mv=parseInt(m)||0;
+  var pad = function(n){ return ('0'+n).slice(-2); };
+  var setVal = function(id, v){ var e=document.getElementById(id); if(e) e.value=v; };
+  if (h === '*') {
+    freq = 'hourly';
+  } else if (h.indexOf('/') === 1) {
+    freq = 'interval';
+    setVal('dbBakIntervalVal', h.slice(2));
+  } else if (dow !== '*') {
+    freq = 'weekly';
+    setVal('dbBakDow', dow);
+    hv = parseInt(h)||0;
+  } else if (dom !== '*') {
+    freq = 'monthly';
+    setVal('dbBakDom', dom);
+    hv = parseInt(h)||0;
+  } else {
+    freq = 'daily';
+    hv = parseInt(h)||0;
+  }
+  setVal('dbBakFreq', freq);
+  if (freq !== 'interval') setVal('dbBakTime', pad(hv)+':'+pad(mv));
+  dbBakUpdateSchedUI();
+}
+
+async function dbBakSave() {
+  var el = function(id){ return (document.getElementById(id)||{}).value; };
+  var body = {
+    enabled:      _dbBakEnabled,
+    cron_expr:    el('dbBakCronExpr') || '0 2 * * *',
+    keep_copies:  parseInt(el('dbBakKeep')) || 7,
+    target_type:  el('dbBakTargetType'),
+    sftp_host:    el('dbBakSftpHost'),
+    sftp_port:    parseInt(el('dbBakSftpPort')) || 22,
+    sftp_user:    el('dbBakSftpUser'),
+    sftp_path:    el('dbBakSftpPath'),
+    cifs_host:    el('dbBakCifsHost'),
+    cifs_share:   el('dbBakCifsShare'),
+    cifs_domain:  el('dbBakCifsDomain'),
+    cifs_user:    el('dbBakCifsUser'),
+    cifs_path:    el('dbBakCifsPath'),
+    nfs_ds_id:    el('dbBakNfsDsId'),
+    nfs_subdir:   el('dbBakNfsSubdir'),
+  };
+  var sftpPass = el('dbBakSftpPass');
+  if (sftpPass) body.sftp_password = sftpPass;
+  var cifsPass = el('dbBakCifsPass');
+  if (cifsPass) body.cifs_password = cifsPass;
+
+  var btn = document.getElementById('dbBakSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    var r = await apiPost('settings/db-backup-save', body);
+    if (r.success) {
+      toast('Backup schedule saved', 'success');
+      loadDbBackupConfig();
+    } else {
+      toast('Save failed: ' + (r.error || 'unknown error'), 'error');
+    }
+  } catch(e) { toast('Save failed', 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Save'; } }
+}
+
+async function dbBakRunNow() {
+  var btn = document.getElementById('dbBakRunBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+  try {
+    var r = await apiPost('settings/db-backup-run-now', {});
+    if (r.success) {
+      toast('Backup completed: ' + (r.filename || ''), 'success');
+      loadDbBackupConfig();
+    } else {
+      toast('Backup failed: ' + (r.error || 'unknown'), 'error');
+    }
+  } catch(e) { toast('Backup failed', 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Run now'; } }
 }
 
 // ── Job Tracker ────────────────────────────────────────────────────────────
@@ -12063,6 +12628,770 @@ actLogPoll();
     </div>
   </div>
 </div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     SINGLE FILE RESTORE MODAL
+     ══════════════════════════════════════════════════════════════════════ -->
+<div id="sfrModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3000;align-items:center;justify-content:center">
+  <div style="width:90%;max-width:1400px;height:80vh;display:flex;flex-direction:column;background:var(--bg);border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.4);overflow:hidden">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--card)">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+      <div>
+        <div style="font-weight:700;font-size:15px">Single File Restore</div>
+        <div id="sfrVmTitle" style="font-size:11px;color:var(--muted)">—</div>
+      </div>
+      <div style="flex:1"></div>
+      <span id="sfrGuestBadge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border);color:var(--muted);display:none"></span>
+      <button class="btn btn-ghost btn-sm" onclick="closeSfrModal()">✕ Close</button>
+    </div>
+
+    <!-- Toolbar: snapshot + disk + mount controls -->
+    <div style="padding:8px 16px;background:var(--bg-alt);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="sfrSnapSel" onchange="sfrSnapChanged()" style="min-width:180px;font-size:12px">
+        <option value="">— select snapshot —</option>
+      </select>
+      <select id="sfrDiskSel" style="min-width:160px;font-size:12px;display:none"></select>
+      <button class="btn btn-primary btn-sm" id="sfrMountBtn" onclick="sfrMount()" style="display:none">Mount</button>
+      <button class="btn btn-ghost btn-sm" id="sfrUmountBtn" onclick="sfrUmount()" style="display:none">⏏ Unmount</button>
+      <div id="sfrPartChips" style="display:none;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+      <span id="sfrToolbarStatus" style="font-size:11px;color:var(--muted);margin-left:4px"></span>
+    </div>
+
+    <!-- Two panels: Total Commander style -->
+    <div style="flex:1;display:flex;overflow:hidden;min-height:0">
+
+      <!-- LEFT: snapshot filesystem -->
+      <div style="flex:1;display:flex;flex-direction:column;border-right:3px solid var(--border);min-width:0;overflow:hidden">
+        <div style="padding:4px 10px;background:var(--bg-alt);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:6px">
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap">Snapshot</span>
+          <span style="color:var(--border)">│</span>
+          <span id="sfrSnapPanelPath" style="font-family:monospace;font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left">/</span>
+        </div>
+        <!-- Column headers -->
+        <div style="display:flex;padding:2px 10px;background:var(--bg-alt);border-bottom:1px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0">
+          <span style="flex:1">Name</span>
+          <span style="width:70px;text-align:right">Size</span>
+          <span style="width:120px;text-align:right;padding-right:4px">Modified</span>
+        </div>
+        <div id="sfrSnapList" style="flex:1;overflow-y:auto;font-size:12px;font-family:monospace">
+          <div style="padding:24px 16px;color:var(--muted);text-align:center">Select a snapshot and click Mount to browse files.</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: live VM filesystem -->
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+        <div style="padding:4px 10px;background:var(--bg-alt);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:6px">
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap">Live VM</span>
+          <span style="color:var(--border)">│</span>
+          <span id="sfrVmPanelPath" style="font-family:monospace;font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left">/</span>
+        </div>
+        <!-- Column headers -->
+        <div style="display:flex;padding:2px 10px;background:var(--bg-alt);border-bottom:1px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0">
+          <span style="flex:1">Name</span>
+          <span style="width:70px;text-align:right">Size</span>
+          <span style="width:120px;text-align:right;padding-right:4px">Modified</span>
+        </div>
+        <div id="sfrVmList" style="flex:1;overflow-y:auto;font-size:12px;font-family:monospace">
+          <div style="padding:24px 16px;color:var(--muted);text-align:center">Connecting to VM…</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom action bar: TC-style F-key buttons -->
+    <div style="padding:5px 12px;background:var(--bg-alt);border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" id="sfrDlBtn"    onclick="sfrDownload()"    disabled title="Download selected file from snapshot">↓ Download</button>
+      <button class="btn btn-ghost btn-sm" id="sfrDlTarBtn" onclick="sfrDownloadTar()" disabled title="Download as tar.gz">↓ tar.gz</button>
+      <button class="btn btn-primary btn-sm" id="sfrCopyBtn" onclick="sfrCopyToVm()"   disabled title="Copy selected file to VM (requires QGA)">F5 Copy → VM</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost btn-sm" onclick="sfrVmNewFolder()" title="Create new folder in VM">F7 New Folder</button>
+      <button class="btn btn-danger btn-sm" id="sfrVmDelBtn" onclick="sfrVmDelete()" disabled title="Delete selected in VM">F8 Delete</button>
+    </div>
+
+    <!-- Copy destination bar -->
+    <div id="sfrCopyBar" style="display:none;padding:8px 16px;background:var(--bg-alt);border-top:1px solid var(--border);flex-shrink:0;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;white-space:nowrap">Copy to VM path:</span>
+        <input id="sfrCopyDest" style="flex:1;min-width:180px;max-width:380px;font-family:monospace;font-size:12px" placeholder="/home/user/restored_file">
+        <button id="sfrCopyBtn2" class="btn btn-primary btn-sm" onclick="sfrDoCopy()">Copy</button>
+        <button id="sfrCopyCancelBtn" class="btn btn-ghost btn-sm" onclick="sfrCopyCancel()">Cancel</button>
+        <span id="sfrCopyStatus" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+      <!-- Progress bar (hidden until copy starts) -->
+      <div id="sfrCopyProgress" style="display:none">
+        <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+          <div id="sfrCopyBar2" style="height:100%;background:var(--primary);width:0%;transition:width .4s;border-radius:4px"></div>
+        </div>
+        <div id="sfrCopyProgressText" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── QGA / OS info cache (vmid_mappingId → {qga_ok, guest_os, os_name, os_id}) ──
+var _sfrOsCache = {};
+
+// Monochrome SVG OS icons — same stroke style as the rest of the UI
+var _sfrSvgWindows = '<svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor" style="vertical-align:middle;flex-shrink:0"><rect x="0.5" y="0.5" width="5.5" height="5.5"/><rect x="7" y="0.5" width="5.5" height="5.5"/><rect x="0.5" y="7" width="5.5" height="5.5"/><rect x="7" y="7" width="5.5" height="5.5"/></svg>';
+var _sfrSvgLinux   = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;flex-shrink:0"><rect x="0.5" y="1.5" width="12" height="9" rx="1.5"/><polyline points="2.5,4.5 4.5,6.5 2.5,8.5"/><line x1="6" y1="8.5" x2="10" y2="8.5"/></svg>';
+var _sfrSvgNoAgent = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="vertical-align:middle;flex-shrink:0;opacity:.4"><circle cx="6.5" cy="6.5" r="5"/><line x1="4" y1="6.5" x2="9" y2="6.5"/></svg>';
+
+function _sfrOsIcon(os_id, qga_ok) {
+  if (!qga_ok) return _sfrSvgNoAgent;
+  var id = (os_id || '').toLowerCase();
+  if (id.indexOf('windows') >= 0 || id === 'mswindows') return _sfrSvgWindows;
+  return _sfrSvgLinux;
+}
+
+async function _sfrLoadVmOsInfo(vmid, mappingId) {
+  var key = vmid + '_' + mappingId;
+  if (_sfrOsCache[key] !== undefined) {
+    _sfrApplyOsInfo(key, _sfrOsCache[key]);
+    return;
+  }
+  try {
+    var r = await apiFetch(
+      'file-restore/sessions/vm-qga-info?vmid=' + encodeURIComponent(vmid)
+      + '&mapping_id=' + encodeURIComponent(mappingId)
+    );
+    _sfrOsCache[key] = r;
+    _sfrApplyOsInfo(key, r);
+  } catch(e) {
+    _sfrOsCache[key] = {qga_ok: false, guest_os: 'linux', os_name: 'Unavailable', os_id: ''};
+    _sfrApplyOsInfo(key, _sfrOsCache[key]);
+  }
+}
+
+function _sfrApplyOsInfo(key, info) {
+  var iconEl = document.getElementById('osicon_' + key);
+  var btnEl  = document.getElementById('sfrbtn_'  + key);
+  if (!iconEl) return;
+  var ico = _sfrOsIcon(info.os_id, info.qga_ok);
+  var tip = info.qga_ok
+    ? (info.os_name || info.guest_os)
+    : 'Guest Agent not running — Single File Restore unavailable';
+  iconEl.innerHTML     = ico;   // SVG, must use innerHTML
+  iconEl.title         = tip;
+  iconEl.style.opacity = info.qga_ok ? '1' : '1';  // opacity handled inside SVG
+  if (btnEl) {
+    if (info.qga_ok) {
+      btnEl.disabled          = false;
+      btnEl.style.opacity     = '';
+      btnEl.style.cursor      = '';
+      btnEl.title = 'Single File Restore (' + (info.os_name || info.guest_os) + ')';
+    } else {
+      btnEl.disabled          = true;
+      btnEl.style.opacity     = '.25';
+      btnEl.style.cursor      = 'not-allowed';
+      btnEl.title = 'Guest Agent not running';
+    }
+  }
+}
+
+// ── Single File Restore State ─────────────────────────────────────────────────
+var _sfr = {
+  sid: null, vmid: null, vmName: '', mappingId: null, guestOs: 'linux', osName: '',
+  snapPath: '/', vmPath: '/',
+  snapSel: null, vmSel: null,   // selected {name, type, fullPath}
+  mounted: false,
+};
+
+async function openSfrModal(vmid, vmName, mappingId) {
+  _sfr = { sid: null, vmid: vmid, vmName: vmName, mappingId: mappingId,
+            guestOs: 'linux', osName: '',
+            snapPath: '/', vmPath: '/', snapSel: null, vmSel: null, mounted: false };
+  var modal = document.getElementById('sfrModal');
+  modal.style.display = 'flex';
+  document.getElementById('sfrVmTitle').textContent =
+    'VM ' + vmid + (vmName ? ' — ' + vmName : '');
+  document.getElementById('sfrGuestBadge').style.display = 'none';
+  document.getElementById('sfrToolbarStatus').textContent = 'Connecting…';
+  document.getElementById('sfrSnapSel').innerHTML = '<option value="">— loading —</option>';
+  _sfrResetSnap();
+  document.getElementById('sfrVmList').innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Connecting to VM…</div>';
+
+  try {
+    var r = await apiPost('file-restore/sessions/create', { vmid: vmid, mapping_id: mappingId });
+    if (r.error) { toast('SFR: ' + r.error, 'error'); closeSfrModal(); return; }
+    _sfr.sid     = r.session_id;
+    _sfr.guestOs = r.guest_os || 'linux';
+    _sfr.osName  = r.os_name  || (_sfr.guestOs === 'windows' ? 'Windows' : 'Linux');
+    document.getElementById('sfrVmTitle').textContent =
+      'VM ' + vmid + (vmName ? ' — ' + vmName : '');
+    var badge = document.getElementById('sfrGuestBadge');
+    badge.textContent = _sfr.osName;
+    badge.style.display = '';
+    // Update cached OS info for the VM list
+    _sfrOsCache[vmid + '_' + mappingId] = {
+      qga_ok: true, guest_os: _sfr.guestOs,
+      os_name: _sfr.osName, os_id: r.os_id || _sfr.guestOs
+    };
+    _sfrApplyOsInfo(vmid + '_' + mappingId, _sfrOsCache[vmid + '_' + mappingId]);
+    var snaps = r.snapshots || [];
+    var sel = document.getElementById('sfrSnapSel');
+    sel.innerHTML = '<option value="">— select snapshot —</option>' +
+      snaps.map(function(s){
+        var lbl = (s.label ? '[' + esc(s.label) + '] ' : '') + esc(s.snap_name) + ' — ' + fmtDateRel(s.created_at);
+        return '<option value="' + esc(s.snap_name) + '">' + lbl + '</option>';
+      }).join('');
+    document.getElementById('sfrToolbarStatus').textContent = snaps.length + ' snapshot' + (snaps.length!==1?'s':'') + ' available';
+    _sfrLoadVm('/');
+  } catch(e) {
+    toast('SFR: ' + (e.message || 'connection failed'), 'error');
+    closeSfrModal();
+  }
+}
+
+function closeSfrModal() {
+  if (_sfrCopyPoll) { clearInterval(_sfrCopyPoll); _sfrCopyPoll = null; }
+  if (_sfr.sid) {
+    var sid = _sfr.sid;
+    _sfr.sid = null;
+    // Signal abort if a copy is running, then close (server cancels before unmounting)
+    if ((_copy_progress_local || {}).status === 'running') {
+      apiPost('file-restore/sessions/copy-cancel', { sid: sid }).catch(function(){});
+    }
+    apiPost('file-restore/sessions/close', { sid: sid }).catch(function(){});
+  }
+  _copy_progress_local = null;
+  document.getElementById('sfrModal').style.display = 'none';
+  _sfr = { sid: null, vmid: null, vmName: '', mappingId: null, guestOs: 'linux', osName: '',
+            snapPath: '/', vmPath: '/', snapSel: null, vmSel: null, mounted: false };
+}
+
+// Best-effort cleanup when the browser tab is closed without using the Close button.
+// keepalive ensures the request completes even if the page is unloading.
+window.addEventListener('beforeunload', function() {
+  if (_sfr && _sfr.sid) {
+    var sid = _sfr.sid;
+    if ((_copy_progress_local || {}).status === 'running') {
+      fetch(API + '/file-restore/sessions/copy-cancel', {
+        method: 'POST', keepalive: true,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sid: sid})
+      }).catch(function(){});
+    }
+    fetch(API + '/file-restore/sessions/close', {
+      method: 'POST', keepalive: true,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sid: sid})
+    }).catch(function(){});
+  }
+});
+
+// ── Snapshot side ─────────────────────────────────────────────────────────────
+
+function _sfrResetSnap() {
+  document.getElementById('sfrDiskSel').style.display    = 'none';
+  document.getElementById('sfrMountBtn').style.display   = 'none';
+  document.getElementById('sfrPartChips').style.display  = 'none';
+  document.getElementById('sfrUmountBtn').style.display  = 'none';
+  document.getElementById('sfrSnapList').innerHTML = '<div style="padding:24px 16px;color:var(--muted);text-align:center">Select a snapshot to continue.</div>';
+  document.getElementById('sfrSnapPanelPath').textContent = '/';
+  _sfr.snapSel = null; _sfr.mounted = false;
+  _sfrUpdateActions();
+}
+
+async function sfrSnapChanged() {
+  var snapName = document.getElementById('sfrSnapSel').value;
+  if (!snapName || !_sfr.sid) { _sfrResetSnap(); return; }
+  document.getElementById('sfrToolbarStatus').textContent = 'Loading disks…';
+  document.getElementById('sfrDiskSel').style.display = 'none';
+  document.getElementById('sfrMountBtn').style.display = 'none';
+  try {
+    var r = await apiPost('file-restore/sessions/list-disks', { sid: _sfr.sid, snap_name: snapName });
+    var disks = r.disks || [];
+    if (!disks.length) {
+      document.getElementById('sfrToolbarStatus').textContent = 'No QCOW2 disks found in snapshot.';
+      return;
+    }
+    var ds = document.getElementById('sfrDiskSel');
+    ds.innerHTML = disks.map(function(d){
+      return '<option value="' + esc(d) + '">' + esc(d.split('/').pop()) + '</option>';
+    }).join('');
+    ds.style.display = disks.length > 1 ? '' : 'none';
+    document.getElementById('sfrMountBtn').style.display = '';
+    document.getElementById('sfrToolbarStatus').textContent =
+      disks.length === 1 ? 'Ready to mount' : disks.length + ' disks — select and mount';
+  } catch(e) {
+    document.getElementById('sfrToolbarStatus').textContent = 'Error: ' + (e.message || e);
+  }
+}
+
+var _fsPref = {ext4:4,xfs:4,btrfs:4,ext3:3,ext2:3,reiserfs:3,f2fs:3,ntfs:2,fuseblk:2,vfat:1,fat32:1,fat16:1};
+
+async function sfrMount() {
+  var snapName = document.getElementById('sfrSnapSel').value;
+  var ds = document.getElementById('sfrDiskSel');
+  var diskFile = ds.value || (ds.options.length ? ds.options[0].value : '');
+  if (!snapName || !diskFile || !_sfr.sid) return;
+  var btn = document.getElementById('sfrMountBtn');
+  btn.disabled = true; btn.textContent = 'Mounting…';
+  document.getElementById('sfrToolbarStatus').textContent = 'Connecting disk…';
+  document.getElementById('sfrPartChips').style.display = 'none';
+  try {
+    var r = await apiPost('file-restore/sessions/mount',
+                          { sid: _sfr.sid, snap_name: snapName, disk_file: diskFile });
+    if (r.error) { toast('Mount failed: ' + r.error, 'error'); return; }
+    var parts = r.partitions || [];
+    if (!parts.length) {
+      _sfrShowMountMsg('⊘', 'No partitions found', 'The disk image has no recognisable partition table.');
+      document.getElementById('sfrUmountBtn').style.display = '';
+      return;
+    }
+    var mountable = parts.filter(function(p){ return !p.skip; });
+    if (!mountable.length) {
+      var allEnc = parts.every(function(p){ return p.encrypted; });
+      var types  = parts.map(function(p){ return p.fstype || '?'; }).join(', ');
+      _sfrShowMountMsg(
+        allEnc ? '🔒' : '⊘',
+        allEnc ? 'Encrypted disk' : 'No browsable partitions',
+        (allEnc ? 'All partitions are ' + types + ' encrypted. Single File Restore requires an unencrypted filesystem.'
+                : 'Partitions found: ' + types + '. Only swap / LVM / RAID — nothing to browse.')
+      );
+      document.getElementById('sfrUmountBtn').style.display = '';
+      document.getElementById('sfrMountBtn').style.display = 'none';
+      return;
+    }
+    mountable.sort(function(a,b){
+      return (_fsPref[(b.fstype||'').toLowerCase()]||1) - (_fsPref[(a.fstype||'').toLowerCase()]||1);
+    });
+    if (mountable.length === 1) {
+      await _sfrDoSelectPartition(mountable[0].dev);
+    } else {
+      _sfrRenderPartChips(parts, mountable);
+      document.getElementById('sfrUmountBtn').style.display = '';
+      document.getElementById('sfrMountBtn').style.display = 'none';
+      document.getElementById('sfrToolbarStatus').textContent = 'Select a partition:';
+    }
+  } catch(e) {
+    toast('Mount error: ' + (e.message || e), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Mount';
+  }
+}
+
+function _sfrShowMountMsg(icon, title, detail) {
+  document.getElementById('sfrSnapList').innerHTML =
+    '<div style="padding:32px 20px;text-align:center;color:var(--muted)">' +
+    '<div style="font-size:2em;margin-bottom:10px">' + icon + '</div>' +
+    '<strong>' + esc(title) + '</strong>' +
+    '<div style="margin-top:6px;font-size:0.85em">' + esc(detail) + '</div></div>';
+}
+
+var _fsIcon = {ext4:'🐧',ext3:'🐧',ext2:'🐧',xfs:'🐧',btrfs:'🐧',reiserfs:'🐧',
+               ntfs:'🪟',fuseblk:'🪟',vfat:'💾',fat32:'💾',fat16:'💾',
+               swap:'⊘',lvm2_member:'⊘',linux_raid_member:'⊘',
+               bitlocker:'🔒',crypto_luks:'🔒',veracrypt:'🔒'};
+
+function _sfrRenderPartChips(parts, mountable) {
+  var chips = document.getElementById('sfrPartChips');
+  chips.innerHTML = parts.map(function(p){
+    var fs  = (p.fstype || '').toLowerCase();
+    var ico = _fsIcon[fs] || '💾';
+    var lbl = (p.fstype || 'unknown') + (p.label ? ' "'+p.label+'"' : '') + ' · ' + p.size;
+    if (p.skip) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:4px;' +
+             'border:1px solid var(--border);color:var(--muted);font-size:11px;opacity:.6" title="not mountable">' +
+             ico + ' ' + esc(lbl) + '</span>';
+    }
+    return '<button class="btn btn-ghost btn-sm" onclick="_sfrDoSelectPartition(' + "'" + esc(p.dev) + "'" + ')" ' +
+           'style="font-size:11px;gap:4px;display:inline-flex;align-items:center" title="' + esc(p.dev) + '">' +
+           ico + ' ' + esc(lbl) + '</button>';
+  }).join('');
+  chips.style.display = 'flex';
+}
+
+async function _sfrDoSelectPartition(dev) {
+  document.getElementById('sfrToolbarStatus').textContent = 'Mounting partition…';
+  document.getElementById('sfrPartChips').style.display = 'none';
+  try {
+    var r = await apiPost('file-restore/sessions/select-partition', { sid: _sfr.sid, partition: dev });
+    if (r.error) {
+      var logHtml = (r.log || []).map(function(l){ return '<div style="font-family:monospace;font-size:10px;white-space:pre-wrap">'+esc(l)+'</div>'; }).join('');
+      _sfrShowMountMsg('⚠', 'Partition mount failed',
+        r.error + (logHtml ? '\n\nMount log:' : ''));
+      if (logHtml) document.getElementById('sfrSnapList').innerHTML +=
+        '<div style="margin:0 20px 20px;padding:8px;background:var(--bg-alt);border-radius:4px;border:1px solid var(--border)">' + logHtml + '</div>';
+      document.getElementById('sfrUmountBtn').style.display = '';
+      return;
+    }
+    _sfr.mounted = true;
+    _sfr.snapPath = '/';
+    document.getElementById('sfrToolbarStatus').textContent = 'Browsing snapshot';
+    document.getElementById('sfrMountBtn').style.display = 'none';
+    document.getElementById('sfrDiskSel').style.display = 'none';
+    document.getElementById('sfrUmountBtn').style.display = '';
+    _sfrLoadSnap('/');
+  } catch(e) {
+    toast('Partition mount error: ' + (e.message || e), 'error');
+  }
+}
+
+async function sfrUmount() {
+  if (!_sfr.sid) return;
+  document.getElementById('sfrToolbarStatus').textContent = 'Unmounting…';
+  document.getElementById('sfrUmountBtn').disabled = true;
+  try {
+    await apiPost('file-restore/sessions/umount', { sid: _sfr.sid });
+  } catch(e) { /* best effort */ }
+  _sfr.mounted = false;
+  _sfr.snapSel = null;
+  _sfrUpdateActions();
+  _sfrResetSnap();
+  // Reset toolbar to disk/mount state (keep snapshot selection)
+  document.getElementById('sfrPartChips').style.display = 'none';
+  document.getElementById('sfrUmountBtn').style.display = 'none';
+  document.getElementById('sfrUmountBtn').disabled = false;
+  document.getElementById('sfrMountBtn').style.display = '';
+  document.getElementById('sfrDiskSel').style.display = '';
+  document.getElementById('sfrSnapList').innerHTML =
+    '<div style="padding:24px 16px;color:var(--muted);text-align:center">Disk unmounted. Select a disk and click Mount.</div>';
+  document.getElementById('sfrToolbarStatus').textContent = 'Unmounted';
+}
+
+// ── File panel rendering ──────────────────────────────────────────────────────
+
+function _sfrRenderList(containerId, entries, path, selState, navFn, selFn, isDrives, isWin) {
+  var el = document.getElementById(containerId);
+  if (!entries.length && !isDrives) {
+    el.innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Empty directory.</div>';
+    return;
+  }
+  var sep = isWin ? '\\' : '/';
+  var rows = '<style>' +
+    '.sfr-row{display:flex;align-items:center;padding:1px 10px;cursor:pointer;user-select:none;white-space:nowrap}' +
+    '.sfr-row:hover{background:var(--hover,rgba(100,100,100,.12))}' +
+    '.sfr-sel{background:var(--primary)!important;color:#fff}' +
+    '.sfr-sel .sfr-muted{color:rgba(255,255,255,.7)!important}' +
+    '.sfr-nm{flex:1;overflow:hidden;text-overflow:ellipsis}' +
+    '.sfr-sz{width:70px;text-align:right;color:var(--muted);font-size:11px}' +
+    '.sfr-dt{width:120px;text-align:right;color:var(--muted);font-size:10px;padding-right:4px}' +
+    '.sfr-muted{color:var(--muted)}' +
+    '</style>';
+
+  // ".." row — skip for drives view and top-level Linux root
+  if (!isDrives && path && path !== '/') {
+    var parentPath = _sfrParentPath(path, isWin);
+    rows += '<div class="sfr-row" onclick="' + navFn + '(\'' + jse(parentPath) + '\')">' +
+      '<span class="sfr-muted" style="margin-right:6px">📁</span>' +
+      '<span class="sfr-nm sfr-muted">..</span>' +
+      '<span class="sfr-sz"></span><span class="sfr-dt"></span></div>';
+  }
+
+  entries.slice().sort(function(a,b){
+    if (a.type==='d' && b.type!=='d') return -1;
+    if (a.type!=='d' && b.type==='d') return 1;
+    return a.name.localeCompare(b.name);
+  }).forEach(function(e) {
+    // Drive entries (is_drives) have the full path as their name (e.g. "C:\")
+    var fullPath = isDrives ? e.name
+                 : isWin   ? path.replace(/\\+$/, '') + '\\' + e.name
+                 :            path.replace(/\/$/, '')  + '/'  + e.name;
+    var isDir = e.type === 'd';
+    var isSel = selState && selState.fullPath === fullPath;
+    var icon  = isDrives ? '💾' : (isDir ? '📁' : '📄');
+    var size  = isDir ? '<DIR>' : _sfrFmtSize(e.size);
+    var dt    = esc(e.modified || '');
+    var sel   = isSel ? ' sfr-sel' : '';
+    rows += '<div class="sfr-row' + sel + '" ' +
+      'onclick="' + selFn + '(\'' + jse(fullPath) + '\',\'' + (isDir?'d':'f') + '\',\'' + jse(e.name) + '\')" ' +
+      (isDir ? 'ondblclick="' + navFn + '(\'' + jse(fullPath) + '\')"' : '') + '>' +
+      '<span style="margin-right:6px">' + icon + '</span>' +
+      '<span class="sfr-nm">' + esc(e.name) + '</span>' +
+      '<span class="sfr-sz' + (isSel ? '' : ' sfr-muted') + '">' + esc(size) + '</span>' +
+      '<span class="sfr-dt' + (isSel ? '' : ' sfr-muted') + '">' + dt + '</span>' +
+      '</div>';
+  });
+  el.innerHTML = rows;
+}
+
+function _sfrParentPath(p, isWin) {
+  if (!p || p === '/') return '/';
+  if (isWin) {
+    var clean = p.replace(/\\+$/, '');        // strip trailing backslashes
+    if (!clean.includes('\\')) return '/';    // "C:" → back to drives view
+    var parts = clean.split('\\');
+    parts.pop();
+    var parent = parts.join('\\');
+    // "C:" alone → "C:\" (root of drive)
+    return (parent === '' || parent.endsWith(':')) ? parent + '\\' : parent + '\\';
+  }
+  var parts = p.replace(/\/$/, '').split('/');
+  parts.pop();
+  return parts.join('/') || '/';
+}
+
+function _sfrFmtSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes/1048576).toFixed(1) + ' MB';
+  return (bytes/1073741824).toFixed(2) + ' GB';
+}
+
+// ── Snapshot navigation ───────────────────────────────────────────────────────
+
+// Cache to avoid re-fetching on selection change
+var _sfrSnapEntries = [], _sfrVmEntries = [];
+
+async function _sfrLoadSnap(path) {
+  if (!_sfr.sid || !_sfr.mounted) return;
+  _sfr.snapPath = path || '/';
+  document.getElementById('sfrSnapPanelPath').textContent = _sfr.snapPath;
+  document.getElementById('sfrSnapList').innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Loading…</div>';
+  try {
+    var r = await apiFetch('file-restore/sessions/snap-ls?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapPath));
+    if (r.error) { document.getElementById('sfrSnapList').innerHTML = '<div style="padding:12px;color:var(--danger)">'+esc(r.error)+'</div>'; return; }
+    _sfrSnapEntries = r.entries || [];
+    _sfr.snapSel = null;
+    _sfrUpdateActions();
+    _sfrRenderSnap();
+  } catch(e) {
+    document.getElementById('sfrSnapList').innerHTML = '<div style="padding:12px;color:var(--danger)">'+esc(String(e))+'</div>';
+  }
+}
+
+function _sfrRenderSnap() {
+  _sfrRenderList('sfrSnapList', _sfrSnapEntries, _sfr.snapPath, _sfr.snapSel, '_sfrNavSnap', '_sfrSelSnap');
+}
+
+function _sfrNavSnap(path) { _sfr.snapSel = null; _sfrUpdateActions(); _sfrLoadSnap(path); }
+function _sfrSelSnap(fullPath, type, name) {
+  _sfr.snapSel = { fullPath: fullPath, type: type, name: name };
+  _sfrUpdateActions();
+  _sfrRenderSnap();
+}
+
+// ── VM navigation ─────────────────────────────────────────────────────────────
+
+var _sfrVmIsDrives = false;
+
+async function _sfrLoadVm(path) {
+  if (!_sfr.sid) return;
+  _sfr.vmPath = path || '/';
+  document.getElementById('sfrVmList').innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Loading…</div>';
+  try {
+    var r = await apiFetch('file-restore/sessions/vm-ls?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.vmPath));
+    if (r.error) { document.getElementById('sfrVmList').innerHTML = '<div style="padding:12px;color:var(--danger)">'+esc(r.error)+'</div>'; return; }
+    _sfrVmIsDrives = !!(r.is_drives);
+    _sfrVmEntries = r.entries || [];
+    _sfr.vmSel = null;
+    _sfrUpdateActions();
+    document.getElementById('sfrVmPanelPath').textContent =
+      _sfrVmIsDrives ? 'This PC' : _sfr.vmPath;
+    _sfrRenderVm();
+  } catch(e) {
+    document.getElementById('sfrVmList').innerHTML = '<div style="padding:12px;color:var(--danger)">'+esc(String(e))+'</div>';
+  }
+}
+
+function _sfrRenderVm() {
+  _sfrRenderList('sfrVmList', _sfrVmEntries, _sfr.vmPath, _sfr.vmSel,
+                 '_sfrNavVm', '_sfrSelVm', _sfrVmIsDrives, _sfr.guestOs === 'windows');
+}
+
+function _sfrNavVm(path) { _sfr.vmSel = null; _sfrUpdateActions(); _sfrLoadVm(path); }
+function _sfrSelVm(fullPath, type, name) {
+  _sfr.vmSel = { fullPath: fullPath, type: type, name: name };
+  _sfrUpdateActions();
+  _sfrRenderVm();
+}
+
+// ── Action button state ───────────────────────────────────────────────────────
+
+function _sfrUpdateActions() {
+  var hasFile = _sfr.snapSel && _sfr.snapSel.type === 'f';
+  var hasAny  = !!_sfr.snapSel;
+  document.getElementById('sfrDlBtn').disabled    = !hasFile;
+  document.getElementById('sfrDlTarBtn').disabled = !hasAny;
+  document.getElementById('sfrCopyBtn').disabled  = !hasFile;
+  document.getElementById('sfrVmDelBtn').disabled = !_sfr.vmSel;
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+
+function sfrDownload() {
+  if (!_sfr.snapSel || !_sfr.sid) return;
+  var url = API + '/file-restore/sessions/download?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapSel.fullPath);
+  window.location.href = url;
+}
+
+function sfrDownloadTar() {
+  if (!_sfr.snapSel || !_sfr.sid) return;
+  var url = API + '/file-restore/sessions/download-tar?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapSel.fullPath);
+  window.location.href = url;
+}
+
+// ── Copy to VM ────────────────────────────────────────────────────────────────
+
+var _sfrCopyPoll = null;
+
+function sfrCopyToVm() {
+  if (!_sfr.snapSel || !_sfr.sid) return;
+  var dest = document.getElementById('sfrCopyDest');
+  var sep  = _sfr.guestOs === 'windows' ? '\\' : '/';
+  var vmDir;
+  if (_sfrVmIsDrives || _sfr.vmPath === '/') {
+    // At drives view: no sensible default dir — leave dest empty for user to type
+    vmDir = _sfr.guestOs === 'windows' ? 'C:\\' : '';
+  } else {
+    vmDir = _sfr.vmPath.replace(/[\/\\]+$/, '');
+  }
+  dest.value = (vmDir ? vmDir + sep : '') + _sfr.snapSel.name;
+  document.getElementById('sfrCopyStatus').textContent = '';
+  document.getElementById('sfrCopyProgress').style.display = 'none';
+  document.getElementById('sfrCopyBar2').style.width = '0%';
+  document.getElementById('sfrCopyBtn2').disabled = false;
+  document.getElementById('sfrCopyCancelBtn').textContent = 'Cancel';
+  document.getElementById('sfrCopyBar').style.display = 'flex';
+  dest.focus();
+}
+
+function sfrCopyCancel() {
+  var prog = _copy_progress_local || {};
+  var isRunning = (prog.status === 'running');
+  if (_sfrCopyPoll) { clearInterval(_sfrCopyPoll); _sfrCopyPoll = null; }
+  if (isRunning && _sfr.sid) {
+    // Signal server to abort the running transfer
+    apiPost('file-restore/sessions/copy-cancel', { sid: _sfr.sid }).catch(function(){});
+    document.getElementById('sfrCopyStatus').textContent = 'Aborting…';
+    document.getElementById('sfrCopyCancelBtn').disabled = true;
+    // Re-poll briefly to show the cancelled state, then hide
+    var abortPoll = setInterval(async function() {
+      try {
+        var p = await apiFetch('file-restore/sessions/copy-status?sid=' + encodeURIComponent(_sfr.sid));
+        if (p.status !== 'running') {
+          clearInterval(abortPoll);
+          document.getElementById('sfrCopyBar').style.display = 'none';
+          document.getElementById('sfrCopyCancelBtn').disabled = false;
+          if (p.status === 'cancelled') toast('Transfer aborted', 'info');
+        }
+      } catch(e) {
+        clearInterval(abortPoll);
+        document.getElementById('sfrCopyBar').style.display = 'none';
+        document.getElementById('sfrCopyCancelBtn').disabled = false;
+      }
+    }, 800);
+  } else {
+    document.getElementById('sfrCopyBar').style.display = 'none';
+  }
+}
+var _copy_progress_local = null;
+
+async function sfrDoCopy() {
+  if (!_sfr.snapSel || !_sfr.sid) return;
+  var dest = document.getElementById('sfrCopyDest').value.trim();
+  if (!dest) { toast('Enter destination path', 'error'); return; }
+  var statusEl  = document.getElementById('sfrCopyStatus');
+  var progWrap  = document.getElementById('sfrCopyProgress');
+  var progBar   = document.getElementById('sfrCopyBar2');
+  var progText  = document.getElementById('sfrCopyProgressText');
+  var copyBtn   = document.getElementById('sfrCopyBtn2');
+
+  statusEl.textContent = 'Starting…';
+  copyBtn.disabled = true;
+  progWrap.style.display = 'none';
+
+  try {
+    var r = await apiPost('file-restore/sessions/copy',
+                          { sid: _sfr.sid, snap_path: _sfr.snapSel.fullPath, vm_path: dest });
+    if (r.error) { statusEl.textContent = 'Error: ' + r.error; copyBtn.disabled = false; return; }
+
+    if (!r.async) {
+      // Small file: synchronous completion
+      statusEl.textContent = '✓ Copied';
+      toast('Copied to VM: ' + dest, 'success');
+      _sfrLoadVm(_sfr.vmPath);
+      copyBtn.disabled = false;
+      return;
+    }
+
+    // Large file: poll progress
+    statusEl.textContent = 'Transferring…';
+    progWrap.style.display = '';
+    var cancelBtn = document.getElementById('sfrCopyCancelBtn');
+    cancelBtn.textContent = 'Abort';
+    cancelBtn.disabled = false;
+
+    if (_sfrCopyPoll) clearInterval(_sfrCopyPoll);
+    _sfrCopyPoll = setInterval(async function() {
+      try {
+        var p = await apiFetch('file-restore/sessions/copy-status?sid=' + encodeURIComponent(_sfr.sid));
+        _copy_progress_local = p;
+        if (p.status === 'done') {
+          clearInterval(_sfrCopyPoll); _sfrCopyPoll = null;
+          cancelBtn.textContent = 'Cancel'; cancelBtn.disabled = false;
+          progBar.style.width = '100%';
+          progText.textContent = 'Complete';
+          statusEl.textContent = '✓ Copied';
+          copyBtn.disabled = false;
+          toast('✓ Copied to VM: ' + dest, 'success');
+          _sfrLoadVm(_sfr.vmPath);
+          setTimeout(function() { progWrap.style.display = 'none'; _copy_progress_local = null; }, 3000);
+        } else if (p.status === 'error') {
+          clearInterval(_sfrCopyPoll); _sfrCopyPoll = null;
+          cancelBtn.textContent = 'Cancel'; cancelBtn.disabled = false;
+          progWrap.style.display = 'none';
+          statusEl.textContent = 'Error: ' + (p.error || '?');
+          toast('Copy failed: ' + (p.error || '?'), 'error');
+          copyBtn.disabled = false;
+        } else {
+          // running
+          var bytes = p.bytes || 0, total = p.total || -1;
+          if (total > 0) {
+            var pct = Math.min(99, Math.round(bytes / total * 100));
+            progBar.style.width = pct + '%';
+            progText.textContent = _sfrFmtSize(bytes) + ' / ' + _sfrFmtSize(total) + ' (' + pct + '%)';
+          } else {
+            // indeterminate — animate
+            var w = parseInt(progBar.style.width) || 0;
+            progBar.style.width = ((w + 3) % 90 + 5) + '%';
+            progText.textContent = bytes > 0 ? _sfrFmtSize(bytes) + ' transferred…' : 'Connecting…';
+          }
+        }
+      } catch(e) { /* ignore poll errors */ }
+    }, 900);
+  } catch(e) {
+    statusEl.textContent = 'Error: ' + (e.message || e);
+    copyBtn.disabled = false;
+  }
+}
+
+// ── VM operations ─────────────────────────────────────────────────────────────
+
+async function sfrVmNewFolder() {
+  if (!_sfr.sid) return;
+  var name = prompt('New folder name:');
+  if (!name || !name.trim()) return;
+  var sep = _sfr.guestOs === 'windows' ? '\\' : '/';
+  var path = (_sfr.vmPath.replace(/\/$/, '') || '') + sep + name.trim();
+  try {
+    var r = await apiPost('file-restore/sessions/vm-mkdir', { sid: _sfr.sid, path: path });
+    if (r.error) { toast('mkdir failed: ' + r.error, 'error'); return; }
+    toast('Folder created: ' + path, 'success');
+    _sfrLoadVm(_sfr.vmPath);
+  } catch(e) { toast('mkdir error', 'error'); }
+}
+
+async function sfrVmDelete() {
+  if (!_sfr.vmSel || !_sfr.sid) return;
+  if (!confirm('Delete "' + _sfr.vmSel.name + '" in the live VM? This cannot be undone.')) return;
+  try {
+    var r = await apiPost('file-restore/sessions/vm-delete',
+                          { sid: _sfr.sid, path: _sfr.vmSel.fullPath });
+    if (r.error) { toast('Delete failed: ' + r.error, 'error'); return; }
+    toast('Deleted: ' + _sfr.vmSel.name, 'success');
+    _sfr.vmSel = null;
+    _sfrUpdateActions();
+    _sfrLoadVm(_sfr.vmPath);
+  } catch(e) { toast('Delete error', 'error'); }
+}
+</script>
 
 </body>
 </html>
