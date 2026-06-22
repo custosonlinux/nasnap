@@ -1704,10 +1704,11 @@ function applyI18n() {
             <th class="sortable" onclick="rcColSort('proto')">Protocol <span class="si" id="rcs_proto">⇅</span></th>
             <th class="sortable" onclick="rcColSort('count')">Snapshots <span class="si" id="rcs_count">⇅</span></th>
             <th class="sortable" onclick="rcColSort('lastSnap')">Last Snapshot <span class="si" id="rcs_lastSnap">↓</span></th>
+            <th>OS Type</th>
             <th>Actions</th>
           </tr></thead>
           <tbody id="rcVmTbody">
-            <tr><td colspan="7" class="empty"><span class="spinner"></span></td></tr>
+            <tr><td colspan="8" class="empty"><span class="spinner"></span></td></tr>
           </tbody>
         </table>
         <p style="font-size:11px;color:var(--muted);padding:6px 14px 8px;margin:0">All VMs that have ever been snapshotted — including VMs no longer in the cluster — appear here.</p>
@@ -3937,7 +3938,7 @@ function _renderRcRows() {
     var svgVm = '<svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>';
     var msg = q ? 'No VMs match "'+esc(q)+'".' : (_rcSource==='secondary' ? 'Select a SnapMirror relationship to load VMs.' : 'No snapshots found.');
     var sub = (!q&&_rcSource==='primary') ? 'Create a snapshot first — all VMs that have been snapshotted will appear here.' : '';
-    tbody.innerHTML = _emptyRow(7, svgVm, msg, sub, (!q&&_rcSource==='primary') ? 'Go to Snapshots' : null, (!q&&_rcSource==='primary') ? "document.querySelector('[data-tab=\"snapshots\"]').click()" : null);
+    tbody.innerHTML = _emptyRow(8, svgVm, msg, sub, (!q&&_rcSource==='primary') ? 'Go to Snapshots' : null, (!q&&_rcSource==='primary') ? "document.querySelector('[data-tab=\"snapshots\"]').click()" : null);
     return;
   }
   var _rcProtoBg = {NFS:'#0ea5e9', ISCSI:'#f97316', NVME:'#a855f7'};
@@ -3948,8 +3949,10 @@ function _renderRcRows() {
     var protoBg = _rcProtoBg[v.protocol] || '#888';
     var protoBadge = '<span class="badge" style="background:'+protoBg+';color:#fff;font-size:10px">'+esc(v.protocol)+'</span>';
     var osKey = v.vmid + '_' + v.mappingId;
-    var osCell = v.isSan ? '' :
-      '<span id="osicon_'+osKey+'" title="" style="cursor:default;opacity:.3;display:inline-flex;align-items:center" aria-label="checking">'+_sfrSvgLinux+'</span>';
+    var osCell = v.isSan
+      ? '<span style="color:var(--muted);font-size:11px">—</span>'
+      : '<span id="osicon_'+osKey+'" title="" style="cursor:default;opacity:.3;display:inline-flex;align-items:center;gap:4px" aria-label="checking">'
+          +_sfrSvgLinux+'<span id="oslabel_'+osKey+'" style="font-size:11px"></span></span>';
     var sfrBtn = v.isSan ? '' :
       '<button id="sfrbtn_'+osKey+'" class="btn btn-ghost btn-icon" title="Single File Restore" '
       +'onclick="openSfrModal('+v.vmid+',\''+esc(v.name)+'\',\''+esc(v.mappingId)+'\')" disabled style="opacity:.4;cursor:not-allowed">'
@@ -3962,8 +3965,8 @@ function _renderRcRows() {
       '<td>'+protoBadge+'</td>'+
       '<td style="color:var(--muted)">'+cnt+'</td>'+
       '<td style="color:var(--muted)">'+fmtDateRel(v.lastSnap)+'</td>'+
+      '<td>'+osCell+'</td>'+
       '<td><div class="row-actions" style="gap:2px">'+
-        osCell+
         _icoBtn('secondary', t('act_restore'), 'openRestoreWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')', 'restore')+
         _icoBtn('ghost',     t('act_clone'),   'openCloneWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')',   'clone')+
         sfrBtn+
@@ -12767,26 +12770,29 @@ async function _sfrLoadVmOsInfo(vmid, mappingId) {
 }
 
 function _sfrApplyOsInfo(key, info) {
-  var iconEl = document.getElementById('osicon_' + key);
-  var btnEl  = document.getElementById('sfrbtn_'  + key);
+  var iconEl  = document.getElementById('osicon_'  + key);
+  var labelEl = document.getElementById('oslabel_' + key);
+  var btnEl   = document.getElementById('sfrbtn_'  + key);
   if (!iconEl) return;
   var ico = _sfrOsIcon(info.os_id, info.qga_ok);
   var tip = info.qga_ok
     ? (info.os_name || info.guest_os)
     : 'Guest Agent not running — Single File Restore unavailable';
-  iconEl.innerHTML     = ico;   // SVG, must use innerHTML
-  iconEl.title         = tip;
-  iconEl.style.opacity = info.qga_ok ? '1' : '1';  // opacity handled inside SVG
+  // Rebuild innerHTML: SVG icon + label span
+  var labelText = info.qga_ok ? (info.os_name || info.guest_os || '') : '';
+  iconEl.innerHTML = ico + '<span id="oslabel_'+key+'" style="font-size:11px">'+esc(labelText)+'</span>';
+  iconEl.title     = tip;
+  iconEl.style.opacity = '1';
   if (btnEl) {
     if (info.qga_ok) {
-      btnEl.disabled          = false;
-      btnEl.style.opacity     = '';
-      btnEl.style.cursor      = '';
+      btnEl.disabled      = false;
+      btnEl.style.opacity = '';
+      btnEl.style.cursor  = '';
       btnEl.title = 'Single File Restore (' + (info.os_name || info.guest_os) + ')';
     } else {
-      btnEl.disabled          = true;
-      btnEl.style.opacity     = '.25';
-      btnEl.style.cursor      = 'not-allowed';
+      btnEl.disabled      = true;
+      btnEl.style.opacity = '.25';
+      btnEl.style.cursor  = 'not-allowed';
       btnEl.title = 'Guest Agent not running';
     }
   }
@@ -13351,7 +13357,7 @@ async function sfrDoCopy() {
             // indeterminate — animate
             var w = parseInt(progBar.style.width) || 0;
             progBar.style.width = ((w + 3) % 90 + 5) + '%';
-            progText.textContent = bytes > 0 ? _sfrFmtSize(bytes) + ' transferred…' : 'Connecting…';
+            progText.textContent = bytes > 0 ? _sfrFmtSize(bytes) + ' transferred…' : 'Preparing…';
           }
         }
       } catch(e) { /* ignore poll errors */ }

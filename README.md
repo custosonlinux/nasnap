@@ -39,6 +39,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Tamperproof Snapshots (ONTAP Snapshot Locking / WORM, requires ONTAP 9.12.1+) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | SnapMirror Destination Tamperproof (independent lock duration) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Restore — SFSR (Single File / VM Disk, NFS only) | ✅ | ❌ n/a | ❌ n/a |
+| Single File Restore (SFR) — copy file from snapshot into live VM via QGA | ✅ | ❌ n/a | ❌ n/a |
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
 | VM Clone from snapshot | ✅ | 🟡 Beta | 🟡 Beta¹ |
@@ -183,6 +184,7 @@ After logging in, open **Settings → Initial Setup** to walk through ONTAP conn
 | `WORKERS` | `1` | Gunicorn worker processes — keep at 1; the background scheduler thread is single-instance and must not run in multiple workers |
 | `NASNAP_DATA` | `/data` | Persistent data directory (DB + AES key) |
 | `DEBUG` | — | Set to `1` for Flask debug mode and the `/dev/autologin` shortcut |
+| `SFR_COPY_LIMIT_MB` | `200` | Maximum file size (MB) that Single File Restore will copy into a VM via QGA. Larger files must be downloaded locally. See the [SFR performance note](#single-file-restore-sfr--performance--limits) below. |
 
 > **Port and TLS** are configured via **Settings → Server/Network** in the UI and persisted in `/data/server.json`. The container uses `network_mode: host` so port changes take effect on the next restart without modifying `docker-compose.yml`.
 
@@ -502,6 +504,66 @@ conn = sqlite3.connect(DB_FILE, check_same_thread=False,
 ```
 
 This is the default since v1.0.0 and prevents lock contention from background threads (DR heartbeat, schedule ticker).
+
+---
+
+## Single File Restore (SFR) — Performance & Limits
+
+Single File Restore lets you copy individual files from an ONTAP snapshot directly into a running VM without mounting a full restore volume. It supports Linux and Windows VMs and requires the QEMU Guest Agent to be running inside the VM.
+
+### How data travels
+
+```
+NFS snapshot (PVE host)
+  └─ SSH / cat ──▶ NaSnap (Python)
+                      └─ HTTPS / PVE API ──▶ pveproxy
+                                               └─ QMP socket ──▶ QEMU GA ──▶ VM disk
+```
+
+No VM network access is required. Everything flows through the QGA socket on the PVE host.
+
+### Why it is slower than a direct file copy
+
+The QEMU Guest Agent is a **synchronous, single-threaded JSON daemon** inside the VM. PVE's `agent/file-write` API maps to one `guest-file-write` call per request: PVE opens the file, writes the payload, closes it, and only then returns a response. NaSnap must wait for each round trip before sending the next chunk.
+
+At **460 KB per chunk** (the typical auto-probed PVE limit), a **200 MB file** requires roughly **450 sequential HTTPS round trips**. Even at 50 ms per round trip — TCP keep-alive is reused, so there is no TLS handshake overhead after the first call — that is ~22 seconds of pure API overhead, plus disk I/O inside the VM on each write.
+
+| File size | ~Chunks (460 KB each) | Measured transfer time |
+|---|---|---|
+| 10 MB | ~22 | ~2 min 50 s |
+| 100 MB | ~220 | ~28 min |
+| 200 MB | ~450 | ~57 min |
+| 755 MB | ~1 700 | ~3.5 h |
+
+> **Measured throughput: ~17 s/MB (~60 KB/s).** This is entirely dominated by QGA round-trip latency — approximately 0.85 s per chunk — not by network or disk bandwidth.
+
+Actual time depends on PVE host load, VM disk speed, and the chunk size discovered by the auto-probe. The probe result is logged at startup as:
+
+```
+[sfr] QGA file-write probe: max=512 KB → safe chunk=460 KB
+```
+
+### The 200 MB default limit
+
+The default `SFR_COPY_LIMIT_MB=200` balances usability against transfer time. For files larger than 200 MB, use the **↓ Download** button to save the file locally and transfer it to the VM using your preferred method (SCP, WinSCP, shared folder, etc.).
+
+To raise the limit, add to `docker-compose.yml`:
+
+```yaml
+environment:
+  SFR_COPY_LIMIT_MB: "500"
+```
+
+### What happens during "Preparing…"
+
+Before the first byte is sent, NaSnap auto-probes PVE's actual `file-write` payload limit via a short binary-search (8–16 API calls). The progress bar shows the correct total size immediately, so the bar is deterministic throughout the transfer even during this probe phase. The probe result is cached for the lifetime of the container process.
+
+### Supported VM types
+
+| VM | Small files (≤ 4 MB) | Large files (> 4 MB) |
+|---|---|---|
+| Linux (QEMU GA) | ✅ Single QGA write | ✅ Chunked via QGA |
+| Windows (QEMU GA) | ✅ Single QGA write | ❌ Use ↓ Download |
 
 ---
 

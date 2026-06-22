@@ -510,14 +510,12 @@ def vm_delete(pve, vmid, node, path, guest_os="linux"):
 _QGA_SMALL    = 4 * 1024 * 1024
 # Conservative default chunk size — replaced at runtime by _probe_qga_fw_limit()
 _QGA_FW_CHUNK = 30 * 1024
-# Read 4 MB from source per SSH call (one paramiko channel handles more data efficiently)
-_SSH_BLOCK    = 4 * 1024 * 1024
 
 # Per-PVE-endpoint cache: _base URL → discovered binary chunk limit in bytes
 _qga_fw_limit_cache: dict = {}
 # Files larger than this get a clear "use Download" error instead of a very long transfer
 # Set to 0 to disable the limit.
-SFR_COPY_LIMIT = int(os.environ.get("SFR_COPY_LIMIT_MB", "1024")) * 1024 * 1024
+SFR_COPY_LIMIT = int(os.environ.get("SFR_COPY_LIMIT_MB", "200")) * 1024 * 1024
 
 
 def copy_file_to_vm(pve, mount_path, snap_rel, vmid, node, vm_dest_path,
@@ -651,20 +649,44 @@ def _probe_qga_fw_limit(pve, vmid, node):
     return limit
 
 
+def _read_n(fh, n):
+    """Read exactly n bytes from a paramiko ChannelFile, blocking until data or EOF.
+
+    paramiko's read(n) may return fewer bytes than requested when the SSH receive
+    window has less data buffered; this wrapper retries until we have n bytes or
+    the channel signals EOF.
+    """
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = fh.read(n - len(buf))
+        if not chunk:
+            break
+        buf.extend(chunk)
+    return bytes(buf)
+
+
 def _qga_write_chunked(pve, vmid, node, host, user, pw,
                        src_path, vm_dest_path, file_size, progress_cb=None, cancel_check=None):
     """Write a large file into the VM via QGA — no VM network required.
 
-    Two optimisations vs the naive approach:
-    1. Persistent paramiko SSH connection — one TCP+SSH handshake for all reads,
-       each subsequent command costs ~1-2 ms (channel open) vs ~5-10 ms (subprocess).
-    2. Auto-probed chunk size — binary-searches PVE's actual file-write limit so
-       we use the largest safe chunk, minimising the number of API round-trips.
+    Optimisations vs the original block-based approach:
+    1. File is streamed in a single SSH channel (`cat`) — no per-block `dd` seek,
+       no repeated channel opens.  Python reads chunk_size raw bytes at a time and
+       base64-encodes them locally (fast, avoids base64 process on PVE host).
+    2. Auto-probed chunk size — binary-searches PVE's file-write limit so we use
+       the largest safe chunk, minimising the number of API round-trips.
+    3. Progress is reported after every single QGA write so the UI bar moves
+       immediately from the very first chunk.
 
-    Data path: NFS snapshot ──SSH/paramiko──▶ Python ──HTTPS/PVE API──▶ QGA ──▶ VM disk
+    Data path: NFS snapshot ──SSH/cat──▶ Python ──HTTPS/PVE API──▶ QGA ──▶ VM disk
     """
     import base64 as _b64
     from ._helpers import SshSession
+
+    # Signal file size immediately so the UI shows a deterministic progress bar
+    # while the probe is running — avoids "Connecting…" during that phase.
+    if progress_cb:
+        progress_cb(0, file_size)
 
     # Discover actual chunk limit once per PVE endpoint
     chunk_size = _probe_qga_fw_limit(pve, vmid, node)
@@ -674,33 +696,29 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
     chunk_paths = []
     bytes_done  = 0
     chunk_idx   = 0
-    num_blocks  = (file_size + _SSH_BLOCK - 1) // _SSH_BLOCK
     est_chunks  = (file_size + chunk_size - 1) // chunk_size
 
     log.info(
         f"[sfr] chunked QGA: {file_size // 1048576} MB, chunk={chunk_size // 1024} KB, "
-        f"~{est_chunks} PVE calls, {num_blocks} SSH reads"
+        f"~{est_chunks} PVE calls (streaming)"
     )
 
     try:
         with SshSession(host, user, pw) as ssh:
-            for blk in range(num_blocks):
-                if cancel_check:
-                    cancel_check()  # raises if user cancelled
+            # Stream the entire file in one SSH channel — no per-block dd+skip overhead.
+            _, out_fh, err_fh = ssh._client.exec_command(
+                f"cat {shlex.quote(src_path)}", timeout=7200
+            )
+            try:
+                while True:
+                    if cancel_check:
+                        cancel_check()  # raises if user cancelled
 
-                b64_block = ssh.run(
-                    f"dd if={shlex.quote(src_path)} bs={_SSH_BLOCK} skip={blk} count=1 "
-                    f"2>/dev/null | base64 -w0",
-                    timeout=120,
-                ).strip()
-                if not b64_block:
-                    break  # past end of file
+                    raw = _read_n(out_fh, chunk_size)
+                    if not raw:
+                        break  # EOF
 
-                raw = _b64.b64decode(b64_block)
-
-                for off in range(0, len(raw), chunk_size):
-                    piece     = raw[off : off + chunk_size]
-                    piece_b64 = _b64.b64encode(piece).decode()
+                    piece_b64 = _b64.b64encode(raw).decode()
                     cpath     = f"{tmp_prefix}_c{chunk_idx:06d}"
                     r = pve._api_post(
                         f"{pve._base}/nodes/{node}/qemu/{vmid}/agent/file-write",
@@ -713,11 +731,17 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
                         )
                     chunk_paths.append(cpath)
                     chunk_idx += 1
+                    bytes_done += len(raw)
 
-                bytes_done += len(raw)
-                if progress_cb:
-                    progress_cb(bytes_done, file_size)
-                log.debug(f"[sfr] {bytes_done // 1048576}/{file_size // 1048576} MB")
+                    if progress_cb:
+                        progress_cb(bytes_done, file_size)
+                    log.debug(f"[sfr] {bytes_done // 1048576}/{file_size // 1048576} MB")
+            finally:
+                # Drain exit status so the channel closes cleanly.
+                try:
+                    out_fh.channel.recv_exit_status()
+                except Exception:
+                    pass
 
         if not chunk_paths:
             raise RuntimeError("No data read from source file")
