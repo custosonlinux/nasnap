@@ -2157,6 +2157,23 @@ function applyI18n() {
         </div>
       </div>
 
+      <!-- ═══════════════ PVE HOST MAINTENANCE ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>PVE Host Maintenance</span>
+        <button class="btn btn-ghost btn-sm" id="pveHealthBtn" onclick="pveHealthCheck()">
+          <span id="pveHealthSpinner" class="spinner" style="display:none;margin-right:4px"></span>
+          <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>Check All Hosts
+        </button>
+      </div>
+      <div class="card" id="pveHealthCard" style="display:none">
+        <div id="pveHealthBody">
+          <div id="pveHealthEmpty" style="display:none;color:var(--success,#16a34a);font-size:13px;padding:4px 0">
+            ✓ All PVE hosts are clean — no stale mounts or SFR leftovers found.
+          </div>
+          <div id="pveHealthList"></div>
+        </div>
+      </div>
+
       <!-- ═══════════════ PLUGIN UPDATE ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>Plugin Update</span>
@@ -3949,12 +3966,9 @@ function _renderRcRows() {
     var protoBg = _rcProtoBg[v.protocol] || '#888';
     var protoBadge = '<span class="badge" style="background:'+protoBg+';color:#fff;font-size:10px">'+esc(v.protocol)+'</span>';
     var osKey = v.vmid + '_' + v.mappingId;
-    var osCell = v.isSan
-      ? '<span style="color:var(--muted);font-size:11px">—</span>'
-      : '<span id="osicon_'+osKey+'" title="" style="cursor:default;opacity:.3;display:inline-flex;align-items:center;gap:4px" aria-label="checking">'
-          +_sfrSvgLinux+'<span id="oslabel_'+osKey+'" style="font-size:11px"></span></span>';
-    var sfrBtn = v.isSan ? '' :
-      '<button id="sfrbtn_'+osKey+'" class="btn btn-ghost btn-icon" title="Single File Restore" '
+    var osCell = '<span id="osicon_'+osKey+'" title="" style="cursor:default;opacity:.3;display:inline-flex;align-items:center;gap:4px" aria-label="checking">'
+        +_sfrSvgLinux+'<span id="oslabel_'+osKey+'" style="font-size:11px"></span></span>';
+    var sfrBtn = '<button id="sfrbtn_'+osKey+'" class="btn btn-ghost btn-icon" title="Single File Restore" '
       +'onclick="openSfrModal('+v.vmid+',\''+esc(v.name)+'\',\''+esc(v.mappingId)+'\')" disabled style="opacity:.4;cursor:not-allowed">'
       +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
       +'</button>';
@@ -3973,9 +3987,8 @@ function _renderRcRows() {
       '</div></td>'+
     '</tr>';
   }).join('');
-  // Lazy-load QGA / OS info for each non-SAN VM
+  // Lazy-load QGA / OS info for all VMs (SAN VMs also need QGA for SFR)
   rows.forEach(function(v){
-    if (v.isSan) return;
     _sfrLoadVmOsInfo(v.vmid, v.mappingId);
   });
   ['vmid','name','dsName','proto','count','lastSnap'].forEach(function(c){
@@ -10593,6 +10606,103 @@ async function dbBakRunNow() {
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Run now'; } }
 }
 
+// ── PVE Host Maintenance ──────────────────────────────────────────────────
+var _pveHealthData = [];
+
+async function pveHealthCheck() {
+  var btn  = document.getElementById('pveHealthBtn');
+  var spin = document.getElementById('pveHealthSpinner');
+  btn.disabled = true; spin.style.display = '';
+  document.getElementById('pveHealthCard').style.display = '';
+  document.getElementById('pveHealthList').innerHTML =
+    '<div style="padding:10px 0;color:var(--muted)"><span class="spinner" style="margin-right:6px"></span>Checking PVE hosts…</div>';
+  document.getElementById('pveHealthEmpty').style.display = 'none';
+  try {
+    var r = await apiFetch('settings/pve-health');
+    _pveHealthData = r.hosts || [];
+    _renderPveHealth();
+  } catch(e) {
+    document.getElementById('pveHealthList').innerHTML =
+      '<div style="color:var(--danger);padding:8px 0">Error: ' + esc(e.message || String(e)) + '</div>';
+  } finally { btn.disabled = false; spin.style.display = 'none'; }
+}
+
+function _renderPveHealth() {
+  var hosts = _pveHealthData;
+  var hasIssues = hosts.some(function(h) {
+    return h.stale_nfs.length || h.sfr_dirs.length || h.nasnap_vgs.length;
+  });
+  document.getElementById('pveHealthEmpty').style.display = hasIssues ? 'none' : '';
+  if (!hasIssues) { document.getElementById('pveHealthList').innerHTML = ''; return; }
+
+  var html = '';
+  hosts.forEach(function(h, idx) {
+    var total = h.stale_nfs.length + h.sfr_dirs.length + h.nasnap_vgs.length;
+    if (!total && !h.error) return;
+    html += '<div style="border-top:1px solid var(--border);padding:12px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px" id="pveHealthHost' + idx + '">';
+    html += '<div style="flex:1;min-width:0">';
+    html += '<div style="font-weight:600;margin-bottom:6px">' + esc(h.host_name) +
+            ' <span style="font-size:11px;color:var(--muted);font-weight:normal">' + esc(h.host) + '</span></div>';
+    if (h.error) {
+      html += '<div style="color:var(--danger);font-size:12px">SSH error: ' + esc(h.error) + '</div>';
+    }
+    if (h.stale_nfs.length) {
+      html += '<div style="margin-bottom:5px"><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Stale NFS (' + h.stale_nfs.length + ')</span>';
+      h.stale_nfs.forEach(function(mp) {
+        html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(mp) + '</div>';
+      });
+      html += '</div>';
+    }
+    if (h.sfr_dirs.length) {
+      html += '<div style="margin-bottom:5px"><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">SFR Temp Dirs (' + h.sfr_dirs.length + ')</span>';
+      h.sfr_dirs.forEach(function(d) {
+        var tag = d.mounted
+          ? ' <span style="color:var(--danger);font-weight:600">[mounted]</span>'
+          : ' <span style="color:var(--muted)">[not mounted]</span>';
+        html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(d.path) + tag + '</div>';
+      });
+      html += '</div>';
+    }
+    if (h.nasnap_vgs.length) {
+      html += '<div><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Leftover LVM VGs (' + h.nasnap_vgs.length + ')</span>';
+      h.nasnap_vgs.forEach(function(vg) {
+        html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(vg) + '</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    if (!h.error && total > 0) {
+      html += '<button class="btn btn-warning btn-sm" style="flex-shrink:0;white-space:nowrap" onclick="pveCleanupHost(' + idx + ',this)">Clean up</button>';
+    }
+    html += '</div>';
+  });
+  document.getElementById('pveHealthList').innerHTML = html;
+}
+
+async function pveCleanupHost(idx, btn) {
+  var h = _pveHealthData[idx];
+  if (!h) return;
+  btn.disabled = true; btn.textContent = 'Cleaning…';
+  try {
+    var r = await apiPost('settings/pve-cleanup', {
+      host_id:    h.host_id,
+      stale_nfs:  h.stale_nfs,
+      sfr_dirs:   h.sfr_dirs,
+      nasnap_vgs: h.nasnap_vgs,
+    });
+    var failed = (r.results || []).filter(function(x) { return !x.ok; });
+    if (!failed.length) {
+      toast('✓ ' + h.host_name + ': clean', 'success');
+    } else {
+      toast(h.host_name + ': ' + failed.length + ' item(s) could not be removed — check logs', 'warning');
+    }
+    pveHealthCheck();
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Clean up';
+    toast('Cleanup failed: ' + esc(e.message || String(e)), 'error');
+  }
+}
+
 // ── Job Tracker ────────────────────────────────────────────────────────────
 var _activeJobs = {};
 
@@ -12808,7 +12918,7 @@ var _sfr = {
 
 async function openSfrModal(vmid, vmName, mappingId) {
   _sfr = { sid: null, vmid: vmid, vmName: vmName, mappingId: mappingId,
-            guestOs: 'linux', osName: '',
+            guestOs: 'linux', osName: '', isSan: false,
             snapPath: '/', vmPath: '/', snapSel: null, vmSel: null, mounted: false };
   var modal = document.getElementById('sfrModal');
   modal.style.display = 'flex';
@@ -12826,6 +12936,7 @@ async function openSfrModal(vmid, vmName, mappingId) {
     _sfr.sid     = r.session_id;
     _sfr.guestOs = r.guest_os || 'linux';
     _sfr.osName  = r.os_name  || (_sfr.guestOs === 'windows' ? 'Windows' : 'Linux');
+    _sfr.isSan   = !!r.is_san;
     document.getElementById('sfrVmTitle').textContent =
       'VM ' + vmid + (vmName ? ' — ' + vmName : '');
     var badge = document.getElementById('sfrGuestBadge');
@@ -12912,7 +13023,7 @@ async function sfrSnapChanged() {
     var r = await apiPost('file-restore/sessions/list-disks', { sid: _sfr.sid, snap_name: snapName });
     var disks = r.disks || [];
     if (!disks.length) {
-      document.getElementById('sfrToolbarStatus').textContent = 'No QCOW2 disks found in snapshot.';
+      document.getElementById('sfrToolbarStatus').textContent = 'No disks found for this VM.';
       return;
     }
     var ds = document.getElementById('sfrDiskSel');
@@ -12937,7 +13048,9 @@ async function sfrMount() {
   if (!snapName || !diskFile || !_sfr.sid) return;
   var btn = document.getElementById('sfrMountBtn');
   btn.disabled = true; btn.textContent = 'Mounting…';
-  document.getElementById('sfrToolbarStatus').textContent = 'Connecting disk…';
+  document.getElementById('sfrToolbarStatus').textContent = _sfr.isSan
+    ? 'Creating ONTAP snapshot clone — this may take 30–60 s…'
+    : 'Connecting disk…';
   document.getElementById('sfrPartChips').style.display = 'none';
   try {
     var r = await apiPost('file-restore/sessions/mount',

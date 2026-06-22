@@ -2,6 +2,52 @@
 
 ---
 
+## VM-Datenbank Garbage Collection
+
+**Prio: Mittel**
+
+VMs, die gelöscht oder migriert wurden, bleiben dauerhaft in der RC-Ansicht sichtbar, obwohl kein Restore mehr möglich ist. Das gilt auch für Datastores, deren Mapping gelöscht wurde. Die Bereinigung muss automatisch erfolgen — kein Admin kann sich merken, welche Einträge veraltet sind.
+
+### Problem
+
+Die `netapp_snapshots`-Tabelle enthält `vmids_json` pro Snapshot. Wenn alle Snapshots einer VM gelöscht sind (durch Retention), bleibt die VM trotzdem in der Restore-Ansicht (weil frühere Einträge in der DB verbleiben). Dasselbe gilt für Datastores, deren `netapp_volume_mapping` gelöscht wurde — der `ON DELETE CASCADE` löscht zwar die Snapshots, aber die RC-Ansicht aggregiert VMs über alle bekannten `vmids_json`-Einträge.
+
+### Bereinigungsregeln
+
+1. **Snapshot ohne zugehöriges Mapping** → Mapping wurde gelöscht, CASCADE löscht Snapshots — kein Problem.
+2. **VM ohne Snapshots mehr** → VM taucht in `vmids_json` keines aktiven Snapshots mehr auf → VM-Eintrag muss aus der Aggregation verschwinden. Aktuell kein expliziter VM-Eintrag in der DB (VMs werden dynamisch aus `vmids_json` aggregiert) → GC muss alten `vmids_json`-Einträge in *noch vorhandenen* Snapshots prüfen.
+3. **Snapshot in DB, aber nicht mehr auf ONTAP** → Snapshot wurde direkt auf ONTAP gelöscht ohne NaSnap → Eintrag in DB ist Leiche.
+
+### Geplanter Ansatz
+
+- **Automatischer Abgleich** beim Snapshot-Scan (Index-Import):  
+  Der Index in jedem Snapshot enthält die Snapshot-History. Beim Startup-Scan oder manuellen Index-Scan wird geprüft, welche Snapshots tatsächlich noch auf ONTAP existieren. Einträge ohne ONTAP-Gegenstück werden als `status='orphaned'` markiert oder gelöscht.
+- **Hintergrund-GC-Thread** (täglich, z.B. 03:00 Uhr):  
+  Vergleicht `netapp_snapshots` mit ONTAP-Snapshot-Liste via REST API. Snapshots, die nicht mehr auf ONTAP existieren, werden entfernt. Danach: alle VMIDs, die in keinem verbleibenden `done`-Snapshot mehr vorkommen, sind automatisch bereinigt.
+- **Mapping-Prüfung**:  
+  GC prüft auch, ob das ONTAP-Volume für jedes Mapping noch existiert. Fehlt das Volume, werden alle zugehörigen Snapshots als orphaned markiert.
+
+### Was wiederverwendet werden kann
+
+- ONTAP-Client `list_snapshots(volume_uuid)` — bereits vorhanden
+- Index-Scan-Logik aus `_ds_scan_creds()` + `_reconcile_index_into_db()`
+- DB-Abfrage `DELETE FROM netapp_snapshots WHERE ...` (inkl. ON DELETE CASCADE auf Jobs/Manifeste)
+
+### Was neu gebaut werden muss
+
+- GC-Thread mit konfigurierbarem Intervall (Default: täglich)
+- ONTAP-Snapshot-Abgleich je Mapping
+- UI-Hinweis in Settings: "Letzte GC-Ausführung / N orphaned entries entfernt"
+- Optional: manueller "Run GC now"-Button in Settings
+
+**Aufwand: 2–3 Tage**
+- 1 Tag: ONTAP-Abgleich-Logik + DB-Cleanup
+- 0,5 Tag: GC-Thread + Scheduling
+- 0,5 Tag: Settings-UI (Status-Anzeige + manueller Trigger)
+- 0,5 Tag: Tests + Edge Cases (offline ONTAP, teilweise Snapshots)
+
+---
+
 ## Active Directory / LDAP Authentication
 
 **Prio: Hoch**

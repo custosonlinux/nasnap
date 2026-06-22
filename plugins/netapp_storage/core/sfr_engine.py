@@ -133,6 +133,26 @@ def detect_guest_os(pve, vmid, node):
     return "linux"
 
 
+# ── SAN disk listing ─────────────────────────────────────────────────────────
+
+def list_san_vm_disks(pve, vg_name, vmid):
+    """List LV names for a VM in a SAN datastore (from the live VG).
+    Returns names like ['vm-105-disk-0', 'vm-105-disk-1'] sorted.
+    """
+    from ._helpers import ssh_run
+    try:
+        out = ssh_run(
+            pve.host, pve.ssh_user, pve.ssh_password,
+            f"lvs --noheadings -o lv_name {shlex.quote(vg_name)} 2>/dev/null"
+            f" | grep 'vm-{int(vmid)}-disk' || true",
+            capture=True, timeout=15,
+        )
+        return sorted(l.strip() for l in out.strip().splitlines() if l.strip())
+    except Exception as e:
+        log.warning(f"[sfr] list_san_vm_disks: {e}")
+        return []
+
+
 # ── Snapshot disk listing ─────────────────────────────────────────────────────
 
 def list_snap_disks(pve, nfs_mount_path, snap_name, vmid):
@@ -299,11 +319,300 @@ def umount_session(pve, nbd_device, mount_base):
             log.warning(f"[sfr] cleanup step failed: {e}")
 
     if mount_base:
-        _try(f"umount -l {shlex.quote(mount_base)}/mnt 2>/dev/null || true")
+        # Kill any processes still using the mountpoint (e.g. lingering SSH cat after cancel),
+        # then unmount normally; fall back to lazy umount only if needed.
+        _try(
+            f"fuser -km {shlex.quote(mount_base)}/mnt 2>/dev/null; "
+            f"umount {shlex.quote(mount_base)}/mnt 2>/dev/null || "
+            f"umount -l {shlex.quote(mount_base)}/mnt 2>/dev/null || true"
+        )
     if nbd_device:
         _try(f"qemu-nbd -d {shlex.quote(nbd_device)} 2>/dev/null || true")
     if mount_base:
         _try(f"rm -rf {shlex.quote(mount_base)}")
+
+
+# ── SAN mount / cleanup ───────────────────────────────────────────────────────
+
+def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
+    """Clone LUN/namespace from snapshot, map to PVE host, mount via qemu-nbd (read-only).
+
+    Returns {'nbd_device', 'mount_base', 'partitions': [...], 'san_state': {...}}.
+    san_state carries all info needed for cleanup in cleanup_san_state().
+    """
+    from ._helpers import ssh_run, load_plugin_config
+
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
+    key  = getattr(pve, "ssh_key", None) or ""
+
+    protocol  = mapping.get("storage_protocol", "nvme")
+    svm_name  = mapping["svm_name"]
+    vol_uuid  = mapping["volume_uuid"]
+    vg_name   = mapping["lvm_vg_name"]
+    lvm_type  = mapping.get("lvm_type", "linear")
+    pool_name = mapping.get("lvm_pool_name", "")
+
+    poll_cfg    = load_plugin_config()
+    poll_ivl    = poll_cfg.get("job_poll_interval_s", 3)
+    poll_to     = poll_cfg.get("job_poll_timeout_s", 300)
+    token       = uuid.uuid4().hex[:8]
+    clone_name  = f"nasnap_sfr_{token}"
+    mount_base  = f"{_MOUNT_BASE}{session_id}"
+
+    san = {
+        "protocol":                   protocol,
+        "clone_name":                 clone_name,
+        "temp_lun_uuid":              "",
+        "temp_iscsi_clone_vol_uuid":  "",
+        "temp_iscsi_serial":          "",
+        "igroup_uuid":                "",
+        "temp_ns_uuid":               "",
+        "subsystem_uuid":             "",
+        "temp_vg_name":               "",
+        "lv_name":                    lv_name,
+    }
+
+    try:
+        vol_info = client.get_volume(vol_uuid)
+        vol_name = (vol_info or {}).get("name", "")
+        if not vol_name:
+            raise RuntimeError(f"Cannot resolve volume name for UUID {vol_uuid}")
+
+        device = ""
+
+        if protocol == "iscsi":
+            from .san_helpers import rescan_iscsi, find_device_by_serial
+            log.info(f"[sfr-san] Cloning iSCSI LUN from snapshot '{snap_name}' …")
+            temp_lun_uuid, temp_clone_vol_uuid = client.clone_lun_from_snapshot(
+                vol_uuid, snap_name, svm_name, clone_name,
+                poll_interval=poll_ivl, poll_timeout=poll_to,
+            )
+            san["temp_lun_uuid"]             = temp_lun_uuid
+            san["temp_iscsi_clone_vol_uuid"] = temp_clone_vol_uuid
+
+            lun_uuid = mapping.get("lun_uuid", "")
+            existing_maps = client.list_lun_maps(lun_uuid=lun_uuid) if lun_uuid else []
+            if not existing_maps:
+                raise RuntimeError("No igroup mapping found for main LUN — re-run discovery")
+            igroup_uuid = existing_maps[0]["igroup"]["uuid"]
+            san["igroup_uuid"] = igroup_uuid
+            client.map_lun(temp_lun_uuid, igroup_uuid, svm_name)
+
+            rescan_iscsi(host, user, pw, key)
+            temp_lun_info = client.get_lun(temp_lun_uuid)
+            temp_serial   = temp_lun_info.get("serial_number", "")
+            san["temp_iscsi_serial"] = temp_serial
+            if not temp_serial:
+                raise RuntimeError("Cannot determine serial number of clone LUN")
+            from .san_helpers import find_device_by_serial as _fds
+            device = _fds(host, user, pw, key, temp_serial, timeout_s=60)
+
+        elif protocol == "nvme":
+            from .san_helpers import nvme_list_devices, nvme_ns_rescan, find_new_nvme_device
+            log.info(f"[sfr-san] Cloning NVMe namespace from snapshot '{snap_name}' …")
+            devices_before = nvme_list_devices(host, user, pw, key)
+
+            namespaces = client.list_nvme_namespaces(svm_name=svm_name)
+            main_ns = next(
+                (ns for ns in namespaces
+                 if (ns.get("location") or {}).get("volume", {}).get("uuid") == vol_uuid),
+                None,
+            )
+            if not main_ns:
+                main_ns = next(
+                    (ns for ns in namespaces
+                     if (ns.get("location") or {}).get("volume", {}).get("name") == vol_name),
+                    None,
+                )
+            if not main_ns:
+                raise RuntimeError(f"Cannot find NVMe namespace for volume {vol_uuid}")
+            main_ns_uuid  = main_ns["uuid"]
+            subsystem     = client.get_nvme_subsystem_for_namespace(main_ns_uuid, svm_name=svm_name)
+            if not subsystem:
+                raise RuntimeError("No NVMe subsystem found for main namespace")
+            subsystem_uuid = subsystem["uuid"]
+            san["subsystem_uuid"] = subsystem_uuid
+
+            temp_ns_uuid, ns_job = client.clone_namespace(
+                main_ns_uuid, snap_name, vol_name, clone_name, svm_name)
+            if ns_job:
+                client.poll_job(ns_job, interval_s=poll_ivl, timeout_s=poll_to)
+            if not temp_ns_uuid:
+                raise RuntimeError("clone_namespace returned no UUID")
+            san["temp_ns_uuid"] = temp_ns_uuid
+
+            clone_already_mapped = bool(
+                client.get_nvme_subsystem_for_namespace(temp_ns_uuid, svm_name=svm_name))
+            if not clone_already_mapped:
+                client.add_nvme_namespace_to_subsystem(subsystem_uuid, temp_ns_uuid, svm_name=svm_name)
+
+            nvme_ns_rescan(host, user, pw, key)
+            device = find_new_nvme_device(host, user, pw, key, devices_before, timeout_s=60)
+        else:
+            raise RuntimeError(f"Unsupported SAN protocol for SFR: {protocol}")
+
+        log.info(f"[sfr-san] Clone device: {device}")
+
+        # vgimportclone → temp VG
+        from .san_helpers import vg_import_clone, activate_lv_for_restore
+        temp_vg = vg_import_clone(host, user, pw, key, device, vg_name)
+        san["temp_vg_name"] = temp_vg
+        log.info(f"[sfr-san] Clone VG: {temp_vg}")
+
+        # Activate the VM's LV (clone VG → read-only nbd, so write to clone is harmless)
+        activate_lv_for_restore(host, user, pw, key, temp_vg, lv_name, lvm_type, pool_name)
+        lv_device = f"/dev/{temp_vg}/{lv_name}"
+
+        # qemu-nbd: expose LV as block device (read-only)
+        ssh_run(host, user, pw, "modprobe nbd max_part=8 2>/dev/null || true", timeout=15)
+        nbd_dev = _find_free_nbd(pve)
+        ssh_run(host, user, pw,
+                f"qemu-nbd --read-only -c {shlex.quote(nbd_dev)} {shlex.quote(lv_device)}",
+                timeout=30)
+        ssh_run(host, user, pw,
+                f"sleep 1; partprobe {shlex.quote(nbd_dev)} 2>/dev/null || true", timeout=15)
+
+        # Partition detection (same as NFS path)
+        _ENCRYPTED_FS = {"bitlocker", "crypto_luks", "veracrypt"}
+        _SKIP_FS      = {"swap", "linux_raid_member", "lvm2_member"}
+        partitions    = []
+        try:
+            ssh_run(host, user, pw, "udevadm settle 2>/dev/null || true", timeout=10)
+            out = ssh_run(host, user, pw,
+                          f"lsblk -J -o NAME,SIZE,FSTYPE,LABEL {shlex.quote(nbd_dev)}",
+                          capture=True, timeout=15)
+            children = (json.loads(out).get("blockdevices") or [{}])[0].get("children") or []
+            for c in children:
+                if not c.get("name"):
+                    continue
+                dev    = f"/dev/{c['name']}"
+                fstype = c.get("fstype") or ""
+                label  = c.get("label") or ""
+                if not fstype:
+                    try:
+                        fstype = ssh_run(host, user, pw,
+                                         f"blkid -s TYPE -o value {shlex.quote(dev)} 2>/dev/null || true",
+                                         capture=True, timeout=10).strip()
+                    except Exception:
+                        pass
+                if not label:
+                    try:
+                        label = ssh_run(host, user, pw,
+                                        f"blkid -s LABEL -o value {shlex.quote(dev)} 2>/dev/null || true",
+                                        capture=True, timeout=10).strip()
+                    except Exception:
+                        pass
+                fs = fstype.lower()
+                partitions.append({
+                    "dev":       dev,
+                    "size":      c.get("size", "?"),
+                    "fstype":    fstype,
+                    "label":     label,
+                    "encrypted": fs in _ENCRYPTED_FS,
+                    "skip":      fs in _ENCRYPTED_FS or fs in _SKIP_FS,
+                })
+        except Exception as e:
+            log.warning(f"[sfr-san] partition scan failed: {e}")
+
+        ssh_run(host, user, pw, f"mkdir -p {shlex.quote(mount_base)}/mnt", timeout=15)
+        return {
+            "nbd_device":  nbd_dev,
+            "mount_base":  mount_base,
+            "partitions":  partitions,
+            "san_state":   san,
+        }
+
+    except Exception:
+        # Partial cleanup on failure
+        _san_partial_cleanup(pve, client, san)
+        raise
+
+
+def _san_partial_cleanup(pve, client, san):
+    """Best-effort partial cleanup when mount_san_disk fails mid-way."""
+    from ._helpers import ssh_run
+
+    def _try(fn):
+        try:
+            fn()
+        except Exception as e:
+            log.warning(f"[sfr-san] partial cleanup step: {e}")
+
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
+    key  = getattr(pve, "ssh_key", None) or ""
+
+    temp_vg = san.get("temp_vg_name", "")
+    if temp_vg:
+        from .san_helpers import cleanup_restore_vg
+        _try(lambda: cleanup_restore_vg(host, user, pw, key, temp_vg))
+
+    _san_cleanup_ontap(client, san)
+
+
+def cleanup_san_state(pve, client, san_state):
+    """Full SAN cleanup after a session closes: VG → ONTAP LUN/NS → clone delete.
+
+    Called from file_restore.py when a SAN session is closed or expires.
+    """
+    from ._helpers import ssh_run
+
+    def _try(fn):
+        try:
+            fn()
+        except Exception as e:
+            log.warning(f"[sfr-san] cleanup: {e}")
+
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
+    key  = getattr(pve, "ssh_key", None) or ""
+
+    temp_vg = san_state.get("temp_vg_name", "")
+    if temp_vg:
+        from .san_helpers import cleanup_restore_vg
+        _try(lambda: cleanup_restore_vg(host, user, pw, key, temp_vg))
+
+    protocol         = san_state.get("protocol", "")
+    temp_iscsi_serial = san_state.get("temp_iscsi_serial", "")
+    if protocol == "iscsi" and temp_iscsi_serial:
+        from .san_helpers import flush_iscsi_clone_device
+        _try(lambda: flush_iscsi_clone_device(host, user, pw, key, temp_iscsi_serial))
+
+    _san_cleanup_ontap(client, san_state)
+
+
+def _san_cleanup_ontap(client, san):
+    """Delete the ONTAP clone LUN/namespace and its volume (if applicable)."""
+    def _try(fn):
+        try:
+            fn()
+        except Exception as e:
+            log.warning(f"[sfr-san] ONTAP cleanup: {e}")
+
+    protocol = san.get("protocol", "")
+
+    if protocol == "iscsi":
+        lun_uuid  = san.get("temp_lun_uuid", "")
+        vol_uuid  = san.get("temp_iscsi_clone_vol_uuid", "")
+        ig_uuid   = san.get("igroup_uuid", "")
+        if lun_uuid and ig_uuid:
+            _try(lambda: client.unmap_lun(lun_uuid, ig_uuid))
+        if vol_uuid:
+            _try(lambda: client.delete_volume(vol_uuid))
+        elif lun_uuid:
+            _try(lambda: client.delete_lun(lun_uuid))
+
+    elif protocol == "nvme":
+        ns_uuid  = san.get("temp_ns_uuid", "")
+        sub_uuid = san.get("subsystem_uuid", "")
+        if ns_uuid and sub_uuid:
+            _try(lambda: client.remove_nvme_namespace_from_subsystem(sub_uuid, ns_uuid))
+        if ns_uuid:
+            _try(lambda: client.delete_namespace(ns_uuid))
 
 
 # ── Browsing: snapshot ────────────────────────────────────────────────────────

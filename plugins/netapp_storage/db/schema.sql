@@ -348,6 +348,7 @@ CREATE TABLE IF NOT EXISTS netapp_sfr_sessions (
     mount_path   TEXT NOT NULL DEFAULT '',
     partition    TEXT NOT NULL DEFAULT '',
     guest_os     TEXT NOT NULL DEFAULT 'linux',
+    san_state    TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT '',
     last_active  TEXT NOT NULL DEFAULT ''
 );

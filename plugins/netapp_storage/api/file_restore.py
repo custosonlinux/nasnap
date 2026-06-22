@@ -5,6 +5,7 @@ Sessions track an active disk mount + QGA connection for one VM.
 Cleanup thread expires sessions after 30 min of inactivity.
 """
 
+import json
 import logging
 import threading
 import time
@@ -75,6 +76,29 @@ def _pve_for_sess(db, sess):
     return pve
 
 
+def _ontap_client_for_mapping(db, mapping):
+    from ..core._helpers import get_endpoint, build_ontap_client
+    endpoint = get_endpoint(db, mapping["endpoint_id"])
+    return build_ontap_client(endpoint)
+
+
+def _san_cleanup(db, pve, sess):
+    """Full cleanup for a SAN session: umount + nbd + VG + ONTAP clone."""
+    san_state = {}
+    try:
+        san_state = json.loads(sess.get("san_state") or "{}")
+    except Exception:
+        pass
+    sfr_engine.umount_session(pve, sess.get("nbd_device", ""), sess.get("mount_path", ""))
+    if san_state:
+        try:
+            mapping = get_mapping(db, sess["mapping_id"])
+            client  = _ontap_client_for_mapping(db, mapping)
+            sfr_engine.cleanup_san_state(pve, client, san_state)
+        except Exception as e:
+            log.warning(f"[sfr] san cleanup (ONTAP) {sess.get('id','?')}: {e}")
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 def _create_session():
@@ -90,9 +114,6 @@ def _create_session():
     db = get_db()
     try:
         mapping = get_mapping(db, mapping_id)
-        if mapping.get("storage_protocol", "nfs") != "nfs":
-            return {"error": "Single File Restore requires an NFS datastore"}, 400
-
         pve, pve_host_id = _pve_for_mapping(db, mapping)
         node = pve.find_vm_node(int(vmid))
         if not node:
@@ -131,12 +152,14 @@ def _create_session():
             (sid, vmid, node, mapping_id, pve_host_id,
              mapping["pve_storage_id"], "", "", "", "", "", guest_os, now, now),
         )
+        is_san = mapping.get("storage_protocol", "nfs") != "nfs"
         return {
             "session_id": sid,
             "node":       node,
             "guest_os":   guest_os,
             "os_name":    os_name,
             "os_id":      os_id,
+            "is_san":     is_san,
             "snapshots":  [dict(s) for s in (snaps or [])],
         }
     except Exception as e:
@@ -198,13 +221,21 @@ def _close_session():
     sess = _get_sess(db, sid)
     if not sess:
         return {"ok": True}
-    # Cancel any running copy so the mount is not held busy when we unmount
+    # Cancel any running copy and wait for the thread to fully exit before
+    # unmounting — a running thread may hold the nbd device via an open SSH channel.
     if _copy_progress.get(sid, {}).get("status") == "running":
         _copy_cancelled.add(sid)
-        time.sleep(0.5)  # give the thread a moment to notice the flag
+    if sid in _copy_cancelled or _copy_progress.get(sid, {}).get("status") == "running":
+        for _ in range(50):  # wait up to 5 s
+            if _copy_progress.get(sid, {}).get("status") not in ("running", ""):
+                break
+            time.sleep(0.1)
     try:
         pve = _pve_for_sess(db, sess)
-        sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+        if sess.get("san_state"):
+            _san_cleanup(db, pve, sess)
+        else:
+            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
     except Exception as e:
         log.warning(f"[sfr] umount on close {sid}: {e}")
     db.execute("DELETE FROM netapp_sfr_sessions WHERE id=?", (sid,))
@@ -228,10 +259,13 @@ def _list_disks():
         return {"error": "Session not found"}, 404
     try:
         mapping = get_mapping(db, sess["mapping_id"])
-        nfs_mount_path = (mapping.get("nfs_mount_path") or "").rstrip("/") \
-                         or f"/mnt/pve/{sess['storage_id']}"
         pve = _pve_for_sess(db, sess)
-        disks = sfr_engine.list_snap_disks(pve, nfs_mount_path, snap_name, sess["vmid"])
+        if mapping.get("storage_protocol", "nfs") != "nfs":
+            disks = sfr_engine.list_san_vm_disks(pve, mapping["lvm_vg_name"], sess["vmid"])
+        else:
+            nfs_mount_path = (mapping.get("nfs_mount_path") or "").rstrip("/") \
+                             or f"/mnt/pve/{sess['storage_id']}"
+            disks = sfr_engine.list_snap_disks(pve, nfs_mount_path, snap_name, sess["vmid"])
         _touch(db, sid)
         return {"disks": disks}
     except Exception as e:
@@ -253,15 +287,32 @@ def _mount():
     if not sess:
         return {"error": "Session not found"}, 404
     try:
-        pve = _pve_for_sess(db, sess)
+        mapping = get_mapping(db, sess["mapping_id"])
+        pve     = _pve_for_sess(db, sess)
+        is_san  = mapping.get("storage_protocol", "nfs") != "nfs"
+
+        # Clean up any previous mount before re-mounting
         if sess["nbd_device"] or sess["mount_path"]:
-            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
-        res = sfr_engine.mount_disk(pve, sid, disk_file)
+            if is_san and sess.get("san_state"):
+                _san_cleanup(db, pve, sess)
+            else:
+                sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+
+        if is_san:
+            client = _ontap_client_for_mapping(db, mapping)
+            res = sfr_engine.mount_san_disk(
+                pve, client, mapping, snap_name, sess["vmid"], disk_file, sid)
+            san_json = json.dumps(res["san_state"])
+        else:
+            res = sfr_engine.mount_disk(pve, sid, disk_file)
+            san_json = ""
+
         db.execute(
             "UPDATE netapp_sfr_sessions "
-            "SET snap_name=?,disk_file=?,nbd_device=?,mount_path=?,partition='',last_active=? "
-            "WHERE id=?",
-            (snap_name, disk_file, res["nbd_device"], res["mount_base"], _utcnow(), sid),
+            "SET snap_name=?,disk_file=?,nbd_device=?,mount_path=?,partition='',"
+            "san_state=?,last_active=? WHERE id=?",
+            (snap_name, disk_file, res["nbd_device"], res["mount_base"],
+             san_json, _utcnow(), sid),
         )
         return {"ok": True, "partitions": res["partitions"]}
     except Exception as e:
@@ -546,13 +597,16 @@ def _umount_disk():
         return {"error": "Session not found"}, 404
     try:
         pve = _pve_for_sess(db, sess)
-        sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+        if sess.get("san_state"):
+            _san_cleanup(db, pve, sess)
+        else:
+            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
     except Exception as e:
         log.warning(f"[sfr] umount_disk {sid}: {e}")
     db.execute(
         "UPDATE netapp_sfr_sessions "
-        "SET snap_name='',disk_file='',nbd_device='',mount_path='',partition='',last_active=? "
-        "WHERE id=?",
+        "SET snap_name='',disk_file='',nbd_device='',mount_path='',partition='',"
+        "san_state='',last_active=? WHERE id=?",
         (_utcnow(), sid),
     )
     return {"ok": True}
@@ -600,10 +654,23 @@ def _cleanup_expired():
     rows = db.query("SELECT * FROM netapp_sfr_sessions WHERE last_active < ?", (cutoff,))
     for row in (rows or []):
         sess = dict(row)
-        log.info(f"[sfr] Expiring session {sess['id']} (VM {sess['vmid']})")
+        sid  = sess["id"]
+        log.info(f"[sfr] Expiring session {sid} (VM {sess['vmid']})")
+        # If a copy is still running for this session, cancel it and wait
+        if _copy_progress.get(sid, {}).get("status") == "running":
+            _copy_cancelled.add(sid)
+            for _ in range(30):
+                if _copy_progress.get(sid, {}).get("status") != "running":
+                    break
+                time.sleep(0.1)
         try:
             pve = build_pve_client(db, sess["pve_host_id"])
-            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+            if sess.get("san_state"):
+                _san_cleanup(db, pve, sess)
+            else:
+                sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
         except Exception as e:
-            log.warning(f"[sfr] cleanup umount {sess['id']}: {e}")
-        db.execute("DELETE FROM netapp_sfr_sessions WHERE id=?", (sess["id"],))
+            log.warning(f"[sfr] cleanup umount {sid}: {e}")
+        db.execute("DELETE FROM netapp_sfr_sessions WHERE id=?", (sid,))
+        _copy_progress.pop(sid, None)
+        _copy_cancelled.discard(sid)

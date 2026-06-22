@@ -1131,6 +1131,143 @@ def start_db_backup_scheduler():
     log.info("[netapp_storage] DB backup scheduler started")
 
 
+def _pve_health_check():
+    """Scan all configured PVE hosts for stale NFS mounts, leftover SFR temp dirs and VGs."""
+    err = _require_admin()
+    if err:
+        return err
+
+    import shlex
+    from ..core._helpers import ssh_run
+
+    db = get_db()
+    hosts = db.query("SELECT * FROM netapp_pve_hosts ORDER BY name") or []
+    results = []
+
+    for h in hosts:
+        host = h["host"]
+        user = h["ssh_user"] or "root"
+        pw   = h["ssh_password"] or ""
+        rec  = {
+            "host_id":    h["id"],
+            "host_name":  h["name"],
+            "host":       host,
+            "stale_nfs":  [],
+            "sfr_dirs":   [],
+            "nasnap_vgs": [],
+            "error":      "",
+        }
+        try:
+            # Stale NFS: df stderr emits "df: <path>: Stale file handle"
+            out = ssh_run(host, user, pw,
+                "timeout 30 df 2>&1 | grep 'Stale file handle' | sed 's/df: //;s/: Stale file handle//'",
+                capture=True, timeout=40)
+            for line in out.strip().splitlines():
+                mp = line.strip()
+                if mp:
+                    rec["stale_nfs"].append(mp)
+
+            # SFR leftover temp dirs
+            out2 = ssh_run(host, user, pw,
+                r"for d in /tmp/nasnap-sfr-*/; do [ -d \"$d\" ] || continue; "
+                r"mountpoint -q \"${d}mnt\" 2>/dev/null && echo \"mounted:${d%/}\" || echo \"dir:${d%/}\"; "
+                r"done 2>/dev/null || true",
+                capture=True, timeout=15)
+            for line in out2.strip().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                mounted = line.startswith("mounted:")
+                path    = line.split(":", 1)[1] if ":" in line else line
+                rec["sfr_dirs"].append({"path": path, "mounted": mounted})
+
+            # Leftover nasnap LVM VGs (from SFR clone sessions)
+            out3 = ssh_run(host, user, pw,
+                "vgs --noheadings -o vg_name 2>/dev/null | grep nasnap_sfr || true",
+                capture=True, timeout=10)
+            for line in out3.strip().splitlines():
+                vg = line.strip()
+                if vg:
+                    rec["nasnap_vgs"].append(vg)
+
+        except Exception as e:
+            rec["error"] = str(e)
+
+        results.append(rec)
+
+    return {"hosts": results}
+
+
+def _pve_cleanup():
+    """Clean up stale NFS mounts, SFR temp dirs and leftover VGs on a PVE host."""
+    err = _require_admin()
+    if err:
+        return err
+
+    import shlex
+    from ..core._helpers import ssh_run
+
+    data       = request.get_json() or {}
+    host_id    = str(data.get("host_id", "")).strip()
+    stale_nfs  = data.get("stale_nfs",  [])
+    sfr_dirs   = data.get("sfr_dirs",   [])
+    nasnap_vgs = data.get("nasnap_vgs", [])
+
+    if not host_id:
+        return {"error": "host_id required"}, 400
+
+    db = get_db()
+    h  = db.query_one("SELECT * FROM netapp_pve_hosts WHERE id=?", (host_id,))
+    if not h:
+        return {"error": "PVE host not found"}, 404
+
+    host = h["host"]
+    user = h["ssh_user"] or "root"
+    pw   = h["ssh_password"] or ""
+    items = []
+
+    for mp in stale_nfs:
+        ok, errmsg = True, ""
+        try:
+            ssh_run(host, user, pw,
+                f"umount -l {shlex.quote(mp)} 2>/dev/null || true",
+                timeout=10)
+        except Exception as e:
+            ok, errmsg = False, str(e)
+        items.append({"type": "stale_nfs", "target": mp, "ok": ok, "error": errmsg})
+
+    # SFR dirs: kill users → find nbd device → unmount → disconnect nbd → rm -rf
+    for d in sfr_dirs:
+        path = d if isinstance(d, str) else d.get("path", "")
+        ok, errmsg = True, ""
+        try:
+            ssh_run(host, user, pw,
+                f"mnt={shlex.quote(path)}/mnt; "
+                f"fuser -km \"$mnt\" 2>/dev/null; "
+                f"nbd=$(grep \" $mnt \" /proc/mounts 2>/dev/null | awk '{{print $1}}' | sed 's/p[0-9]*$//'); "
+                f"umount \"$mnt\" 2>/dev/null || umount -l \"$mnt\" 2>/dev/null; "
+                f"[ -n \"$nbd\" ] && qemu-nbd -d \"$nbd\" 2>/dev/null; "
+                f"rm -rf {shlex.quote(path)} 2>/dev/null || true",
+                timeout=30)
+        except Exception as e:
+            ok, errmsg = False, str(e)
+        items.append({"type": "sfr_dir", "target": path, "ok": ok, "error": errmsg})
+
+    # LVM VGs: deactivate all LVs then remove
+    for vg in nasnap_vgs:
+        ok, errmsg = True, ""
+        try:
+            ssh_run(host, user, pw,
+                f"vgchange -an {shlex.quote(vg)} 2>/dev/null; "
+                f"vgremove -f {shlex.quote(vg)} 2>/dev/null || true",
+                timeout=20)
+        except Exception as e:
+            ok, errmsg = False, str(e)
+        items.append({"type": "nasnap_vg", "target": vg, "ok": ok, "error": errmsg})
+
+    return {"results": items}
+
+
 def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/smtp',              _smtp_get)
     register_plugin_route(PLUGIN_ID, 'settings/smtp/save',         _smtp_save)
@@ -1143,3 +1280,5 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/db-backup-config',  _backup_config_get)
     register_plugin_route(PLUGIN_ID, 'settings/db-backup-save',    _backup_config_save)
     register_plugin_route(PLUGIN_ID, 'settings/db-backup-run-now', _backup_run_now)
+    register_plugin_route(PLUGIN_ID, 'settings/pve-health',        _pve_health_check)
+    register_plugin_route(PLUGIN_ID, 'settings/pve-cleanup',       _pve_cleanup)
