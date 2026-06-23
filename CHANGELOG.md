@@ -10,6 +10,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **SFR — Multi-file and directory restore** — the snapshot panel now supports multi-select: clicking any file or directory toggles it in/out of the selection (checkmark prefix, light-blue highlight). A counter badge ("N selected") appears in the panel header with a ✕ clear button. F5 Copy → VM sends all selected items as a single `tar` stream from the PVE host into the VM via QGA (`tar -czf - | chunks → base64 -d | tar xzf -C dest_dir` pattern). Works for single file, multiple files, and entire directories. The copy button label updates dynamically ("F5 Copy 3 → VM", "F5 Copy dir → VM"). ↓ Download and ↓ tar.gz continue to operate on the most recently clicked single item.
+
+- **SFR — Windows single-file copy** — F5 Copy → VM now works for single files on Windows VMs. Data flows via QGA `agent/file-write` (which writes content verbatim): NaSnap writes base64 chunks to temp files in `C:\Windows\Temp\`, then executes a PowerShell command in the VM to concatenate, decode from base64, and write the final file. Fixed 30 KB chunk size (multiple of 3, no mid-stream padding). Multi-file and directory copy is still unsupported for Windows VMs (use ↓ tar.gz).
+
+- **SFR — Batch QGA OS-type loading in Restore & Clone view** — the VM list in the Restore & Clone tab previously probed each VM's OS type one by one (serialised by `WORKERS=1`), causing up to ~2 s × N VMs of wait before the list was interactive. A new batch endpoint (`sessions/vm-qga-info-batch`) probes all VMs concurrently (up to 12 threads) with one `cluster/resources` call per PVE cluster. Expected speedup: 10 VMs from ~20 s → ~2–3 s.
+
+- **SFR — Finish button** — a `✓ Finish Restore` button in the modal header replaces the emergency-only ✕ Close as the primary completion path. Clicking it awaits `sessions/close` (unmount + full cleanup), shows a success toast, and closes the modal. The old ✕ Close button remains for emergency use.
+
+- **SFR — Custom New Folder dialog** — the F7 New Folder action now shows a NaSnap-styled inline modal (z-index 4000, Enter/Escape key support, error display) instead of the browser's native `prompt()`. Errors from the backend (permission denied, folder already exists) are shown inline in red.
+
+- **SFR — Copy destination bar tracks VM navigation** — clicking into a directory in the VM panel now automatically updates the Copy Destination input to the newly entered directory, keeping copy destination and browsed directory in sync (Total Commander behaviour).
+
+- **SFR — Disk sizes in disk selector** — when multiple disks are available (e.g. EFI system partition, TPM, data disk on Windows Server 2025), the disk selector dropdown now shows the size next to each disk name. `list_san_vm_disks()` uses `lvs --noheadings -o lv_name,lv_size` and `list_snap_disks()` uses `stat -c '%n %s'` to populate size information.
+
 - **Active Directory / LDAP Authentication** — connect NaSnap to an AD domain or any LDAP directory. Users authenticate with their domain credentials; group membership determines the role. Configure in **Settings → Active Directory / LDAP**: server, port, encryption (None / STARTTLS / LDAPS), service-account bind DN and password (AES-256-GCM encrypted at rest), Base DN, user search filter, Admin group DN, and Viewer group DN.
   - Login flow: local accounts are checked first; LDAP is only attempted if no local account matches the username.
   - Users not in either configured group are denied — access is always explicit.
@@ -18,6 +32,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **Test Connection** button in the settings UI verifies the service-account bind and returns the user's groups before saving.
 
 ### Fixed
+
+- **SFR — in-VM assembly of transferred chunks was broken** — the QGA `agent/file-write` API writes the `content` field verbatim (no base64 decoding occurs server-side). Chunk files in the VM therefore contained base64 text, not binary data. The assembly command (`cat chunks | base64 -d`) now correctly decodes the concatenated base64. Chunk size is forced to a multiple of 3 bytes so concatenating chunks never introduces mid-stream `=` padding that would break base64 decoding. Previously, every file copy produced a corrupted file.
+
+- **SFR — Windows mkdir failed silently** — `vm_mkdir` used `cmd.exe /c mkdir "path"` and ignored the exit code entirely, so any failure (permission denied, parent path wrong, folder already exists) was silently swallowed — the API returned `{"ok": True}` and the UI showed "Folder created" while no folder was actually created. Now uses `powershell.exe New-Item -ItemType Directory -Path '...'` (consistent with the rest of the Windows QGA code) and raises a `RuntimeError` with the PowerShell error message on non-zero exit code.
+
+- **SFR — mkdir path double-backslash on Windows** — the new-folder path was constructed by stripping only `/` from the current path, not `\`. On Windows paths ending with `\`, this produced double-backslash in the constructed path (e.g. `C:\Users\\NewFolder`). The strip now uses `replace(/[\/\\]+$/, '')` to handle both separators.
 
 - **Admin-role check broken across all plugin API endpoints** (`_require_admin`) — a missing `from flask import request` import caused every admin-only endpoint (snapshots, schedules, restore, clone, dr, provisioning, recovery, snapmirror, file_restore, settings) to return HTTP 500 instead of 403 when called without admin rights. The `_require_admin` helper now imports `request` correctly. Affected features: UI Features toggles (auto-scan, DR), all write operations.
 - **Session role not propagated** — existing sessions after the DB migration had `role = 'viewer'` even for admin users. A migration SQL statement now backfills `role = 'admin'` for sessions belonging to admin users.

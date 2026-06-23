@@ -4078,10 +4078,8 @@ function _renderRcRows() {
       '</div></td>'+
     '</tr>';
   }).join('');
-  // Lazy-load QGA / OS info for all VMs (SAN VMs also need QGA for SFR)
-  rows.forEach(function(v){
-    _sfrLoadVmOsInfo(v.vmid, v.mappingId);
-  });
+  // Load QGA / OS info for all VMs in one batched request (server probes in parallel)
+  _sfrLoadVmOsInfoBatch(rows);
   ['vmid','name','dsName','proto','count','lastSnap'].forEach(function(c){
     var span = document.getElementById('rcs_'+c);
     var th   = span && span.parentElement;
@@ -6774,6 +6772,24 @@ function downloadJobLog() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function copyJobLog() {
+  var j = _currentLogJobId && _allJobsCache.find(function(x){ return x.id === _currentLogJobId; });
+  if (!j) return;
+  var lines = (j.log||[]).map(function(l) {
+    return (l.ts ? l.ts + '  ' : '') + (l.msg || l);
+  });
+  if (j.error) lines.push('[ERROR] ' + j.error);
+  var text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = document.getElementById('copyJobLogBtn');
+    var orig = btn.innerHTML;
+    btn.textContent = '✓ Copied';
+    setTimeout(function() { btn.innerHTML = orig; }, 1800);
+  }).catch(function() {
+    toast('Clipboard not available', 'error');
+  });
 }
 
 function prepareRestore(snapId) {
@@ -12659,6 +12675,9 @@ actLogPoll();
     <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
       <div id="lvm_error" style="font-size:12px;color:var(--error)"></div>
       <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost btn-sm" onclick="copyJobLog()" id="copyJobLogBtn" title="Copy log to clipboard">
+          <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:4px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>Copy
+        </button>
         <button class="btn btn-ghost btn-sm" onclick="downloadJobLog()" title="Download as .txt">
           <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:4px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Download
         </button>
@@ -12978,7 +12997,8 @@ actLogPoll();
       </div>
       <div style="flex:1"></div>
       <span id="sfrGuestBadge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border);color:var(--muted);display:none"></span>
-      <button class="btn btn-ghost btn-sm" onclick="closeSfrModal()">✕ Close</button>
+      <button id="sfrFinishBtn" class="btn btn-primary btn-sm" onclick="sfrFinish()" title="Mark restore as complete — unmounts snapshot and closes the session cleanly">✓ Finish Restore</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeSfrModal()" title="Close without waiting for cleanup (emergency exit)">✕ Close</button>
     </div>
 
     <!-- Toolbar: snapshot + disk + mount controls -->
@@ -13002,6 +13022,8 @@ actLogPoll();
           <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap">Snapshot</span>
           <span style="color:var(--border)">│</span>
           <span id="sfrSnapPanelPath" style="font-family:monospace;font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left">/</span>
+          <span id="sfrSelCount" style="display:none;font-size:10px;color:var(--primary);white-space:nowrap;margin-left:4px"></span>
+          <span id="sfrSelClear" style="display:none;font-size:10px;cursor:pointer;color:var(--muted);margin-left:2px" onclick="_sfrClearSels()" title="Clear selection">✕</span>
         </div>
         <!-- Column headers -->
         <div style="display:flex;padding:2px 10px;background:var(--bg-alt);border-bottom:1px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0">
@@ -13038,7 +13060,7 @@ actLogPoll();
     <div style="padding:5px 12px;background:var(--bg-alt);border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" id="sfrDlBtn"    onclick="sfrDownload()"    disabled title="Download selected file from snapshot">↓ Download</button>
       <button class="btn btn-ghost btn-sm" id="sfrDlTarBtn" onclick="sfrDownloadTar()" disabled title="Download as tar.gz">↓ tar.gz</button>
-      <button class="btn btn-primary btn-sm" id="sfrCopyBtn" onclick="sfrCopyToVm()"   disabled title="Copy selected file to VM (requires QGA)">F5 Copy → VM</button>
+      <button class="btn btn-primary btn-sm" id="sfrCopyBtn" onclick="sfrCopyToVm()"   disabled title="Copy selected files/dirs to VM (requires QGA; Linux VMs only for multi/dir)">F5 Copy → VM</button>
       <div style="flex:1"></div>
       <button class="btn btn-ghost btn-sm" onclick="sfrVmNewFolder()" title="Create new folder in VM">F7 New Folder</button>
       <button class="btn btn-danger btn-sm" id="sfrVmDelBtn" onclick="sfrVmDelete()" disabled title="Delete selected in VM">F8 Delete</button>
@@ -13047,8 +13069,8 @@ actLogPoll();
     <!-- Copy destination bar -->
     <div id="sfrCopyBar" style="display:none;padding:8px 16px;background:var(--bg-alt);border-top:1px solid var(--border);flex-shrink:0;flex-direction:column;gap:6px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:12px;font-weight:600;white-space:nowrap">Copy to VM path:</span>
-        <input id="sfrCopyDest" style="flex:1;min-width:180px;max-width:380px;font-family:monospace;font-size:12px" placeholder="/home/user/restored_file">
+        <span id="sfrCopyDestLabel" style="font-size:12px;font-weight:600;white-space:nowrap">Destination directory in VM:</span>
+        <input id="sfrCopyDest" style="flex:1;min-width:180px;max-width:380px;font-family:monospace;font-size:12px" placeholder="/home/user/">
         <button id="sfrCopyBtn2" class="btn btn-primary btn-sm" onclick="sfrDoCopy()">Copy</button>
         <button id="sfrCopyCancelBtn" class="btn btn-ghost btn-sm" onclick="sfrCopyCancel()">Cancel</button>
         <span id="sfrCopyStatus" style="font-size:12px;color:var(--muted)"></span>
@@ -13062,6 +13084,21 @@ actLogPoll();
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- SFR — New Folder modal (z-index above sfrModal) -->
+<div id="sfrMkdirOverlay" style="display:none;position:fixed;inset:0;z-index:4000;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:22px 24px;min-width:320px;max-width:440px;box-shadow:0 8px 36px rgba(0,0,0,.45)">
+    <div style="font-weight:700;font-size:14px;margin-bottom:14px">New Folder</div>
+    <input id="sfrMkdirInput" type="text" placeholder="Folder name"
+           style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-alt);color:var(--text);font-size:13px;font-family:monospace;margin-bottom:6px"
+           onkeydown="if(event.key==='Enter')sfrMkdirConfirm();else if(event.key==='Escape')sfrMkdirCancel();" />
+    <div id="sfrMkdirError" style="color:var(--danger);font-size:12px;min-height:18px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="sfrMkdirCancel()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="sfrMkdirConfirm()">Create</button>
+    </div>
   </div>
 </div>
 
@@ -13100,6 +13137,35 @@ async function _sfrLoadVmOsInfo(vmid, mappingId) {
   }
 }
 
+async function _sfrLoadVmOsInfoBatch(vms) {
+  // Apply cached results immediately so already-known icons show at once
+  var uncached = [];
+  vms.forEach(function(v) {
+    var key = v.vmid + '_' + v.mappingId;
+    if (_sfrOsCache[key] !== undefined) {
+      _sfrApplyOsInfo(key, _sfrOsCache[key]);
+    } else {
+      uncached.push({vmid: String(v.vmid), mapping_id: String(v.mappingId)});
+    }
+  });
+  if (!uncached.length) return;
+  try {
+    var r = await apiPost('file-restore/sessions/vm-qga-info-batch', {vms: uncached});
+    (r.results || []).forEach(function(info) {
+      var key = info.vmid + '_' + info.mapping_id;
+      _sfrOsCache[key] = info;
+      _sfrApplyOsInfo(key, info);
+    });
+  } catch(e) {
+    // Fallback: mark all uncached as unavailable so icons resolve
+    uncached.forEach(function(vm) {
+      var key = vm.vmid + '_' + vm.mapping_id;
+      _sfrOsCache[key] = {qga_ok: false, guest_os: 'linux', os_name: 'Unavailable', os_id: ''};
+      _sfrApplyOsInfo(key, _sfrOsCache[key]);
+    });
+  }
+}
+
 function _sfrApplyOsInfo(key, info) {
   var iconEl  = document.getElementById('osicon_'  + key);
   var labelEl = document.getElementById('oslabel_' + key);
@@ -13133,14 +13199,16 @@ function _sfrApplyOsInfo(key, info) {
 var _sfr = {
   sid: null, vmid: null, vmName: '', mappingId: null, guestOs: 'linux', osName: '',
   snapPath: '/', vmPath: '/',
-  snapSel: null, vmSel: null,   // selected {name, type, fullPath}
+  snapSel: null, snapSels: {},  // snapSels: fullPath→{name,type,fullPath}; snapSel: last clicked
+  vmSel: null,
   mounted: false,
 };
 
 async function openSfrModal(vmid, vmName, mappingId) {
   _sfr = { sid: null, vmid: vmid, vmName: vmName, mappingId: mappingId,
             guestOs: 'linux', osName: '', isSan: false,
-            snapPath: '/', vmPath: '/', snapSel: null, vmSel: null, mounted: false };
+            snapPath: '/', vmPath: '/',
+            snapSel: null, snapSels: {}, vmSel: null, mounted: false };
   var modal = document.getElementById('sfrModal');
   modal.style.display = 'flex';
   document.getElementById('sfrVmTitle').textContent =
@@ -13184,6 +13252,26 @@ async function openSfrModal(vmid, vmName, mappingId) {
   }
 }
 
+async function sfrFinish() {
+  var btn = document.getElementById('sfrFinishBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Finishing…'; }
+  if (_sfrCopyPoll) { clearInterval(_sfrCopyPoll); _sfrCopyPoll = null; }
+  if (_sfr.sid) {
+    var sid = _sfr.sid;
+    _sfr.sid = null;
+    if ((_copy_progress_local || {}).status === 'running') {
+      try { await apiPost('file-restore/sessions/copy-cancel', { sid: sid }); } catch(e) {}
+    }
+    try { await apiPost('file-restore/sessions/close', { sid: sid }); } catch(e) {}
+  }
+  _copy_progress_local = null;
+  toast('✓ Restore complete — snapshot unmounted and session closed', 'success');
+  document.getElementById('sfrModal').style.display = 'none';
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Finish Restore'; }
+  _sfr = { sid: null, vmid: null, vmName: '', mappingId: null, guestOs: 'linux', osName: '',
+            snapPath: '/', vmPath: '/', snapSel: null, snapSels: {}, vmSel: null, mounted: false };
+}
+
 function closeSfrModal() {
   if (_sfrCopyPoll) { clearInterval(_sfrCopyPoll); _sfrCopyPoll = null; }
   if (_sfr.sid) {
@@ -13198,7 +13286,7 @@ function closeSfrModal() {
   _copy_progress_local = null;
   document.getElementById('sfrModal').style.display = 'none';
   _sfr = { sid: null, vmid: null, vmName: '', mappingId: null, guestOs: 'linux', osName: '',
-            snapPath: '/', vmPath: '/', snapSel: null, vmSel: null, mounted: false };
+            snapPath: '/', vmPath: '/', snapSel: null, snapSels: {}, vmSel: null, mounted: false };
 }
 
 // Best-effort cleanup when the browser tab is closed without using the Close button.
@@ -13230,7 +13318,7 @@ function _sfrResetSnap() {
   document.getElementById('sfrUmountBtn').style.display  = 'none';
   document.getElementById('sfrSnapList').innerHTML = '<div style="padding:24px 16px;color:var(--muted);text-align:center">Select a snapshot to continue.</div>';
   document.getElementById('sfrSnapPanelPath').textContent = '/';
-  _sfr.snapSel = null; _sfr.mounted = false;
+  _sfr.snapSel = null; _sfr.snapSels = {}; _sfr.mounted = false;
   _sfrUpdateActions();
 }
 
@@ -13249,7 +13337,10 @@ async function sfrSnapChanged() {
     }
     var ds = document.getElementById('sfrDiskSel');
     ds.innerHTML = disks.map(function(d){
-      return '<option value="' + esc(d) + '">' + esc(d.split('/').pop()) + '</option>';
+      var val  = typeof d === 'string' ? d : d.path;
+      var name = val.split('/').pop().replace(/\.qcow2$/, '');
+      var sz   = (typeof d === 'object' && d.size_str) ? ' (' + d.size_str + ')' : '';
+      return '<option value="' + esc(val) + '">' + esc(name) + esc(sz) + '</option>';
     }).join('');
     ds.style.display = disks.length > 1 ? '' : 'none';
     document.getElementById('sfrMountBtn').style.display = '';
@@ -13380,7 +13471,7 @@ async function sfrUmount() {
     await apiPost('file-restore/sessions/umount', { sid: _sfr.sid });
   } catch(e) { /* best effort */ }
   _sfr.mounted = false;
-  _sfr.snapSel = null;
+  _sfr.snapSel = null; _sfr.snapSels = {};
   _sfrUpdateActions();
   _sfrResetSnap();
   // Reset toolbar to disk/mount state (keep snapshot selection)
@@ -13396,31 +13487,38 @@ async function sfrUmount() {
 
 // ── File panel rendering ──────────────────────────────────────────────────────
 
-function _sfrRenderList(containerId, entries, path, selState, navFn, selFn, isDrives, isWin) {
+// selSet (optional): object keyed by fullPath for multi-select (snap panel).
+// When provided, rows are toggled in/out of selSet; single-select (selState) is ignored.
+function _sfrRenderList(containerId, entries, path, selState, navFn, selFn, isDrives, isWin, selSet) {
   var el = document.getElementById(containerId);
-  if (!entries.length && !isDrives) {
-    el.innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Empty directory.</div>';
-    return;
-  }
   var sep = isWin ? '\\' : '/';
   var rows = '<style>' +
     '.sfr-row{display:flex;align-items:center;padding:1px 10px;cursor:pointer;user-select:none;white-space:nowrap}' +
     '.sfr-row:hover{background:var(--hover,rgba(100,100,100,.12))}' +
     '.sfr-sel{background:var(--primary)!important;color:#fff}' +
     '.sfr-sel .sfr-muted{color:rgba(255,255,255,.7)!important}' +
+    '.sfr-checked{background:rgba(88,166,255,.18)!important;border-left:2px solid var(--primary)}' +
     '.sfr-nm{flex:1;overflow:hidden;text-overflow:ellipsis}' +
     '.sfr-sz{width:70px;text-align:right;color:var(--muted);font-size:11px}' +
     '.sfr-dt{width:120px;text-align:right;color:var(--muted);font-size:10px;padding-right:4px}' +
     '.sfr-muted{color:var(--muted)}' +
     '</style>';
 
-  // ".." row — skip for drives view and top-level Linux root
+  // ".." row — always render first (skip for drives view and top-level Linux root)
   if (!isDrives && path && path !== '/') {
     var parentPath = _sfrParentPath(path, isWin);
     rows += '<div class="sfr-row" onclick="' + navFn + '(\'' + jse(parentPath) + '\')">' +
+      '<span style="width:14px;display:inline-block;margin-right:4px"></span>' +
       '<span class="sfr-muted" style="margin-right:6px">📁</span>' +
       '<span class="sfr-nm sfr-muted">..</span>' +
       '<span class="sfr-sz"></span><span class="sfr-dt"></span></div>';
+  }
+
+  // Empty directory — show message after ".." row so user can navigate back
+  if (!entries.length && !isDrives) {
+    rows += '<div style="padding:16px;color:var(--muted);text-align:center">Empty directory.</div>';
+    el.innerHTML = rows;
+    return;
   }
 
   entries.slice().sort(function(a,b){
@@ -13432,19 +13530,33 @@ function _sfrRenderList(containerId, entries, path, selState, navFn, selFn, isDr
     var fullPath = isDrives ? e.name
                  : isWin   ? path.replace(/\\+$/, '') + '\\' + e.name
                  :            path.replace(/\/$/, '')  + '/'  + e.name;
-    var isDir = e.type === 'd';
-    var isSel = selState && selState.fullPath === fullPath;
-    var icon  = isDrives ? '💾' : (isDir ? '📁' : '📄');
-    var size  = isDir ? '<DIR>' : _sfrFmtSize(e.size);
-    var dt    = esc(e.modified || '');
-    var sel   = isSel ? ' sfr-sel' : '';
+    var isDir  = e.type === 'd';
+    var icon   = isDrives ? '💾' : (isDir ? '📁' : '📄');
+    var size   = isDir ? '<DIR>' : _sfrFmtSize(e.size);
+    var dt     = esc(e.modified || '');
+
+    var sel, checkSpan;
+    if (selSet) {
+      // Multi-select mode (snap panel)
+      var isChecked = !!selSet[fullPath];
+      sel       = isChecked ? ' sfr-checked' : '';
+      checkSpan = '<span style="width:14px;display:inline-block;margin-right:4px;color:var(--primary);font-weight:700">' +
+                  (isChecked ? '✓' : '') + '</span>';
+    } else {
+      // Single-select mode (VM panel)
+      var isSel = selState && selState.fullPath === fullPath;
+      sel       = isSel ? ' sfr-sel' : '';
+      checkSpan = '<span style="width:14px;display:inline-block;margin-right:4px"></span>';
+    }
+
     rows += '<div class="sfr-row' + sel + '" ' +
       'onclick="' + selFn + '(\'' + jse(fullPath) + '\',\'' + (isDir?'d':'f') + '\',\'' + jse(e.name) + '\')" ' +
       (isDir ? 'ondblclick="' + navFn + '(\'' + jse(fullPath) + '\')"' : '') + '>' +
+      checkSpan +
       '<span style="margin-right:6px">' + icon + '</span>' +
       '<span class="sfr-nm">' + esc(e.name) + '</span>' +
-      '<span class="sfr-sz' + (isSel ? '' : ' sfr-muted') + '">' + esc(size) + '</span>' +
-      '<span class="sfr-dt' + (isSel ? '' : ' sfr-muted') + '">' + dt + '</span>' +
+      '<span class="sfr-sz sfr-muted">' + esc(size) + '</span>' +
+      '<span class="sfr-dt sfr-muted">' + dt + '</span>' +
       '</div>';
   });
   el.innerHTML = rows;
@@ -13488,7 +13600,7 @@ async function _sfrLoadSnap(path) {
     var r = await apiFetch('file-restore/sessions/snap-ls?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapPath));
     if (r.error) { document.getElementById('sfrSnapList').innerHTML = '<div style="padding:12px;color:var(--danger)">'+esc(r.error)+'</div>'; return; }
     _sfrSnapEntries = r.entries || [];
-    _sfr.snapSel = null;
+    _sfr.snapSel = null; _sfr.snapSels = {};
     _sfrUpdateActions();
     _sfrRenderSnap();
   } catch(e) {
@@ -13497,12 +13609,43 @@ async function _sfrLoadSnap(path) {
 }
 
 function _sfrRenderSnap() {
-  _sfrRenderList('sfrSnapList', _sfrSnapEntries, _sfr.snapPath, _sfr.snapSel, '_sfrNavSnap', '_sfrSelSnap');
+  _sfrRenderList('sfrSnapList', _sfrSnapEntries, _sfr.snapPath, null, '_sfrNavSnap', '_sfrSelSnap',
+                 false, false, _sfr.snapSels);
+  // Update selection counter badge
+  var count = Object.keys(_sfr.snapSels).length;
+  var cEl = document.getElementById('sfrSelCount');
+  var xEl = document.getElementById('sfrSelClear');
+  if (count > 0) {
+    cEl.textContent = count + ' selected';
+    cEl.style.display = '';
+    xEl.style.display = '';
+  } else {
+    cEl.style.display = 'none';
+    xEl.style.display = 'none';
+  }
 }
 
-function _sfrNavSnap(path) { _sfr.snapSel = null; _sfrUpdateActions(); _sfrLoadSnap(path); }
+function _sfrNavSnap(path) {
+  _sfr.snapSel = null; _sfr.snapSels = {};
+  _sfrUpdateActions();
+  _sfrLoadSnap(path);
+}
+
 function _sfrSelSnap(fullPath, type, name) {
-  _sfr.snapSel = { fullPath: fullPath, type: type, name: name };
+  if (_sfr.snapSels[fullPath]) {
+    delete _sfr.snapSels[fullPath];
+    var vals = Object.values(_sfr.snapSels);
+    _sfr.snapSel = vals.length ? vals[vals.length - 1] : null;
+  } else {
+    _sfr.snapSels[fullPath] = { fullPath: fullPath, type: type, name: name };
+    _sfr.snapSel = _sfr.snapSels[fullPath];
+  }
+  _sfrUpdateActions();
+  _sfrRenderSnap();
+}
+
+function _sfrClearSels() {
+  _sfr.snapSel = null; _sfr.snapSels = {};
   _sfrUpdateActions();
   _sfrRenderSnap();
 }
@@ -13535,7 +13678,18 @@ function _sfrRenderVm() {
                  '_sfrNavVm', '_sfrSelVm', _sfrVmIsDrives, _sfr.guestOs === 'windows');
 }
 
-function _sfrNavVm(path) { _sfr.vmSel = null; _sfrUpdateActions(); _sfrLoadVm(path); }
+function _sfrNavVm(path) {
+  _sfr.vmSel = null;
+  _sfrUpdateActions();
+  _sfrLoadVm(path);
+  // Keep copy destination in sync with the VM panel — Total Commander behaviour:
+  // the destination is always the active directory in the right panel.
+  var dest = document.getElementById('sfrCopyDest');
+  if (dest) {
+    var normPath = (path || '').replace(/[\/\\]+$/, '');
+    dest.value = normPath || (_sfr.guestOs === 'windows' ? 'C:\\' : '/');
+  }
+}
 function _sfrSelVm(fullPath, type, name) {
   _sfr.vmSel = { fullPath: fullPath, type: type, name: name };
   _sfrUpdateActions();
@@ -13545,23 +13699,38 @@ function _sfrSelVm(fullPath, type, name) {
 // ── Action button state ───────────────────────────────────────────────────────
 
 function _sfrUpdateActions() {
-  var hasFile = _sfr.snapSel && _sfr.snapSel.type === 'f';
-  var hasAny  = !!_sfr.snapSel;
-  document.getElementById('sfrDlBtn').disabled    = !hasFile;
+  var selVals  = Object.values(_sfr.snapSels);
+  var selCount = selVals.length;
+  var hasSingleFile = selCount === 1 && _sfr.snapSel && _sfr.snapSel.type === 'f';
+  var hasAny        = selCount > 0 && !!_sfr.snapSel;
+
+  document.getElementById('sfrDlBtn').disabled    = !hasSingleFile;
   document.getElementById('sfrDlTarBtn').disabled = !hasAny;
-  document.getElementById('sfrCopyBtn').disabled  = !hasFile;
+  document.getElementById('sfrCopyBtn').disabled  = !selCount;
   document.getElementById('sfrVmDelBtn').disabled = !_sfr.vmSel;
+
+  // Update copy button label to hint at count / dir mode
+  var copyBtn = document.getElementById('sfrCopyBtn');
+  if (selCount > 1) {
+    copyBtn.textContent = 'F5 Copy ' + selCount + ' → VM';
+  } else if (selCount === 1 && selVals[0].type === 'd') {
+    copyBtn.textContent = 'F5 Copy dir → VM';
+  } else {
+    copyBtn.textContent = 'F5 Copy → VM';
+  }
 }
 
 // ── Download ──────────────────────────────────────────────────────────────────
 
 function sfrDownload() {
-  if (!_sfr.snapSel || !_sfr.sid) return;
+  // Single-file download — uses the most recently clicked file (snapSel)
+  if (!_sfr.snapSel || _sfr.snapSel.type !== 'f' || !_sfr.sid) return;
   var url = API + '/file-restore/sessions/download?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapSel.fullPath);
   window.location.href = url;
 }
 
 function sfrDownloadTar() {
+  // tar.gz download — uses the most recently clicked item (snapSel) regardless of type
   if (!_sfr.snapSel || !_sfr.sid) return;
   var url = API + '/file-restore/sessions/download-tar?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapSel.fullPath);
   window.location.href = url;
@@ -13572,17 +13741,16 @@ function sfrDownloadTar() {
 var _sfrCopyPoll = null;
 
 function sfrCopyToVm() {
-  if (!_sfr.snapSel || !_sfr.sid) return;
+  if (!Object.keys(_sfr.snapSels).length || !_sfr.sid) return;
   var dest = document.getElementById('sfrCopyDest');
-  var sep  = _sfr.guestOs === 'windows' ? '\\' : '/';
   var vmDir;
-  if (_sfrVmIsDrives || _sfr.vmPath === '/') {
-    // At drives view: no sensible default dir — leave dest empty for user to type
-    vmDir = _sfr.guestOs === 'windows' ? 'C:\\' : '';
+  if (_sfrVmIsDrives || _sfr.vmPath === '/' || !_sfr.vmPath) {
+    vmDir = _sfr.guestOs === 'windows' ? 'C:\\' : '/tmp';
   } else {
     vmDir = _sfr.vmPath.replace(/[\/\\]+$/, '');
   }
-  dest.value = (vmDir ? vmDir + sep : '') + _sfr.snapSel.name;
+  dest.value = vmDir;
+  document.getElementById('sfrCopyDestLabel').textContent = 'Destination directory in VM:';
   document.getElementById('sfrCopyStatus').textContent = '';
   document.getElementById('sfrCopyProgress').style.display = 'none';
   document.getElementById('sfrCopyBar2').style.width = '0%';
@@ -13624,9 +13792,10 @@ function sfrCopyCancel() {
 var _copy_progress_local = null;
 
 async function sfrDoCopy() {
-  if (!_sfr.snapSel || !_sfr.sid) return;
+  var selPaths = Object.values(_sfr.snapSels).map(function(s) { return s.fullPath; });
+  if (!selPaths.length || !_sfr.sid) return;
   var dest = document.getElementById('sfrCopyDest').value.trim();
-  if (!dest) { toast('Enter destination path', 'error'); return; }
+  if (!dest) { toast('Enter destination directory', 'error'); return; }
   var statusEl  = document.getElementById('sfrCopyStatus');
   var progWrap  = document.getElementById('sfrCopyProgress');
   var progBar   = document.getElementById('sfrCopyBar2');
@@ -13638,14 +13807,16 @@ async function sfrDoCopy() {
   progWrap.style.display = 'none';
 
   try {
-    var r = await apiPost('file-restore/sessions/copy',
-                          { sid: _sfr.sid, snap_path: _sfr.snapSel.fullPath, vm_path: dest });
+    var selVals      = Object.values(_sfr.snapSels);
+    var isSingleFile = selVals.length === 1 && selVals[0].type === 'f';
+    var r = await apiPost('file-restore/sessions/copy-tar',
+                          { sid: _sfr.sid, snap_paths: selPaths, vm_dest_dir: dest,
+                            is_single_file: isSingleFile });
     if (r.error) { statusEl.textContent = 'Error: ' + r.error; copyBtn.disabled = false; return; }
 
     if (!r.async) {
-      // Small file: synchronous completion
       statusEl.textContent = '✓ Copied';
-      toast('Copied to VM: ' + dest, 'success');
+      toast('✓ Copied to VM dir: ' + dest, 'success');
       _sfrLoadVm(_sfr.vmPath);
       copyBtn.disabled = false;
       return;
@@ -13670,7 +13841,7 @@ async function sfrDoCopy() {
           progText.textContent = 'Complete';
           statusEl.textContent = '✓ Copied';
           copyBtn.disabled = false;
-          toast('✓ Copied to VM: ' + dest, 'success');
+          toast('✓ Copied to VM dir: ' + dest, 'success');
           _sfrLoadVm(_sfr.vmPath);
           setTimeout(function() { progWrap.style.display = 'none'; _copy_progress_local = null; }, 3000);
         } else if (p.status === 'error') {
@@ -13704,18 +13875,36 @@ async function sfrDoCopy() {
 
 // ── VM operations ─────────────────────────────────────────────────────────────
 
-async function sfrVmNewFolder() {
+function sfrVmNewFolder() {
   if (!_sfr.sid) return;
-  var name = prompt('New folder name:');
-  if (!name || !name.trim()) return;
-  var sep = _sfr.guestOs === 'windows' ? '\\' : '/';
-  var path = (_sfr.vmPath.replace(/\/$/, '') || '') + sep + name.trim();
+  document.getElementById('sfrMkdirInput').value = '';
+  document.getElementById('sfrMkdirError').textContent = '';
+  document.getElementById('sfrMkdirOverlay').style.display = 'flex';
+  setTimeout(function() { document.getElementById('sfrMkdirInput').focus(); }, 40);
+}
+
+function sfrMkdirCancel() {
+  document.getElementById('sfrMkdirOverlay').style.display = 'none';
+}
+
+async function sfrMkdirConfirm() {
+  var name = document.getElementById('sfrMkdirInput').value.trim();
+  var errEl = document.getElementById('sfrMkdirError');
+  if (!name) { errEl.textContent = 'Please enter a folder name.'; return; }
+  // Strip both / and \ from both ends to handle Linux and Windows paths
+  var sep  = _sfr.guestOs === 'windows' ? '\\' : '/';
+  var base = (_sfr.vmPath || '').replace(/[\/\\]+$/, '');
+  var path = (base || (_sfr.guestOs === 'windows' ? 'C:' : '')) + sep + name;
+  errEl.textContent = '';
   try {
     var r = await apiPost('file-restore/sessions/vm-mkdir', { sid: _sfr.sid, path: path });
-    if (r.error) { toast('mkdir failed: ' + r.error, 'error'); return; }
-    toast('Folder created: ' + path, 'success');
+    if (r.error) { errEl.textContent = 'Failed: ' + r.error; return; }
+    document.getElementById('sfrMkdirOverlay').style.display = 'none';
+    toast('Folder created: ' + name, 'success');
     _sfrLoadVm(_sfr.vmPath);
-  } catch(e) { toast('mkdir error', 'error'); }
+  } catch(e) {
+    errEl.textContent = 'Error: ' + (e.message || e);
+  }
 }
 
 async function sfrVmDelete() {

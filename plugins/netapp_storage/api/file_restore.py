@@ -239,6 +239,86 @@ def _vm_qga_info():
         return {"qga_ok": False, "guest_os": "linux", "os_name": "Unavailable", "os_id": ""}
 
 
+def _vm_qga_info_batch():
+    """Batch QGA probe — checks agent status + OS for multiple VMs in parallel.
+
+    POST body: {"vms": [{"vmid": "116", "mapping_id": "abc"}, ...]}
+    Returns:   {"results": [{vmid, mapping_id, qga_ok, guest_os, os_name, os_id}, ...]}
+
+    Faster than N individual vm-qga-info calls when WORKERS=1 serialises HTTP
+    requests: this endpoint does one cluster/resources call per PVE host, then
+    probes all VMs concurrently with a ThreadPoolExecutor (I/O-bound — threads
+    overlap the PVE/QGA network latency).
+    """
+    import concurrent.futures as _cf
+
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    vms  = data.get("vms", [])
+    if not vms:
+        return {"results": []}
+
+    db = get_db()
+
+    # ── Pre-build per-cluster state (main thread — no locking needed) ──────────
+    pve_by_mid:  dict = {}   # mapping_id  → pve client
+    nodes_by_base: dict = {} # pve._base   → {vmid_str: node_name}
+
+    for vm_spec in vms:
+        mid = str(vm_spec.get("mapping_id", "")).strip()
+        if not mid or mid in pve_by_mid:
+            continue
+        try:
+            mapping = get_mapping(db, mid)
+            pve, _  = _pve_for_mapping(db, mapping)
+            pve_by_mid[mid] = pve
+            if pve._base not in nodes_by_base:
+                r = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
+                nodes_by_base[pve._base] = (
+                    {str(res.get("vmid")): res.get("node")
+                     for res in r.json().get("data", [])}
+                    if r.ok else {}
+                )
+        except Exception as exc:
+            log.debug(f"[sfr] batch setup mapping {mid}: {exc}")
+
+    # ── Per-VM probe (runs in thread pool) ─────────────────────────────────────
+    def _probe_one(vm_spec):
+        vmid = str(vm_spec.get("vmid", "")).strip()
+        mid  = str(vm_spec.get("mapping_id", "")).strip()
+        base = {"vmid": vmid, "mapping_id": mid}
+        if not vmid or mid not in pve_by_mid:
+            return {**base, "qga_ok": False, "guest_os": "linux", "os_name": "", "os_id": ""}
+        try:
+            pve  = pve_by_mid[mid]
+            node = nodes_by_base.get(pve._base, {}).get(vmid)
+            if not node:
+                return {**base, "qga_ok": False, "guest_os": "linux",
+                        "os_name": "VM not found", "os_id": ""}
+            osinfo = sfr_engine.get_osinfo(pve, vmid, node)
+            if osinfo is None:
+                if not sfr_engine.check_qga(pve, vmid, node):
+                    return {**base, "qga_ok": False, "guest_os": "linux",
+                            "os_name": "Agent not running", "os_id": ""}
+                guest_os = sfr_engine.detect_guest_os(pve, vmid, node)
+                return {**base, "qga_ok": True, "guest_os": guest_os,
+                        "os_name": "Windows" if guest_os == "windows" else "Linux",
+                        "os_id":   "mswindows" if guest_os == "windows" else "linux"}
+            return {**base, "qga_ok": True, **osinfo}
+        except Exception as exc:
+            log.debug(f"[sfr] batch probe {vmid}: {exc}")
+            return {**base, "qga_ok": False, "guest_os": "linux",
+                    "os_name": "Unavailable", "os_id": ""}
+
+    max_workers = min(len(vms), 12)
+    with _cf.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(_probe_one, vms))
+
+    return {"results": results}
+
+
 def _close_session():
     err = _require_admin()
     if err:
@@ -590,6 +670,103 @@ def _copy_to_vm():
     return {"ok": True, "async": True}
 
 
+def _copy_tar_to_vm():
+    err = _require_admin()
+    if err:
+        return err
+    data        = request.get_json() or {}
+    sid            = str(data.get("sid", "")).strip()
+    snap_paths     = data.get("snap_paths", [])
+    vm_dest_dir    = str(data.get("vm_dest_dir", "")).strip()
+    is_single_file = bool(data.get("is_single_file", False))
+    if not sid or not snap_paths or not vm_dest_dir:
+        return {"error": "sid, snap_paths and vm_dest_dir required"}, 400
+    if not isinstance(snap_paths, list) or not snap_paths:
+        return {"error": "snap_paths must be a non-empty list"}, 400
+
+    db   = get_db()
+    sess = _get_sess(db, sid)
+    if not sess:
+        return {"error": "Session not found"}, 404
+    if not sess["partition"]:
+        return {"error": "No partition mounted"}, 400
+
+    mount_path  = sess["mount_path"]
+    vmid        = sess["vmid"]
+    node        = sess["node"]
+    guest_os    = sess["guest_os"]
+    job_id      = sess.get("job_id", "")
+
+    try:
+        pve = _pve_for_sess(db, sess)
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+    _copy_progress[sid] = {"status": "running", "bytes": 0, "total": -1, "error": ""}
+    _copy_cancelled.discard(sid)
+
+    names = ", ".join(p.rstrip("/").split("/")[-1] for p in snap_paths[:3])
+    if len(snap_paths) > 3:
+        names += f" (+{len(snap_paths)-3} more)"
+    _sfr_job_log(db, job_id, f"Copy (tar) started: {names} → VM dir:{vm_dest_dir}")
+
+    def _run():
+        _last_touch = [time.time()]
+
+        def _cb(done, total):
+            _copy_progress[sid].update({"bytes": done, "total": total})
+            now = time.time()
+            if now - _last_touch[0] >= 60:
+                try:
+                    _touch(get_db(), sid)
+                except Exception:
+                    pass
+                _last_touch[0] = now
+
+        def _cancel_check():
+            if sid in _copy_cancelled:
+                raise RuntimeError("Cancelled by user")
+
+        try:
+            sfr_engine.copy_tar_to_vm(
+                pve, mount_path, snap_paths, vmid, node, vm_dest_dir,
+                guest_os, is_single_file=is_single_file,
+                progress_cb=_cb, cancel_check=_cancel_check,
+            )
+            total      = _copy_progress[sid].get("total", 0)
+            done_bytes = _copy_progress[sid].get("bytes", 0)
+            _copy_progress[sid].update({"status": "done",
+                                         "bytes": max(total, done_bytes)})
+            try:
+                _db = get_db()
+                _touch(_db, sid)
+                _sfr_job_log(_db, job_id,
+                             f"Copy (tar) complete: {names} → VM dir:{vm_dest_dir}")
+            except Exception:
+                pass
+        except Exception as e:
+            msg = str(e)
+            if sid in _copy_cancelled:
+                log.info(f"[sfr] copy_tar {sid}: cancelled")
+                _copy_progress[sid].update({"status": "cancelled", "error": ""})
+                _copy_cancelled.discard(sid)
+                try:
+                    _sfr_job_log(get_db(), job_id, f"Copy (tar) cancelled: {names}")
+                except Exception:
+                    pass
+            else:
+                log.warning(f"[sfr] copy_tar {sid}: {msg}")
+                _copy_progress[sid].update({"status": "error", "error": msg})
+                try:
+                    _sfr_job_log(get_db(), job_id,
+                                 f"Copy (tar) failed: {names} — {msg}")
+                except Exception:
+                    pass
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "async": True}
+
+
 def _copy_status():
     err = _require_admin()
     if err:
@@ -706,8 +883,9 @@ def _umount_disk():
 
 def register_routes():
     R = register_plugin_route
-    R(PLUGIN_ID, f"{_BASE}/sessions/create",           _create_session)
-    R(PLUGIN_ID, f"{_BASE}/sessions/vm-qga-info",     _vm_qga_info)
+    R(PLUGIN_ID, f"{_BASE}/sessions/create",                 _create_session)
+    R(PLUGIN_ID, f"{_BASE}/sessions/vm-qga-info",           _vm_qga_info)
+    R(PLUGIN_ID, f"{_BASE}/sessions/vm-qga-info-batch",     _vm_qga_info_batch)
     R(PLUGIN_ID, f"{_BASE}/sessions/close",            _close_session)
     R(PLUGIN_ID, f"{_BASE}/sessions/umount",           _umount_disk)
     R(PLUGIN_ID, f"{_BASE}/sessions/list-disks",       _list_disks)
@@ -718,6 +896,7 @@ def register_routes():
     R(PLUGIN_ID, f"{_BASE}/sessions/vm-mkdir",         _vm_mkdir)
     R(PLUGIN_ID, f"{_BASE}/sessions/vm-delete",        _vm_delete)
     R(PLUGIN_ID, f"{_BASE}/sessions/copy",             _copy_to_vm)
+    R(PLUGIN_ID, f"{_BASE}/sessions/copy-tar",        _copy_tar_to_vm)
     R(PLUGIN_ID, f"{_BASE}/sessions/copy-status",     _copy_status)
     R(PLUGIN_ID, f"{_BASE}/sessions/copy-cancel",     _copy_cancel)
     R(PLUGIN_ID, f"{_BASE}/sessions/download",         _download_file)

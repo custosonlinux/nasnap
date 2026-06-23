@@ -136,18 +136,33 @@ def detect_guest_os(pve, vmid, node):
 # ── SAN disk listing ─────────────────────────────────────────────────────────
 
 def list_san_vm_disks(pve, vg_name, vmid):
-    """List LV names for a VM in a SAN datastore (from the live VG).
-    Returns names like ['vm-105-disk-0', 'vm-105-disk-1'] sorted.
+    """List LV names + sizes for a VM in a SAN datastore (from the live VG).
+    Returns [{"path": "vm-105-disk-0", "size_str": "40 GB"}, ...] sorted by path.
     """
     from ._helpers import ssh_run
     try:
         out = ssh_run(
             pve.host, pve.ssh_user, pve.ssh_password,
-            f"lvs --noheadings -o lv_name {shlex.quote(vg_name)} 2>/dev/null"
+            f"lvs --noheadings -o lv_name,lv_size --units g --nosuffix "
+            f"{shlex.quote(vg_name)} 2>/dev/null"
             f" | grep 'vm-{int(vmid)}-disk' || true",
             capture=True, timeout=15,
         )
-        return sorted(l.strip() for l in out.strip().splitlines() if l.strip())
+        disks = []
+        for line in out.strip().splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            name = parts[0].strip()
+            size_str = ""
+            if len(parts) >= 2:
+                try:
+                    gb = float(parts[1])
+                    size_str = f"{gb:.0f} GB" if gb >= 1 else f"{gb * 1024:.0f} MB"
+                except ValueError:
+                    pass
+            disks.append({"path": name, "size_str": size_str})
+        return sorted(disks, key=lambda d: d["path"])
     except Exception as e:
         log.warning(f"[sfr] list_san_vm_disks: {e}")
         return []
@@ -156,8 +171,10 @@ def list_san_vm_disks(pve, vg_name, vmid):
 # ── Snapshot disk listing ─────────────────────────────────────────────────────
 
 def list_snap_disks(pve, nfs_mount_path, snap_name, vmid):
-    """List QCOW2 files for a VM inside an ONTAP snapshot (SSH ls on PVE host).
-    PVE NFS storage places VM images under images/{vmid}/ on the volume.
+    """List QCOW2 files + sizes for a VM inside an ONTAP snapshot.
+    Returns [{"path": "/full/path/vm-116-disk-0.qcow2", "size_str": "12 GB"}, ...].
+    Size is the QCOW2 file size on disk (not virtual size) — sufficient to
+    distinguish tiny EFI/TPM disks from data disks.
     """
     from ._helpers import ssh_run
     snap_images = f"{nfs_mount_path}/.snapshot/{snap_name}/images/{vmid}"
@@ -167,17 +184,45 @@ def list_snap_disks(pve, nfs_mount_path, snap_name, vmid):
             f"ls {shlex.quote(snap_images)}/*.qcow2 2>/dev/null || true",
             capture=True, timeout=15,
         )
-        disks = sorted(l.strip() for l in out.strip().splitlines() if l.strip().endswith(".qcow2"))
-        if disks:
-            return disks
-        # Fallback: search one level deeper (non-standard layouts)
-        out2 = ssh_run(
-            pve.host, pve.ssh_user, pve.ssh_password,
-            f"find {shlex.quote(nfs_mount_path + '/.snapshot/' + snap_name)} "
-            f"-maxdepth 4 -name '*.qcow2' 2>/dev/null | grep '/{vmid}/' || true",
-            capture=True, timeout=20,
-        )
-        return sorted(l.strip() for l in out2.strip().splitlines() if l.strip().endswith(".qcow2"))
+        paths = sorted(l.strip() for l in out.strip().splitlines() if l.strip().endswith(".qcow2"))
+        if not paths:
+            # Fallback: search one level deeper (non-standard layouts)
+            out2 = ssh_run(
+                pve.host, pve.ssh_user, pve.ssh_password,
+                f"find {shlex.quote(nfs_mount_path + '/.snapshot/' + snap_name)} "
+                f"-maxdepth 4 -name '*.qcow2' 2>/dev/null | grep '/{vmid}/' || true",
+                capture=True, timeout=20,
+            )
+            paths = sorted(
+                l.strip() for l in out2.strip().splitlines() if l.strip().endswith(".qcow2")
+            )
+        if not paths:
+            return []
+        # Fetch on-disk sizes in one SSH call
+        sizes: dict[str, str] = {}
+        try:
+            stat_out = ssh_run(
+                pve.host, pve.ssh_user, pve.ssh_password,
+                "stat -c '%n %s' " + " ".join(shlex.quote(p) for p in paths),
+                capture=True, timeout=15,
+            )
+            for line in stat_out.strip().splitlines():
+                parts = line.rsplit(" ", 1)
+                if len(parts) == 2:
+                    fname, sz_str = parts[0].strip(), parts[1].strip()
+                    try:
+                        sz = int(sz_str)
+                        if sz >= 1 << 30:
+                            sizes[fname] = f"{sz >> 30} GB"
+                        elif sz >= 1 << 20:
+                            sizes[fname] = f"{sz >> 20} MB"
+                        else:
+                            sizes[fname] = f"{sz >> 10} KB"
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+        return [{"path": p, "size_str": sizes.get(p, "")} for p in paths]
     except Exception as e:
         log.warning(f"[sfr] list_snap_disks: {e}")
         return []
@@ -961,9 +1006,19 @@ def _parse_dir_windows(output):
 
 def vm_mkdir(pve, vmid, node, path, guest_os="linux"):
     if guest_os == "windows":
-        _qga_exec(pve, vmid, node, ["cmd.exe", "/c", f"mkdir \"{path}\""], timeout=15)
+        ps_path = path.replace("'", "''")
+        _, stderr, rc = _qga_exec(
+            pve, vmid, node,
+            ["powershell.exe", "-NonInteractive", "-Command",
+             f"New-Item -ItemType Directory -Path '{ps_path}'"],
+            timeout=15,
+        )
+        if rc != 0:
+            raise RuntimeError(stderr.strip()[:200] or f"mkdir failed (rc={rc})")
     else:
-        _qga_exec(pve, vmid, node, ["mkdir", "-p", path], timeout=15)
+        _, _, rc = _qga_exec(pve, vmid, node, ["mkdir", "-p", path], timeout=15)
+        if rc != 0:
+            raise RuntimeError(f"mkdir -p failed (rc={rc})")
 
 
 def vm_delete(pve, vmid, node, path, guest_os="linux"):
@@ -1050,7 +1105,7 @@ def _qga_write_single(pve, vmid, node, host, user, pw, src_path, vm_dest_path):
         raise RuntimeError("base64 returned empty — file may be empty or unreadable")
     r = pve._api_post(
         f"{pve._base}/nodes/{node}/qemu/{vmid}/agent/file-write",
-        {"file": vm_dest_path, "content": b64, "encode": 1},
+        {"file": vm_dest_path, "content": b64},
     )
     if not r.ok:
         raise RuntimeError(f"QGA file-write failed ({r.status_code}): {r.text[:200]}")
@@ -1076,7 +1131,7 @@ def _probe_qga_fw_limit(pve, vmid, node):
         data = _b64.b64encode(bytes(n)).decode()
         r = pve._api_post(
             f"{pve._base}/nodes/{node}/qemu/{vmid}/agent/file-write",
-            {"file": tmp, "content": data, "encode": 1},
+            {"file": tmp, "content": data},
         )
         return r.ok
 
@@ -1158,8 +1213,10 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
     if progress_cb:
         progress_cb(0, file_size)
 
-    # Discover actual chunk limit once per PVE endpoint
-    chunk_size = _probe_qga_fw_limit(pve, vmid, node)
+    # Discover actual chunk limit once per PVE endpoint.
+    # Must be a multiple of 3 so every chunk's base64 has no mid-stream '=' padding —
+    # allowing the chunk files to be concatenated and decoded as one continuous stream.
+    chunk_size  = (_probe_qga_fw_limit(pve, vmid, node) // 3) * 3
 
     token       = uuid.uuid4().hex[:8]
     tmp_prefix  = f"/tmp/.nasnap_sfr_{token}"
@@ -1192,7 +1249,7 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
                     cpath     = f"{tmp_prefix}_c{chunk_idx:06d}"
                     r = pve._api_post(
                         f"{pve._base}/nodes/{node}/qemu/{vmid}/agent/file-write",
-                        {"file": cpath, "content": piece_b64, "encode": 1},
+                        {"file": cpath, "content": piece_b64},
                     )
                     if not r.ok:
                         raise RuntimeError(
@@ -1216,11 +1273,14 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
         if not chunk_paths:
             raise RuntimeError("No data read from source file")
 
-        # Assemble in VM: ls | sort | xargs cat → dest, then clean up
-        log.info(f"[sfr] concat {len(chunk_paths)} chunks → {vm_dest_path}")
-        pat     = shlex.quote(f"{tmp_prefix}_c??????")
-        cat_cmd = (
-            f"ls {pat} | sort | xargs cat > {shlex.quote(vm_dest_path)}"
+        # PVE agent/file-write writes content verbatim, so each chunk file holds
+        # base64 text.  Concatenate all chunks and decode in one pass — valid because
+        # chunk_size is a multiple of 3, so no chunk produces mid-stream '=' padding.
+        log.info(f"[sfr] concat+decode {len(chunk_paths)} chunks → {vm_dest_path}")
+        chunks_q = " ".join(shlex.quote(p) for p in chunk_paths)
+        pat      = f"{tmp_prefix}_c??????"  # glob for cleanup only
+        cat_cmd  = (
+            f"cat {chunks_q} | base64 -d > {shlex.quote(vm_dest_path)}"
             f" && rm -f {pat}"
         )
         _, stderr, rc = _qga_exec(pve, vmid, node, ["bash", "-c", cat_cmd], timeout=300)
@@ -1230,8 +1290,10 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
     except Exception:
         if chunk_paths:
             try:
-                pat = shlex.quote(f"{tmp_prefix}_c??????")
-                _qga_exec(pve, vmid, node, ["bash", "-c", f"rm -f {pat}"], timeout=30)
+                pat = f"{tmp_prefix}_c??????"
+                _qga_exec(pve, vmid, node,
+                          ["bash", "-c", f"rm -f {pat}"],
+                          timeout=30)
             except Exception:
                 pass
         raise
@@ -1263,3 +1325,245 @@ def snap_tar_bytes(pve, mount_path, rel_path):
                   f"tar -czf - -C {shlex.quote(parent)} {shlex.quote(name)} | base64",
                   capture=True, timeout=300)
     return base64.b64decode(b64.replace("\n", "").replace("\r", "").strip())
+
+
+def _copy_single_file_windows(pve, vmid, node, src_full_path, vm_dest_dir,
+                              progress_cb=None, cancel_check=None):
+    """Copy one file from the snapshot mount into a Windows VM via QGA + PowerShell.
+
+    PVE agent/file-write writes content verbatim (no base64 decoding happens).
+    We exploit that by writing base64 text chunks to Windows temp files, then
+    use PowerShell to concatenate, decode, and write the final binary file.
+    chunk_size is a fixed 30 KB (multiple of 3) — no probe needed, well within
+    PVE's default pveproxy limit, and avoids writing /tmp probe files in the VM.
+    """
+    import base64 as _b64
+    from ._helpers import SshSession
+
+    CHUNK = 30_720  # 30 KB raw → 40 KB base64; safe for all known PVE limits
+
+    token      = uuid.uuid4().hex[:8]
+    tmp_prefix = f"C:\\Windows\\Temp\\_nasnap_sfr_{token}"
+    chunk_paths: list[str] = []
+    bytes_done  = 0
+    chunk_idx   = 0
+
+    file_size = 0
+    try:
+        from ._helpers import ssh_run as _sr
+        sz = _sr(pve.host, pve.ssh_user, pve.ssh_password,
+                 f"stat -c '%s' {shlex.quote(src_full_path)} 2>/dev/null || echo 0",
+                 capture=True, timeout=10).strip()
+        file_size = int(sz) if sz.isdigit() else 0
+    except Exception:
+        pass
+
+    if progress_cb:
+        progress_cb(0, file_size or 1)
+
+    try:
+        with SshSession(pve.host, pve.ssh_user, pve.ssh_password) as ssh:
+            _, out_fh, _ = ssh._client.exec_command(
+                f"cat {shlex.quote(src_full_path)}", timeout=600
+            )
+            try:
+                while True:
+                    if cancel_check:
+                        cancel_check()
+                    raw = _read_n(out_fh, CHUNK)
+                    if not raw:
+                        break
+                    piece_b64 = _b64.b64encode(raw).decode()
+                    cpath     = f"{tmp_prefix}_c{chunk_idx:06d}"
+                    r = pve._api_post(
+                        f"{pve._base}/nodes/{node}/qemu/{vmid}/agent/file-write",
+                        {"file": cpath, "content": piece_b64},
+                    )
+                    if not r.ok:
+                        raise RuntimeError(
+                            f"QGA file-write chunk {chunk_idx} failed "
+                            f"({r.status_code}): {r.text[:120]}"
+                        )
+                    chunk_paths.append(cpath)
+                    chunk_idx  += 1
+                    bytes_done += len(raw)
+                    if progress_cb:
+                        progress_cb(bytes_done, file_size or bytes_done)
+            finally:
+                try:
+                    out_fh.channel.recv_exit_status()
+                except Exception:
+                    pass
+
+        if not chunk_paths:
+            raise RuntimeError("No data read from source file")
+
+        filename  = src_full_path.rsplit("/", 1)[-1]
+        dest_file = vm_dest_dir.rstrip("\\") + "\\" + filename
+        dest_ps   = dest_file.replace("'", "''")
+        chunks_ps = ", ".join(f"'{c.replace(chr(39), chr(39)*2)}'" for c in chunk_paths)
+
+        # PowerShell: concat chunk base64 strings (already ordered) → decode → write
+        ps_script = (
+            "$sb=[System.Text.StringBuilder]::new();"
+            f"@({chunks_ps})|ForEach-Object{{$sb.Append("
+            "[System.IO.File]::ReadAllText($_, [System.Text.Encoding]::ASCII)"
+            ")|Out-Null}};"
+            f"[System.IO.File]::WriteAllBytes('{dest_ps}',"
+            "[System.Convert]::FromBase64String($sb.ToString()));"
+            f"@({chunks_ps})|ForEach-Object"
+            "{{Remove-Item $_ -Force -ErrorAction SilentlyContinue}}"
+        )
+        log.info(f"[sfr] win copy: {len(chunk_paths)} chunk(s) → {dest_file} ({vmid})")
+        _, stderr, rc = _qga_exec(
+            pve, vmid, node,
+            ["powershell.exe", "-NonInteractive", "-Command", ps_script],
+            timeout=300,
+        )
+        if rc != 0:
+            raise RuntimeError(f"PowerShell write failed (rc={rc}): {stderr[:300]}")
+
+        if progress_cb:
+            progress_cb(file_size or bytes_done, file_size or bytes_done)
+
+    except Exception:
+        if chunk_paths:
+            try:
+                chunks_cl = ", ".join(f"'{c}'" for c in chunk_paths)
+                _qga_exec(
+                    pve, vmid, node,
+                    ["powershell.exe", "-NonInteractive", "-Command",
+                     f"@({chunks_cl})|ForEach-Object"
+                     "{{Remove-Item $_ -Force -ErrorAction SilentlyContinue}}"],
+                    timeout=30,
+                )
+            except Exception:
+                pass
+        raise
+
+
+def copy_tar_to_vm(pve, mount_path, snap_paths, vmid, node, vm_dest_dir,
+                   guest_os="linux", is_single_file=False,
+                   progress_cb=None, cancel_check=None):
+    """Copy files/dirs from the mounted snapshot into the VM via QGA.
+
+    snap_paths:     list of absolute paths within the snapshot mount volume.
+    vm_dest_dir:    destination directory in the VM (names preserved).
+    is_single_file: hint from the UI that exactly one regular file is selected;
+                    enables the Windows PowerShell copy path.
+    Linux VMs:      tar stream → base64 chunks → base64 -d | tar xzf.
+    Windows VMs:    single-file only; multi-file / directories not supported.
+    """
+    import base64 as _b64
+    from ._helpers import SshSession, ssh_run
+
+    if guest_os == "windows":
+        if is_single_file and len(snap_paths) == 1:
+            mnt = f"{mount_path}/mnt"
+            src = f"{mnt}/{snap_paths[0].lstrip('/')}"
+            _copy_single_file_windows(
+                pve, vmid, node, src, vm_dest_dir,
+                progress_cb=progress_cb, cancel_check=cancel_check,
+            )
+            return
+        raise RuntimeError(
+            "Multi-file / directory copy is not supported for Windows VMs. "
+            "Use ↓ tar.gz to download and restore manually."
+        )
+
+    mnt       = f"{mount_path}/mnt"
+    rel_paths = [p.lstrip("/") for p in snap_paths if p.strip()]
+    if not rel_paths:
+        raise RuntimeError("No valid paths specified")
+
+    # Estimate uncompressed source size for progress bar
+    total_bytes = 0
+    try:
+        size_cmd = ("du -sb " +
+                    " ".join(shlex.quote(f"{mnt}/{p}") for p in rel_paths) +
+                    " 2>/dev/null | awk '{s+=$1} END{print s}'")
+        size_str = ssh_run(pve.host, pve.ssh_user, pve.ssh_password,
+                           size_cmd, capture=True, timeout=30).strip()
+        total_bytes = int(size_str) if size_str and size_str.isdigit() else 0
+    except Exception:
+        pass
+
+    if progress_cb:
+        progress_cb(0, total_bytes)
+
+    chunk_size  = (_probe_qga_fw_limit(pve, vmid, node) // 3) * 3
+    token       = uuid.uuid4().hex[:8]
+    tmp_prefix  = f"/tmp/.nasnap_sfr_{token}"
+    chunk_paths = []
+    bytes_done  = 0
+    chunk_idx   = 0
+
+    paths_arg = " ".join(shlex.quote(p) for p in rel_paths)
+    log.info(f"[sfr] copy_tar_to_vm: {len(rel_paths)} item(s) → VM:{vm_dest_dir} ({vmid})")
+
+    try:
+        with SshSession(pve.host, pve.ssh_user, pve.ssh_password) as ssh:
+            _, out_fh, _ = ssh._client.exec_command(
+                f"tar -czf - -C {shlex.quote(mnt)} {paths_arg}",
+                timeout=600,
+            )
+            try:
+                while True:
+                    if cancel_check:
+                        cancel_check()
+                    raw = _read_n(out_fh, chunk_size)
+                    if not raw:
+                        break
+                    piece_b64 = _b64.b64encode(raw).decode()
+                    cpath     = f"{tmp_prefix}_c{chunk_idx:06d}"
+                    r = pve._api_post(
+                        f"{pve._base}/nodes/{node}/qemu/{vmid}/agent/file-write",
+                        {"file": cpath, "content": piece_b64},
+                    )
+                    if not r.ok:
+                        raise RuntimeError(
+                            f"QGA file-write chunk {chunk_idx} failed "
+                            f"({r.status_code}): {r.text[:120]}"
+                        )
+                    chunk_paths.append(cpath)
+                    chunk_idx  += 1
+                    bytes_done += len(raw)
+                    if progress_cb:
+                        progress_cb(bytes_done, total_bytes)
+            finally:
+                try:
+                    out_fh.channel.recv_exit_status()
+                except Exception:
+                    pass
+
+        if not chunk_paths:
+            raise RuntimeError("tar produced no output — paths may be empty or inaccessible")
+
+        # PVE agent/file-write writes content verbatim, so each chunk file holds base64
+        # text.  Stream all chunks through base64 -d directly into tar — valid because
+        # chunk_size is a multiple of 3, so no chunk produces mid-stream '=' padding.
+        log.info(f"[sfr] extracting {len(chunk_paths)}-chunk tar into VM:{vm_dest_dir}")
+        chunks_q = " ".join(shlex.quote(p) for p in chunk_paths)
+        pat      = f"{tmp_prefix}_c??????"  # glob for cleanup only
+        dest_q   = shlex.quote(vm_dest_dir)
+        cmd      = (
+            f"cat {chunks_q} | base64 -d | tar xzf - -C {dest_q}"
+            f" && rm -f {pat}"
+        )
+        _, stderr, rc = _qga_exec(pve, vmid, node, ["bash", "-c", cmd], timeout=600)
+        if rc != 0:
+            raise RuntimeError(f"tar extract in VM failed (rc={rc}): {stderr[:300]}")
+
+        if progress_cb:
+            progress_cb(total_bytes or bytes_done, total_bytes or bytes_done)
+
+    except Exception:
+        if chunk_paths:
+            try:
+                pat = f"{tmp_prefix}_c??????"
+                _qga_exec(pve, vmid, node,
+                          ["bash", "-c", f"rm -f {pat}"],
+                          timeout=30)
+            except Exception:
+                pass
+        raise

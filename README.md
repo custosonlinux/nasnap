@@ -2,7 +2,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI (light theme available).
 
-**Current stable: 1.4.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.5.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -40,7 +40,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Tamperproof Snapshots (ONTAP Snapshot Locking / WORM, requires ONTAP 9.12.1+) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | SnapMirror Destination Tamperproof (independent lock duration) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Restore — SFSR (Single File / VM Disk, NFS only) | ✅ | ❌ n/a | ❌ n/a |
-| Single File Restore (SFR) — copy file from snapshot into live VM via QGA | ✅ | ❌ n/a | ❌ n/a |
+| Single File Restore (SFR) — copy single file or multi-file/dir from snapshot into live VM via QGA | ✅ | ❌ n/a | ❌ n/a |
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
 | VM Clone from snapshot | ✅ | 🟡 Beta | 🟡 Beta¹ |
@@ -580,10 +580,10 @@ Before the first byte is sent, NaSnap auto-probes PVE's actual `file-write` payl
 
 ### Supported VM types
 
-| VM | Small files (≤ 4 MB) | Large files (> 4 MB) |
+| VM | Copy to VM | Multi-file / directory |
 |---|---|---|
-| Linux (QEMU GA) | ✅ Single QGA write | ✅ Chunked via QGA |
-| Windows (QEMU GA) | ✅ Single QGA write | ❌ Use ↓ Download |
+| Linux (QEMU GA) | ✅ Single file + multi-file + directories | ✅ tar stream via QGA |
+| Windows (QEMU GA) | ✅ Single file (PowerShell QGA copy) | ❌ Use ↓ tar.gz to download and restore manually |
 
 ---
 
