@@ -1177,7 +1177,7 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
         with SshSession(host, user, pw) as ssh:
             # Stream the entire file in one SSH channel — no per-block dd+skip overhead.
             _, out_fh, err_fh = ssh._client.exec_command(
-                f"cat {shlex.quote(src_path)}", timeout=7200
+                f"cat {shlex.quote(src_path)}", timeout=600
             )
             try:
                 while True:
