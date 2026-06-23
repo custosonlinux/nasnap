@@ -36,10 +36,8 @@ def _utcnow():
 
 
 def _require_admin():
-    from nasnap_core.models.permissions import ROLE_ADMIN
-    from nasnap_core.utils.auth import load_users
-    username = request.session.get("user", "")
-    if load_users().get(username, {}).get("role") != ROLE_ADMIN:
+    from flask import request
+    if request.session.get("role") != "admin":
         return {"error": "Admin access required"}, 403
     return None
 

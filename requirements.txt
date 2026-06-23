@@ -5,3 +5,4 @@ requests>=2.31
 gunicorn>=22.0
 paramiko>=3.0
 croniter>=2.0
+ldap3>=2.9

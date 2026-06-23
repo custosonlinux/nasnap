@@ -35,11 +35,7 @@ from ..core._helpers import PLUGIN_ID  # noqa: F401
 
 
 def _require_admin():
-    from nasnap_core.utils.auth import load_users
-    from nasnap_core.models.permissions import ROLE_ADMIN
-    username = request.session.get("user", "")
-    users = load_users()
-    if users.get(username, {}).get("role") != ROLE_ADMIN:
+    if request.session.get("role") != "admin":
         return {"error": "Admin access required"}, 403
     return None
 
@@ -1268,6 +1264,150 @@ def _pve_cleanup():
     return {"results": items}
 
 
+def _ensure_ldap_row(db):
+    if not db.query_one("SELECT id FROM np_ldap_config WHERE id='default'"):
+        db.execute("INSERT INTO np_ldap_config (id, updated_at) VALUES ('default', ?)",
+                   (datetime.now(timezone.utc).isoformat(),))
+
+
+def _ldap_get():
+    db = get_db()
+    _ensure_ldap_row(db)
+    row = db.query_one("SELECT * FROM np_ldap_config WHERE id='default'")
+    d = dict(row)
+    return jsonify({
+        'enabled':         bool(d.get('enabled', 0)),
+        'server':          d.get('server', ''),
+        'port':            d.get('port', 389),
+        'use_ssl':         bool(d.get('use_ssl', 0)),
+        'use_tls':         bool(d.get('use_tls', 1)),
+        'bind_dn':         d.get('bind_dn', ''),
+        'base_dn':         d.get('base_dn', ''),
+        'user_filter':     d.get('user_filter', '(sAMAccountName={username})'),
+        'admin_group_dn':  d.get('admin_group_dn', ''),
+        'viewer_group_dn': d.get('viewer_group_dn', ''),
+        'has_password':    bool(d.get('bind_password_enc', '')),
+    })
+
+
+def _ldap_save():
+    err = _require_admin()
+    if err:
+        return err
+    db = get_db()
+    _ensure_ldap_row(db)
+    data = request.get_json() or {}
+    now = datetime.now(timezone.utc).isoformat()
+
+    enabled      = 1 if data.get('enabled') else 0
+    server       = data.get('server', '').strip()
+    port         = int(data.get('port') or 389)
+    use_ssl      = 1 if data.get('use_ssl') else 0
+    use_tls      = 1 if data.get('use_tls') else 0
+    bind_dn      = data.get('bind_dn', '').strip()
+    base_dn      = data.get('base_dn', '').strip()
+    user_filter  = data.get('user_filter', '').strip() or '(sAMAccountName={username})'
+    admin_grp    = data.get('admin_group_dn', '').strip()
+    viewer_grp   = data.get('viewer_group_dn', '').strip()
+
+    if data.get('bind_password'):
+        pw_enc = db._encrypt(data['bind_password'])
+        db.execute(
+            "UPDATE np_ldap_config SET enabled=?,server=?,port=?,use_ssl=?,use_tls=?,"
+            "bind_dn=?,bind_password_enc=?,base_dn=?,user_filter=?,admin_group_dn=?,"
+            "viewer_group_dn=?,updated_at=? WHERE id='default'",
+            (enabled, server, port, use_ssl, use_tls, bind_dn, pw_enc, base_dn,
+             user_filter, admin_grp, viewer_grp, now),
+        )
+    else:
+        db.execute(
+            "UPDATE np_ldap_config SET enabled=?,server=?,port=?,use_ssl=?,use_tls=?,"
+            "bind_dn=?,base_dn=?,user_filter=?,admin_group_dn=?,viewer_group_dn=?,"
+            "updated_at=? WHERE id='default'",
+            (enabled, server, port, use_ssl, use_tls, bind_dn, base_dn,
+             user_filter, admin_grp, viewer_grp, now),
+        )
+    log.info("[netapp_storage] LDAP config saved")
+    return jsonify({'success': True})
+
+
+def _ldap_test():
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json() or {}
+    db = get_db()
+    _ensure_ldap_row(db)
+    saved = dict(db.query_one("SELECT * FROM np_ldap_config WHERE id='default'") or {})
+
+    server      = (data.get('server') or saved.get('server') or '').strip()
+    port        = int(data.get('port') or saved.get('port') or 389)
+    use_ssl     = bool(data.get('use_ssl') if 'use_ssl' in data else saved.get('use_ssl', False))
+    use_tls     = bool(data.get('use_tls') if 'use_tls' in data else saved.get('use_tls', True))
+    bind_dn     = (data.get('bind_dn') or saved.get('bind_dn') or '').strip()
+    base_dn     = (data.get('base_dn') or saved.get('base_dn') or '').strip()
+    user_filter = (data.get('user_filter') or saved.get('user_filter') or '(sAMAccountName={username})').strip()
+    test_user   = (data.get('test_username') or '').strip()
+
+    if data.get('bind_password'):
+        bind_pw = data['bind_password']
+    elif saved.get('bind_password_enc'):
+        try:
+            bind_pw = db._decrypt(saved['bind_password_enc'])
+        except Exception:
+            bind_pw = ''
+    else:
+        bind_pw = ''
+
+    if not server:
+        return jsonify({'success': False, 'error': 'LDAP server not configured'})
+
+    try:
+        import ldap3
+        import ldap3.utils.conv
+    except ImportError:
+        return jsonify({'success': False, 'error': 'ldap3 library not installed in container'})
+
+    try:
+        srv = ldap3.Server(host=server, port=port, use_ssl=use_ssl,
+                           connect_timeout=10, get_info=ldap3.ALL)
+        conn = ldap3.Connection(srv, user=bind_dn, password=bind_pw,
+                                authentication=ldap3.SIMPLE, auto_bind=False)
+        conn.open()
+        if use_tls and not use_ssl:
+            conn.start_tls()
+        if not conn.bind():
+            conn.unbind()
+            desc = conn.result.get('description', 'unknown') if conn.result else 'unknown'
+            return jsonify({'success': False, 'error': f'Service account bind failed: {desc}'})
+
+        result = {'success': True}
+        if srv.info and srv.info.vendor_name:
+            result['server_info'] = str(srv.info.vendor_name)
+
+        if test_user and base_dn:
+            safe_u = ldap3.utils.conv.escape_filter_chars(test_user)
+            uf = user_filter.replace('{username}', safe_u)
+            conn.search(base_dn, uf, attributes=['distinguishedName', 'memberOf', 'displayName'])
+            if conn.entries:
+                entry = conn.entries[0]
+                groups = [str(m) for m in entry.memberOf] if hasattr(entry, 'memberOf') and entry.memberOf else []
+                dn_attr = str(entry.displayName) if hasattr(entry, 'displayName') and entry.displayName else ''
+                result['user_found'] = True
+                result['user_dn'] = entry.entry_dn
+                result['display_name'] = dn_attr
+                result['groups'] = groups
+            else:
+                result['user_found'] = False
+
+        conn.unbind()
+        return jsonify(result)
+
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)})
+
+
 def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/smtp',              _smtp_get)
     register_plugin_route(PLUGIN_ID, 'settings/smtp/save',         _smtp_save)
@@ -1282,3 +1422,6 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/db-backup-run-now', _backup_run_now)
     register_plugin_route(PLUGIN_ID, 'settings/pve-health',        _pve_health_check)
     register_plugin_route(PLUGIN_ID, 'settings/pve-cleanup',       _pve_cleanup)
+    register_plugin_route(PLUGIN_ID, 'settings/ldap',              _ldap_get)
+    register_plugin_route(PLUGIN_ID, 'settings/ldap/save',         _ldap_save)
+    register_plugin_route(PLUGIN_ID, 'settings/ldap/test',         _ldap_test)

@@ -20,6 +20,7 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Import VMs from Datastore** *(Alpha)* — adopt an existing ONTAP volume with live VMs without reprovisioning. Reads the snapmanifest from the volume, reconstructs VM inventory, reassigns VMIDs on conflicts, and registers the datastore.
 - **Datastore Index** — every NFS snapshot is self-describing via a `.nasnap/index.json` file written before each ONTAP snapshot. The index travels inside the snapshot, enabling import of historical snapshots on any NaSnap instance without a database — even after a complete reinstall. An optional startup auto-scan reconciles all visible datastores automatically.
 - **Manage users** — built-in admin/viewer roles with Argon2id password hashing and AES-256-GCM encrypted ONTAP credentials.
+- **Active Directory / LDAP authentication** *(Beta)* — connect NaSnap to your AD domain. Users authenticate with their AD credentials; group membership determines the role (Admin or Viewer). Local accounts always remain active as a fallback — even when AD is unreachable.
 
 All operations run as background jobs with live log streaming. Every snapshot embeds a manifest (VM inventory + configs) that travels inside the ONTAP snapshot, making restores self-contained.
 
@@ -58,6 +59,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | DR Failback | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | Built-in Auth (admin / viewer, Argon2id) | ✅ | ✅ | ✅ |
+| Active Directory / LDAP Authentication (group→role mapping) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
 | AES-256-GCM Credential Encryption at Rest | ✅ | ✅ | ✅ |
 | DB Export / Import (full config + user backup) | ✅ | ✅ | ✅ |
 | Light / Dark Theme | ✅ | ✅ | ✅ |
@@ -237,6 +239,24 @@ Open **`/admin`** (top bar → Users) to create and delete users and reset passw
 | `viewer` | Read-only — can view snapshots, jobs, and schedules |
 
 The default `admin` account is created on first start using `NASNAP_ADMIN_PASSWORD`.
+
+### Active Directory / LDAP
+
+Configure AD/LDAP in **Settings → Active Directory / LDAP**:
+
+| Field | Description |
+|---|---|
+| Server | DC hostname or IP |
+| Port | 389 (plain/STARTTLS) or 636 (LDAPS) |
+| Encryption | None, STARTTLS, or SSL/LDAPS |
+| Bind DN | Service account in UPN (`svc@domain.tld`) or DN format |
+| Bind Password | Service account password |
+| Base DN | Search root, e.g. `DC=corp,DC=example,DC=com` |
+| User Filter | LDAP filter to locate the user — `{username}` is substituted. Default: `(sAMAccountName={username})` |
+| Admin Group DN | Full DN of the AD group that grants `admin` role |
+| Viewer Group DN | Full DN of the AD group that grants `viewer` role |
+
+**Login flow:** local accounts are checked first; if no matching local account exists, LDAP is attempted. If the AD user is not a member of either configured group, login is denied. Local accounts (especially the built-in `admin`) always remain active — they are never blocked by LDAP configuration.
 
 ---
 

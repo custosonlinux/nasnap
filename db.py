@@ -92,13 +92,39 @@ class NaSnapDB:
             CREATE TABLE IF NOT EXISTS np_sessions (
                 token      TEXT PRIMARY KEY,
                 username   TEXT NOT NULL,
+                role       TEXT NOT NULL DEFAULT 'viewer',
                 expires_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS np_settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS np_ldap_config (
+                id                TEXT PRIMARY KEY DEFAULT 'default',
+                enabled           INTEGER NOT NULL DEFAULT 0,
+                server            TEXT NOT NULL DEFAULT '',
+                port              INTEGER NOT NULL DEFAULT 389,
+                use_ssl           INTEGER NOT NULL DEFAULT 0,
+                use_tls           INTEGER NOT NULL DEFAULT 1,
+                bind_dn           TEXT NOT NULL DEFAULT '',
+                bind_password_enc TEXT NOT NULL DEFAULT '',
+                base_dn           TEXT NOT NULL DEFAULT '',
+                user_filter       TEXT NOT NULL DEFAULT '(sAMAccountName={username})',
+                admin_group_dn    TEXT NOT NULL DEFAULT '',
+                viewer_group_dn   TEXT NOT NULL DEFAULT '',
+                updated_at        TEXT NOT NULL DEFAULT ''
+            );
         """)
+        # Migrations — safe to run repeatedly (errors are ignored)
+        for migration in [
+            "ALTER TABLE np_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer'",
+            "UPDATE np_sessions SET role='admin' WHERE username IN (SELECT username FROM np_users WHERE role='admin')",
+        ]:
+            try:
+                conn.execute(migration)
+                conn.commit()
+            except Exception:
+                pass
         # Plugin tables
         if os.path.exists(_PLUGIN_SCHEMA):
             with open(_PLUGIN_SCHEMA) as f:

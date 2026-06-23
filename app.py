@@ -12,9 +12,9 @@ from flask import Flask, request, jsonify, send_file, redirect, g, Response
 from db import get_db
 from auth import (
     verify_password, create_session, delete_session,
-    ensure_default_admin, get_session, ROLE_ADMIN,
+    ensure_default_admin, get_session, ROLE_ADMIN, SESSION_HOURS,
     list_users, create_user, delete_user, change_password,
-    require_admin, require_auth,
+    require_admin, require_auth, ldap_authenticate,
 )
 
 logging.basicConfig(
@@ -65,15 +65,30 @@ def create_app():
         password = data.get('password') or ''
         if not username or not password:
             return jsonify({'error': 'Username and password required'}), 400
+
+        # Local account takes priority — if found, only local password is checked
         row = get_db().query_one(
             "SELECT password_hash, role FROM np_users WHERE username=?", (username,)
         )
-        if not row or not verify_password(row['password_hash'], password):
-            return jsonify({'error': 'Invalid credentials'}), 401
-        token = create_session(username)
-        resp = jsonify({'ok': True, 'username': username, 'role': row['role']})
-        resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax', max_age=8 * 3600)
-        return resp
+        if row:
+            if not verify_password(row['password_hash'], password):
+                return jsonify({'error': 'Invalid credentials'}), 401
+            token = create_session(username, row['role'])
+            resp = jsonify({'ok': True, 'username': username, 'role': row['role']})
+            resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax',
+                            max_age=SESSION_HOURS * 3600)
+            return resp
+
+        # No local account — try LDAP/AD if configured
+        role = ldap_authenticate(username, password)
+        if role:
+            token = create_session(username, role)
+            resp = jsonify({'ok': True, 'username': username, 'role': role})
+            resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax',
+                            max_age=SESSION_HOURS * 3600)
+            return resp
+
+        return jsonify({'error': 'Invalid credentials'}), 401
 
     @app.route('/api/auth/logout', methods=['POST'])
     def _logout():
@@ -143,8 +158,7 @@ def create_app():
         sess = getattr(g, '_nasnap_session', {})
         if not sess:
             return redirect('/login')
-        row = get_db().query_one("SELECT role FROM np_users WHERE username=?", (sess.get('username'),))
-        if not row or row['role'] != ROLE_ADMIN:
+        if sess.get('role') != ROLE_ADMIN:
             return redirect('/')
         return send_file(_ADMIN_FILE, mimetype='text/html')
 
@@ -377,7 +391,7 @@ def create_app():
     if os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes'):
         @app.route('/dev/autologin')
         def _dev_autologin():
-            token = create_session('admin')
+            token = create_session('admin', ROLE_ADMIN)
             resp = redirect('/')
             resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax', max_age=3600)
             return resp

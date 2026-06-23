@@ -50,11 +50,8 @@ def _write_audit(db, action, user, result, target_name="", volume_name="",
 
 
 def _require_admin():
-    from nasnap_core.utils.auth import load_users
-    from nasnap_core.models.permissions import ROLE_ADMIN
-    username = request.session.get("user", "")
-    users = load_users()
-    if users.get(username, {}).get("role") != ROLE_ADMIN:
+    from flask import request
+    if request.session.get("role") != "admin":
         return {"error": "Admin access required"}, 403
     return None
 

@@ -1924,6 +1924,97 @@ function applyI18n() {
         </div>
       </div>
 
+      <!-- ═══════════════ ACTIVE DIRECTORY / LDAP ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>Active Directory / LDAP</span>
+      </div>
+      <div class="card">
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:4px 0;margin-bottom:12px;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-weight:500;font-size:13px">Enable AD/LDAP Authentication</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Local accounts always remain active regardless of this setting.</div>
+          </div>
+          <div id="ldapToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="ldapToggleEnabled()">
+            <div id="ldapToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
+            <div id="ldapToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
+          </div>
+        </label>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>LDAP Server</label>
+            <input id="ldap_server" placeholder="dc.firma.de">
+          </div>
+          <div class="form-group">
+            <label>Port</label>
+            <input id="ldap_port" type="number" value="389" min="1" max="65535" style="width:120px">
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Encryption</label>
+            <div style="display:flex;gap:16px;margin-top:4px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="radio" name="ldap_enc" value="none" onchange="ldapEncChange()"> None
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="radio" name="ldap_enc" value="tls" onchange="ldapEncChange()" checked> STARTTLS (port 389)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="radio" name="ldap_enc" value="ssl" onchange="ldapEncChange()"> LDAPS (port 636)
+              </label>
+            </div>
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Service Account (Bind DN)</label>
+            <input id="ldap_bind_dn" placeholder="CN=nasnap-svc,OU=ServiceAccounts,DC=firma,DC=de" style="width:100%">
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Service Account Password</label>
+            <input id="ldap_bind_pw" type="password" placeholder="••••••••" style="width:100%">
+            <div id="ldap_pw_hint" style="font-size:11px;color:var(--muted);margin-top:3px;display:none">Password saved — leave blank to keep current password.</div>
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Base DN</label>
+            <input id="ldap_base_dn" placeholder="DC=firma,DC=de" style="width:100%">
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label>User Search Filter</label>
+            <input id="ldap_user_filter" placeholder="(sAMAccountName={username})" style="width:100%">
+            <div style="font-size:11px;color:var(--muted);margin-top:3px"><code>{username}</code> is replaced with the entered username at login.</div>
+          </div>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-weight:500;font-size:13px;margin-bottom:10px">Group → Role Mapping</div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Enter the full Distinguished Name of each AD group. Members of the Admin group get full access; members of the Viewer group get read-only access. Users in neither group are denied login. At least one group must be configured for AD login to work.</p>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Admin Group DN</label>
+              <input id="ldap_admin_grp" placeholder="CN=NaSnap-Admins,OU=Groups,DC=firma,DC=de" style="width:100%">
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Viewer Group DN <span style="font-size:11px;color:var(--muted)">(optional)</span></label>
+              <input id="ldap_viewer_grp" placeholder="CN=NaSnap-Viewers,OU=Groups,DC=firma,DC=de" style="width:100%">
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-weight:500;font-size:13px;margin-bottom:8px">Test Connection</div>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin:0;flex:1;min-width:200px">
+              <label style="font-size:12px">Test Username <span style="color:var(--muted)">(optional — searches for this user)</span></label>
+              <input id="ldap_test_user" placeholder="jdoe" style="width:100%">
+            </div>
+            <button class="btn btn-ghost" onclick="testLdap()" style="flex-shrink:0">
+              <span id="ldapTestSpinner" class="spinner" style="display:none;margin-right:4px"></span>
+              Test Connection
+            </button>
+          </div>
+          <div id="ldapTestResult" style="margin-top:10px;font-size:13px;display:none"></div>
+        </div>
+        <div class="form-actions" style="margin-top:14px">
+          <button class="btn btn-primary" onclick="saveLdap()">Save</button>
+          <span id="ldapSaveStatus" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+
       <!-- ═══════════════ SERVER / NETWORK ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>Server / Network</span>
@@ -2519,7 +2610,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -7076,6 +7167,136 @@ async function testSmtp() {
     if (d.success) toast(t('msg_smtp_test_ok'), 'success');
     else toast(d.error || 'Test failed', 'error');
   } catch(e) { toast(e.message, 'error', e.detail); }
+}
+
+// ═══════════════════════════ LDAP / ACTIVE DIRECTORY ═════════════════════════
+
+var _ldapEnabled = false;
+
+function ldapToggleEnabled() {
+  _ldapEnabled = !_ldapEnabled;
+  _ldapApplyToggle();
+}
+
+function _ldapApplyToggle() {
+  var track = document.getElementById('ldapToggleTrack');
+  var thumb = document.getElementById('ldapToggleThumb');
+  if (!track) return;
+  if (_ldapEnabled) {
+    track.style.background = 'var(--accent,#3b82f6)';
+    thumb.style.transform  = 'translateX(20px)';
+  } else {
+    track.style.background = 'var(--border)';
+    thumb.style.transform  = 'translateX(0)';
+  }
+}
+
+function ldapEncChange() {
+  var val = document.querySelector('input[name="ldap_enc"]:checked');
+  if (!val) return;
+  var portEl = document.getElementById('ldap_port');
+  if (val.value === 'ssl') portEl.value = 636;
+  else if (val.value === 'tls') portEl.value = 389;
+  else portEl.value = 389;
+}
+
+async function loadLdap() {
+  try {
+    var d = await apiFetch('settings/ldap');
+    _ldapEnabled = !!d.enabled;
+    _ldapApplyToggle();
+    document.getElementById('ldap_server').value      = d.server || '';
+    document.getElementById('ldap_port').value        = d.port   || 389;
+    document.getElementById('ldap_base_dn').value     = d.base_dn || '';
+    document.getElementById('ldap_bind_dn').value     = d.bind_dn || '';
+    document.getElementById('ldap_user_filter').value = d.user_filter || '(sAMAccountName={username})';
+    document.getElementById('ldap_admin_grp').value   = d.admin_group_dn  || '';
+    document.getElementById('ldap_viewer_grp').value  = d.viewer_group_dn || '';
+    var pwHint = document.getElementById('ldap_pw_hint');
+    if (pwHint) pwHint.style.display = d.has_password ? '' : 'none';
+    // Set encryption radio
+    var enc = d.use_ssl ? 'ssl' : (d.use_tls ? 'tls' : 'none');
+    var radio = document.querySelector('input[name="ldap_enc"][value="'+enc+'"]');
+    if (radio) radio.checked = true;
+  } catch(e) {}
+}
+
+async function saveLdap() {
+  var encVal = (document.querySelector('input[name="ldap_enc"]:checked') || {}).value || 'tls';
+  var payload = {
+    enabled:         _ldapEnabled,
+    server:          document.getElementById('ldap_server').value.trim(),
+    port:            parseInt(document.getElementById('ldap_port').value) || 389,
+    use_ssl:         encVal === 'ssl',
+    use_tls:         encVal === 'tls',
+    bind_dn:         document.getElementById('ldap_bind_dn').value.trim(),
+    base_dn:         document.getElementById('ldap_base_dn').value.trim(),
+    user_filter:     document.getElementById('ldap_user_filter').value.trim(),
+    admin_group_dn:  document.getElementById('ldap_admin_grp').value.trim(),
+    viewer_group_dn: document.getElementById('ldap_viewer_grp').value.trim(),
+  };
+  var pw = document.getElementById('ldap_bind_pw').value;
+  if (pw) payload.bind_password = pw;
+  try {
+    await apiPost('settings/ldap/save', payload);
+    document.getElementById('ldap_bind_pw').value = '';
+    var st = document.getElementById('ldapSaveStatus');
+    if (st) { st.textContent = '✓ Saved'; setTimeout(function(){ st.textContent = ''; }, 3000); }
+    loadLdap();
+    toast('LDAP configuration saved', 'success');
+  } catch(e) { toast(e.message, 'error', e.detail); }
+}
+
+async function testLdap() {
+  var spin = document.getElementById('ldapTestSpinner');
+  var res  = document.getElementById('ldapTestResult');
+  if (spin) spin.style.display = 'inline-block';
+  if (res)  res.style.display  = 'none';
+  var encVal = (document.querySelector('input[name="ldap_enc"]:checked') || {}).value || 'tls';
+  var payload = {
+    server:      document.getElementById('ldap_server').value.trim(),
+    port:        parseInt(document.getElementById('ldap_port').value) || 389,
+    use_ssl:     encVal === 'ssl',
+    use_tls:     encVal === 'tls',
+    bind_dn:     document.getElementById('ldap_bind_dn').value.trim(),
+    base_dn:     document.getElementById('ldap_base_dn').value.trim(),
+    user_filter: document.getElementById('ldap_user_filter').value.trim(),
+    test_username: document.getElementById('ldap_test_user').value.trim(),
+  };
+  var pw = document.getElementById('ldap_bind_pw').value;
+  if (pw) payload.bind_password = pw;
+  try {
+    var d = await apiPost('settings/ldap/test', payload);
+    if (spin) spin.style.display = 'none';
+    if (!res) return;
+    res.style.display = '';
+    if (d.success) {
+      var html = '<div style="color:var(--success,#16a34a);font-weight:500">✓ Connection successful'
+               + (d.server_info ? ' — ' + esc(d.server_info) : '') + '</div>';
+      if ('user_found' in d) {
+        if (d.user_found) {
+          html += '<div style="margin-top:6px;font-size:12px">'
+                + '<b>' + esc(d.display_name || payload.test_username) + '</b>'
+                + '<br><span style="color:var(--muted)">' + esc(d.user_dn) + '</span></div>';
+          if (d.groups && d.groups.length) {
+            html += '<div style="margin-top:6px;font-size:12px"><b>memberOf (' + d.groups.length + '):</b><ul style="margin:4px 0 0 16px;padding:0">'
+                  + d.groups.map(function(g){ return '<li style="color:var(--muted)">' + esc(g) + '</li>'; }).join('')
+                  + '</ul></div>';
+          } else {
+            html += '<div style="margin-top:4px;font-size:12px;color:var(--muted)">No memberOf groups returned (empty or not readable).</div>';
+          }
+        } else {
+          html += '<div style="margin-top:6px;font-size:12px;color:var(--warning,#f0a040)">⚠ User not found with current filter.</div>';
+        }
+      }
+      res.innerHTML = html;
+    } else {
+      res.innerHTML = '<div style="color:var(--danger,#ef4444)">✗ ' + esc(d.error || 'Connection failed') + '</div>';
+    }
+  } catch(e) {
+    if (spin) spin.style.display = 'none';
+    if (res) { res.style.display = ''; res.innerHTML = '<div style="color:var(--danger,#ef4444)">✗ ' + esc(e.message) + '</div>'; }
+  }
 }
 
 // ═══════════════════════════ PROVISIONING ═════════════════════════════════
