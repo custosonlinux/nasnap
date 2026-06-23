@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Active Directory / LDAP Authentication** — connect NaSnap to an AD domain or any LDAP directory. Users authenticate with their domain credentials; group membership determines the role. Configure in **Settings → Active Directory / LDAP**: server, port, encryption (None / STARTTLS / LDAPS), service-account bind DN and password (AES-256-GCM encrypted at rest), Base DN, user search filter, Admin group DN, and Viewer group DN.
+  - Login flow: local accounts are checked first; LDAP is only attempted if no local account matches the username.
+  - Users not in either configured group are denied — access is always explicit.
+  - Local accounts (including the built-in `admin`) remain fully active regardless of LDAP state — they act as a permanent fallback if AD is unreachable or misconfigured.
+  - Service-account bind → `memberOf` search → user-password bind → group check.
+  - **Test Connection** button in the settings UI verifies the service-account bind and returns the user's groups before saving.
+
+### Fixed
+
+- **Admin-role check broken across all plugin API endpoints** (`_require_admin`) — a missing `from flask import request` import caused every admin-only endpoint (snapshots, schedules, restore, clone, dr, provisioning, recovery, snapmirror, file_restore, settings) to return HTTP 500 instead of 403 when called without admin rights. The `_require_admin` helper now imports `request` correctly. Affected features: UI Features toggles (auto-scan, DR), all write operations.
+- **Session role not propagated** — existing sessions after the DB migration had `role = 'viewer'` even for admin users. A migration SQL statement now backfills `role = 'admin'` for sessions belonging to admin users.
+
+---
+
 ## [1.5.0] — 2026-06-22
 
 ### Added
