@@ -119,6 +119,7 @@ class NaSnapDB:
         for migration in [
             "ALTER TABLE np_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer'",
             "UPDATE np_sessions SET role='admin' WHERE username IN (SELECT username FROM np_users WHERE role='admin')",
+            "ALTER TABLE netapp_sfr_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 conn.execute(migration)

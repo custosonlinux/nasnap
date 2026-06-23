@@ -353,4 +353,3 @@ CREATE TABLE IF NOT EXISTS netapp_sfr_sessions (
     created_at   TEXT NOT NULL DEFAULT '',
     last_active  TEXT NOT NULL DEFAULT ''
 );
-ALTER TABLE netapp_sfr_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT '';
