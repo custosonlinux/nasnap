@@ -236,48 +236,48 @@ def _activate_lvm_guests(host, user, pw, ssh_key, lvm_pv_devs):
             vg_names.append(vg_name)
             log.info(f"[sfr] Activated guest LVM VG '{vg_name}' from {pv_dev}")
 
-            # List LVs via lsblk
+            # List LVs via lvs (lsblk on /dev/<vg> doesn't work — it's a directory)
             try:
-                lsblk_out = ssh_run(host, user, pw,
-                                    f"lsblk -J -o NAME,SIZE,FSTYPE,LABEL /dev/{vg_q} 2>/dev/null || true",
-                                    capture=True, key_material=ssh_key, timeout=10)
-                lv_entries = json.loads(lsblk_out).get("blockdevices") or []
+                lvs_out = ssh_run(host, user, pw,
+                                  f"lvs --noheadings -o lv_name,lv_size {vg_q} 2>/dev/null",
+                                  capture=True, key_material=ssh_key, timeout=10)
+                lv_lines = [l.strip().split() for l in lvs_out.strip().splitlines() if l.strip()]
             except Exception:
-                lv_entries = []
+                lv_lines = []
 
-            for lv in lv_entries:
-                lv_name = lv.get("name", "")
-                if not lv_name:
+            for parts in lv_lines:
+                if not parts:
                     continue
+                lv_name = parts[0]
+                lv_size = parts[1] if len(parts) > 1 else "?"
                 lv_dev  = f"/dev/{vg_name}/{lv_name}"
-                fstype  = lv.get("fstype") or ""
-                label   = lv.get("label") or ""
-                if not fstype:
-                    try:
-                        fstype = ssh_run(host, user, pw,
-                                         f"blkid -s TYPE -o value {shlex.quote(lv_dev)} 2>/dev/null || true",
-                                         capture=True, key_material=ssh_key, timeout=10).strip()
-                    except Exception:
-                        pass
-                if not label:
-                    try:
-                        label = ssh_run(host, user, pw,
-                                        f"blkid -s LABEL -o value {shlex.quote(lv_dev)} 2>/dev/null || true",
-                                        capture=True, key_material=ssh_key, timeout=10).strip()
-                    except Exception:
-                        pass
+                fstype  = ""
+                label   = ""
+                try:
+                    fstype = ssh_run(host, user, pw,
+                                     f"blkid -s TYPE -o value {shlex.quote(lv_dev)} 2>/dev/null || true",
+                                     capture=True, key_material=ssh_key, timeout=10).strip()
+                except Exception:
+                    pass
+                try:
+                    label = ssh_run(host, user, pw,
+                                    f"blkid -s LABEL -o value {shlex.quote(lv_dev)} 2>/dev/null || true",
+                                    capture=True, key_material=ssh_key, timeout=10).strip()
+                except Exception:
+                    pass
                 fs = fstype.lower()
                 if fs == "swap":
                     continue
                 extra.append({
                     "dev":       lv_dev,
-                    "size":      lv.get("size", "?"),
+                    "size":      lv_size,
                     "fstype":    fstype,
                     "label":     label or f"{vg_name}/{lv_name}",
                     "encrypted": fs in _ENCRYPTED_FS,
                     "skip":      fs in _ENCRYPTED_FS,
                     "lvm":       True,
                 })
+                log.info(f"[sfr] Guest LV: {lv_dev} fstype={fstype!r} label={label!r}")
         except Exception as e:
             log.warning(f"[sfr] LVM guest activation failed for {pv_dev}: {e}")
 
