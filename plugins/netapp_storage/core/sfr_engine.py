@@ -200,6 +200,90 @@ def _find_free_nbd(pve):
     return dev
 
 
+def _activate_lvm_guests(host, user, pw, ssh_key, lvm_pv_devs):
+    """Activate LVM VGs found inside a guest disk image exposed via qemu-nbd.
+
+    Called when partition scanning finds lvm2_member partitions.  The VGs inside
+    a QCOW2/snapshot are not visible to the host normally, so UUID collision with
+    live host VGs is not a concern.
+
+    Returns (extra_partitions, vg_names).  vg_names must be deactivated on
+    session close (before qemu-nbd disconnect) to avoid stale dm devices.
+    """
+    from ._helpers import ssh_run
+    _ENCRYPTED_FS = {"bitlocker", "crypto_luks", "veracrypt"}
+    extra    = []
+    vg_names = []
+
+    for pv_dev in lvm_pv_devs:
+        try:
+            pv_q = shlex.quote(pv_dev)
+            # Register PV with LVM (safe even on read-only nbd: updates daemon cache only)
+            ssh_run(host, user, pw,
+                    f"pvscan --cache {pv_q} 2>/dev/null; true",
+                    key_material=ssh_key, timeout=15)
+            vg_out = ssh_run(host, user, pw,
+                             f"pvs --noheadings -o vg_name {pv_q} 2>/dev/null",
+                             capture=True, key_material=ssh_key, timeout=10).strip()
+            if not vg_out:
+                continue
+            vg_name = vg_out
+            vg_q    = shlex.quote(vg_name)
+            # Activate — dm inherits read-only from nbd, so LVs become read-only automatically
+            ssh_run(host, user, pw,
+                    f"vgchange -ay {vg_q} 2>/dev/null; true",
+                    key_material=ssh_key, timeout=15)
+            vg_names.append(vg_name)
+            log.info(f"[sfr] Activated guest LVM VG '{vg_name}' from {pv_dev}")
+
+            # List LVs via lsblk
+            try:
+                lsblk_out = ssh_run(host, user, pw,
+                                    f"lsblk -J -o NAME,SIZE,FSTYPE,LABEL /dev/{vg_q} 2>/dev/null || true",
+                                    capture=True, key_material=ssh_key, timeout=10)
+                lv_entries = json.loads(lsblk_out).get("blockdevices") or []
+            except Exception:
+                lv_entries = []
+
+            for lv in lv_entries:
+                lv_name = lv.get("name", "")
+                if not lv_name:
+                    continue
+                lv_dev  = f"/dev/{vg_name}/{lv_name}"
+                fstype  = lv.get("fstype") or ""
+                label   = lv.get("label") or ""
+                if not fstype:
+                    try:
+                        fstype = ssh_run(host, user, pw,
+                                         f"blkid -s TYPE -o value {shlex.quote(lv_dev)} 2>/dev/null || true",
+                                         capture=True, key_material=ssh_key, timeout=10).strip()
+                    except Exception:
+                        pass
+                if not label:
+                    try:
+                        label = ssh_run(host, user, pw,
+                                        f"blkid -s LABEL -o value {shlex.quote(lv_dev)} 2>/dev/null || true",
+                                        capture=True, key_material=ssh_key, timeout=10).strip()
+                    except Exception:
+                        pass
+                fs = fstype.lower()
+                if fs == "swap":
+                    continue
+                extra.append({
+                    "dev":       lv_dev,
+                    "size":      lv.get("size", "?"),
+                    "fstype":    fstype,
+                    "label":     label or f"{vg_name}/{lv_name}",
+                    "encrypted": fs in _ENCRYPTED_FS,
+                    "skip":      fs in _ENCRYPTED_FS,
+                    "lvm":       True,
+                })
+        except Exception as e:
+            log.warning(f"[sfr] LVM guest activation failed for {pv_dev}: {e}")
+
+    return extra, vg_names
+
+
 def mount_disk(pve, session_id, disk_path):
     """Mount a QCOW2 via qemu-nbd on the PVE host (read-only).
     Returns {'nbd_device', 'mount_base', 'partitions': [{dev, size, fstype, label}]}.
@@ -220,12 +304,17 @@ def mount_disk(pve, session_id, disk_path):
     _ENCRYPTED_FS  = {"bitlocker", "crypto_luks", "veracrypt"}
     _SKIP_FS       = {"swap", "linux_raid_member", "lvm2_member"}
 
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
+    key  = getattr(pve, "ssh_key", None) or ""
+
     partitions = []
+    lvm_pv_devs = []
     try:
         # settle udev so lsblk can see filesystem types
-        ssh_run(pve.host, pve.ssh_user, pve.ssh_password,
-                "udevadm settle 2>/dev/null || true", timeout=10)
-        out = ssh_run(pve.host, pve.ssh_user, pve.ssh_password,
+        ssh_run(host, user, pw, "udevadm settle 2>/dev/null || true", timeout=10)
+        out = ssh_run(host, user, pw,
                       f"lsblk -J -o NAME,SIZE,FSTYPE,LABEL {shlex.quote(nbd_dev)}",
                       capture=True, timeout=15)
         children = (json.loads(out).get("blockdevices") or [{}])[0].get("children") or []
@@ -235,26 +324,23 @@ def mount_disk(pve, session_id, disk_path):
             dev = f"/dev/{c['name']}"
             fstype = c.get("fstype") or ""
             label  = c.get("label") or ""
-            # blkid fallback when lsblk/udev has no type yet
             if not fstype:
                 try:
-                    fstype = ssh_run(
-                        pve.host, pve.ssh_user, pve.ssh_password,
-                        f"blkid -s TYPE -o value {shlex.quote(dev)} 2>/dev/null || true",
-                        capture=True, timeout=10,
-                    ).strip()
+                    fstype = ssh_run(host, user, pw,
+                                     f"blkid -s TYPE -o value {shlex.quote(dev)} 2>/dev/null || true",
+                                     capture=True, timeout=10).strip()
                 except Exception:
                     pass
             if not label:
                 try:
-                    label = ssh_run(
-                        pve.host, pve.ssh_user, pve.ssh_password,
-                        f"blkid -s LABEL -o value {shlex.quote(dev)} 2>/dev/null || true",
-                        capture=True, timeout=10,
-                    ).strip()
+                    label = ssh_run(host, user, pw,
+                                    f"blkid -s LABEL -o value {shlex.quote(dev)} 2>/dev/null || true",
+                                    capture=True, timeout=10).strip()
                 except Exception:
                     pass
             fs = fstype.lower()
+            if fs == "lvm2_member":
+                lvm_pv_devs.append(dev)
             partitions.append({
                 "dev":       dev,
                 "size":      c.get("size", "?"),
@@ -266,10 +352,20 @@ def mount_disk(pve, session_id, disk_path):
     except Exception as e:
         log.warning(f"[sfr] partition scan failed: {e}")
 
-    ssh_run(pve.host, pve.ssh_user, pve.ssh_password,
-            f"mkdir -p {shlex.quote(mount_base)}/mnt", timeout=15)
+    # Activate guest LVM VGs and add their LVs as browsable partitions
+    guest_lvm_vgs = []
+    if lvm_pv_devs:
+        lv_parts, guest_lvm_vgs = _activate_lvm_guests(host, user, pw, key, lvm_pv_devs)
+        partitions.extend(lv_parts)
 
-    return {"nbd_device": nbd_dev, "mount_base": mount_base, "partitions": partitions}
+    ssh_run(host, user, pw, f"mkdir -p {shlex.quote(mount_base)}/mnt", timeout=15)
+
+    return {
+        "nbd_device":     nbd_dev,
+        "mount_base":     mount_base,
+        "partitions":     partitions,
+        "guest_lvm_vgs":  guest_lvm_vgs,
+    }
 
 
 def mount_partition(pve, partition_dev, mount_base):
@@ -308,15 +404,24 @@ def mount_partition(pve, partition_dev, mount_base):
     raise RuntimeError("All mount attempts failed:\n" + "\n".join(lines))
 
 
-def umount_session(pve, nbd_device, mount_base):
-    """Best-effort cleanup: umount → disconnect qemu-nbd → remove tmpdir."""
+def umount_session(pve, nbd_device, mount_base, guest_lvm_vgs=None):
+    """Best-effort cleanup: deactivate guest LVMs → umount → disconnect qemu-nbd → remove tmpdir."""
     from ._helpers import ssh_run
+
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
+    key  = getattr(pve, "ssh_key", None) or ""
 
     def _try(cmd):
         try:
-            ssh_run(pve.host, pve.ssh_user, pve.ssh_password, cmd, timeout=20)
+            ssh_run(host, user, pw, cmd, key_material=key, timeout=20)
         except Exception as e:
             log.warning(f"[sfr] cleanup step failed: {e}")
+
+    # Step 1: deactivate guest LVM VGs before killing processes / umounting
+    for vg in (guest_lvm_vgs or []):
+        _try(f"vgchange -an {shlex.quote(vg)} 2>/dev/null; true")
 
     if mount_base:
         # Kill any processes still using the mountpoint (e.g. lingering SSH cat after cancel),
@@ -450,6 +555,7 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
 
             nvme_ns_rescan(host, user, pw, key)
             device = find_new_nvme_device(host, user, pw, key, devices_before, timeout_s=60)
+            san["nvme_device"] = device  # stored for host-side disconnect on cleanup
         else:
             raise RuntimeError(f"Unsupported SAN protocol for SFR: {protocol}")
 
@@ -474,10 +580,11 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
         ssh_run(host, user, pw,
                 f"sleep 1; partprobe {shlex.quote(nbd_dev)} 2>/dev/null || true", timeout=15)
 
-        # Partition detection (same as NFS path)
+        # Partition detection (delegates to shared NFS path logic)
         _ENCRYPTED_FS = {"bitlocker", "crypto_luks", "veracrypt"}
         _SKIP_FS      = {"swap", "linux_raid_member", "lvm2_member"}
         partitions    = []
+        lvm_pv_devs   = []
         try:
             ssh_run(host, user, pw, "udevadm settle 2>/dev/null || true", timeout=10)
             out = ssh_run(host, user, pw,
@@ -505,6 +612,8 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
                     except Exception:
                         pass
                 fs = fstype.lower()
+                if fs == "lvm2_member":
+                    lvm_pv_devs.append(dev)
                 partitions.append({
                     "dev":       dev,
                     "size":      c.get("size", "?"),
@@ -515,6 +624,13 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
                 })
         except Exception as e:
             log.warning(f"[sfr-san] partition scan failed: {e}")
+
+        # Activate guest LVM VGs (LVM inside the VM disk image)
+        guest_lvm_vgs = []
+        if lvm_pv_devs:
+            lv_parts, guest_lvm_vgs = _activate_lvm_guests(host, user, pw, key, lvm_pv_devs)
+            partitions.extend(lv_parts)
+        san["guest_lvm_vgs"] = guest_lvm_vgs
 
         ssh_run(host, user, pw, f"mkdir -p {shlex.quote(mount_base)}/mnt", timeout=15)
         return {
@@ -545,18 +661,38 @@ def _san_partial_cleanup(pve, client, san):
     pw   = pve.ssh_password
     key  = getattr(pve, "ssh_key", None) or ""
 
+    for vg in san.get("guest_lvm_vgs", []):
+        _try(lambda vg=vg: ssh_run(host, user, pw,
+                                   f"vgchange -an {shlex.quote(vg)} 2>/dev/null; true",
+                                   key_material=key, timeout=15))
+
     temp_vg = san.get("temp_vg_name", "")
     if temp_vg:
         from .san_helpers import cleanup_restore_vg
         _try(lambda: cleanup_restore_vg(host, user, pw, key, temp_vg))
 
+    if san.get("protocol") == "nvme":
+        nvme_device = san.get("nvme_device", "")
+        if nvme_device:
+            import re as _re
+            m = _re.match(r'(/dev/nvme\d+)', nvme_device)
+            if m:
+                ctrl = shlex.quote(m.group(1))
+                _try(lambda: ssh_run(host, user, pw,
+                                     f"timeout 15 nvme disconnect --device {ctrl} 2>/dev/null; true",
+                                     key_material=key, timeout=25))
+
     _san_cleanup_ontap(client, san)
 
 
 def cleanup_san_state(pve, client, san_state):
-    """Full SAN cleanup after a session closes: VG → ONTAP LUN/NS → clone delete.
+    """Full SAN cleanup after a session closes: guest LVMs → outer VG → host disconnect → ONTAP clone.
 
-    Called from file_restore.py when a SAN session is closed or expires.
+    Order matters for PVE stability:
+      1. Deactivate guest LVM VGs (inside the VM disk image, accessed via nbd)
+      2. Deactivate + remove the outer restore VG (datastore-level clone VG)
+      3. Host-side protocol disconnect (iSCSI flush / NVMe disconnect)
+      4. ONTAP clone cleanup (unmap + delete LUN/namespace + delete volume)
     """
     from ._helpers import ssh_run
 
@@ -571,17 +707,42 @@ def cleanup_san_state(pve, client, san_state):
     pw   = pve.ssh_password
     key  = getattr(pve, "ssh_key", None) or ""
 
+    # Step 1: deactivate guest LVM VGs (inside the VM disk, mounted via nbd)
+    for vg in san_state.get("guest_lvm_vgs", []):
+        _try(lambda vg=vg: ssh_run(host, user, pw,
+                                   f"vgchange -an {shlex.quote(vg)} 2>/dev/null; true",
+                                   key_material=key, timeout=15))
+
+    # Step 2: remove the outer restore VG (clone of datastore LVM VG)
     temp_vg = san_state.get("temp_vg_name", "")
     if temp_vg:
         from .san_helpers import cleanup_restore_vg
         _try(lambda: cleanup_restore_vg(host, user, pw, key, temp_vg))
 
-    protocol         = san_state.get("protocol", "")
-    temp_iscsi_serial = san_state.get("temp_iscsi_serial", "")
-    if protocol == "iscsi" and temp_iscsi_serial:
-        from .san_helpers import flush_iscsi_clone_device
-        _try(lambda: flush_iscsi_clone_device(host, user, pw, key, temp_iscsi_serial))
+    # Step 3: host-side protocol disconnect
+    protocol = san_state.get("protocol", "")
 
+    if protocol == "nvme":
+        # Disconnect the NVMe controller that served the clone namespace.
+        # We stored the device path at mount time; use it directly since the VG is gone.
+        nvme_device = san_state.get("nvme_device", "")
+        if nvme_device:
+            import re as _re
+            m = _re.match(r'(/dev/nvme\d+)', nvme_device)
+            if m:
+                ctrl = shlex.quote(m.group(1))
+                _try(lambda: ssh_run(host, user, pw,
+                                     f"timeout 15 nvme disconnect --device {ctrl} 2>/dev/null; true",
+                                     key_material=key, timeout=25))
+                log.info(f"[sfr-san] NVMe disconnect {m.group(1)} on {host}")
+
+    elif protocol == "iscsi":
+        temp_iscsi_serial = san_state.get("temp_iscsi_serial", "")
+        if temp_iscsi_serial:
+            from .san_helpers import flush_iscsi_clone_device
+            _try(lambda: flush_iscsi_clone_device(host, user, pw, key, temp_iscsi_serial))
+
+    # Step 4: delete ONTAP clone (unmap + delete namespace/LUN + delete volume)
     _san_cleanup_ontap(client, san_state)
 
 

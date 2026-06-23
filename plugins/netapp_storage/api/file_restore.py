@@ -81,20 +81,52 @@ def _ontap_client_for_mapping(db, mapping):
 
 
 def _san_cleanup(db, pve, sess):
-    """Full cleanup for a SAN session: umount + nbd + VG + ONTAP clone."""
+    """Full cleanup for a SAN session: guest LVMs → umount → nbd → outer VG → NVMe/iSCSI → ONTAP clone."""
     san_state = {}
     try:
         san_state = json.loads(sess.get("san_state") or "{}")
     except Exception:
         pass
-    sfr_engine.umount_session(pve, sess.get("nbd_device", ""), sess.get("mount_path", ""))
-    if san_state:
+    # umount_session deactivates guest LVMs (stored in san_state for both NFS and SAN)
+    guest_lvm_vgs = san_state.get("guest_lvm_vgs", [])
+    sfr_engine.umount_session(pve, sess.get("nbd_device", ""), sess.get("mount_path", ""),
+                               guest_lvm_vgs=guest_lvm_vgs)
+    if san_state and san_state.get("protocol"):
         try:
             mapping = get_mapping(db, sess["mapping_id"])
             client  = _ontap_client_for_mapping(db, mapping)
             sfr_engine.cleanup_san_state(pve, client, san_state)
         except Exception as e:
             log.warning(f"[sfr] san cleanup (ONTAP) {sess.get('id','?')}: {e}")
+
+
+def _sfr_job_log(db, job_id, msg):
+    """Append a log line to an SFR job entry (best-effort)."""
+    if not job_id:
+        return
+    try:
+        row = db.query_one("SELECT log_json FROM netapp_jobs WHERE id=?", (job_id,))
+        if not row:
+            return
+        from datetime import datetime, timezone
+        entries = json.loads(row["log_json"] or "[]")
+        entries.append({"ts": datetime.now(timezone.utc).isoformat(), "msg": msg})
+        db.execute("UPDATE netapp_jobs SET log_json=? WHERE id=?",
+                   (json.dumps(entries), job_id))
+    except Exception as e:
+        log.warning(f"[sfr] job_log write {job_id}: {e}")
+
+
+def _sfr_job_finish(db, job_id, status="done"):
+    if not job_id:
+        return
+    try:
+        db.execute(
+            "UPDATE netapp_jobs SET status=?, progress_pct=100, completed_at=? WHERE id=?",
+            (status, datetime.now(timezone.utc).isoformat(), job_id),
+        )
+    except Exception as e:
+        log.warning(f"[sfr] job_finish {job_id}: {e}")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -228,12 +260,22 @@ def _close_session():
             if _copy_progress.get(sid, {}).get("status") not in ("running", ""):
                 break
             time.sleep(0.1)
+    job_id = sess.get("job_id", "")
+    _sfr_job_log(db, job_id, "Session closed by user")
+    _sfr_job_finish(db, job_id, "done")
+
     try:
         pve = _pve_for_sess(db, sess)
         if sess.get("san_state"):
             _san_cleanup(db, pve, sess)
         else:
-            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+            san_state = {}
+            try:
+                san_state = json.loads(sess.get("san_state") or "{}")
+            except Exception:
+                pass
+            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"],
+                                      guest_lvm_vgs=san_state.get("guest_lvm_vgs", []))
     except Exception as e:
         log.warning(f"[sfr] umount on close {sid}: {e}")
     db.execute("DELETE FROM netapp_sfr_sessions WHERE id=?", (sid,))
@@ -303,14 +345,38 @@ def _mount():
             san_json = json.dumps(res["san_state"])
         else:
             res = sfr_engine.mount_disk(pve, sid, disk_file)
-            san_json = ""
+            # Store guest LVM VGs in san_state so cleanup can deactivate them
+            guest_lvm_vgs = res.get("guest_lvm_vgs", [])
+            san_json = json.dumps({"guest_lvm_vgs": guest_lvm_vgs}) if guest_lvm_vgs else ""
+
+        # Create / update job entry for this SFR session
+        username = getattr(request, "session", {}).get("username", "system") \
+                   if hasattr(request, "session") else "system"
+        job_id = sess.get("job_id", "")
+        if not job_id:
+            job_id = str(uuid.uuid4())
+            protocol = mapping.get("storage_protocol", "nfs").upper()
+            db.execute(
+                "INSERT INTO netapp_jobs "
+                "(id, job_type, vmid, node, status, log_json, created_by, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (job_id, "sfr", int(sess["vmid"]), sess["node"],
+                 "running", "[]", username, _utcnow()),
+            )
+        _sfr_job_log(db, job_id,
+                     f"Mounted snapshot '{snap_name}', disk '{disk_file}' "
+                     f"({mapping.get('storage_protocol','nfs').upper()} datastore "
+                     f"{mapping.get('pve_storage_id','?')})")
+        if res.get("guest_lvm_vgs"):
+            _sfr_job_log(db, job_id,
+                         f"Guest LVM detected — activated VGs: {', '.join(res['guest_lvm_vgs'])}")
 
         db.execute(
             "UPDATE netapp_sfr_sessions "
             "SET snap_name=?,disk_file=?,nbd_device=?,mount_path=?,partition='',"
-            "san_state=?,last_active=? WHERE id=?",
+            "san_state=?,job_id=?,last_active=? WHERE id=?",
             (snap_name, disk_file, res["nbd_device"], res["mount_base"],
-             san_json, _utcnow(), sid),
+             san_json, job_id, _utcnow(), sid),
         )
         return {"ok": True, "partitions": res["partitions"]}
     except Exception as e:
@@ -336,6 +402,7 @@ def _select_partition():
     try:
         pve = _pve_for_sess(db, sess)
         mount_log = sfr_engine.mount_partition(pve, part_dev, sess["mount_path"])
+        _sfr_job_log(db, sess.get("job_id", ""), f"Selected partition {part_dev}")
         db.execute("UPDATE netapp_sfr_sessions SET partition=?,last_active=? WHERE id=?",
                    (part_dev, _utcnow(), sid))
         return {"ok": True, "log": mount_log}
@@ -462,12 +529,14 @@ def _copy_to_vm():
     _copy_progress[sid]  = {"status": "running", "bytes": 0, "total": -1, "error": ""}
     _copy_cancelled.discard(sid)  # clear any stale cancel flag
 
+    job_id = sess.get("job_id", "")
+    _sfr_job_log(db, job_id, f"Copy started: '{snap_path}' → VM:{vm_path}")
+
     def _run():
         _last_touch = [time.time()]
 
         def _cb(done, total):
             _copy_progress[sid].update({"bytes": done, "total": total})
-            # Keep session alive: touch DB every 60 s so the cleanup daemon does not expire it
             now = time.time()
             if now - _last_touch[0] >= 60:
                 try:
@@ -486,9 +555,15 @@ def _copy_to_vm():
                 vmid, node, vm_path, guest_os,
                 progress_cb=_cb, cancel_check=_cancel_check,
             )
-            _copy_progress[sid].update({"status": "done", "bytes": _copy_progress[sid].get("total", 0)})
+            total = _copy_progress[sid].get("total", 0)
+            _copy_progress[sid].update({"status": "done", "bytes": total})
             try:
-                _touch(get_db(), sid)
+                _db = get_db()
+                _touch(_db, sid)
+                _sfr_job_log(_db, job_id,
+                             f"Copy complete: '{snap_path}' → VM:{vm_path} "
+                             f"({total // 1048576} MB)" if total > 0 else
+                             f"Copy complete: '{snap_path}' → VM:{vm_path}")
             except Exception:
                 pass
         except Exception as e:
@@ -497,9 +572,19 @@ def _copy_to_vm():
                 log.info(f"[sfr] copy_to_vm {sid}: cancelled by user")
                 _copy_progress[sid].update({"status": "cancelled", "error": ""})
                 _copy_cancelled.discard(sid)
+                try:
+                    _sfr_job_log(get_db(), job_id,
+                                 f"Copy cancelled: '{snap_path}'")
+                except Exception:
+                    pass
             else:
                 log.warning(f"[sfr] copy_to_vm {sid}: {msg}")
                 _copy_progress[sid].update({"status": "error", "error": msg})
+                try:
+                    _sfr_job_log(get_db(), job_id,
+                                 f"Copy failed: '{snap_path}' — {msg}")
+                except Exception:
+                    pass
 
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "async": True}
@@ -598,9 +683,16 @@ def _umount_disk():
         if sess.get("san_state"):
             _san_cleanup(db, pve, sess)
         else:
-            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+            san_state = {}
+            try:
+                san_state = json.loads(sess.get("san_state") or "{}")
+            except Exception:
+                pass
+            sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"],
+                                      guest_lvm_vgs=san_state.get("guest_lvm_vgs", []))
     except Exception as e:
         log.warning(f"[sfr] umount_disk {sid}: {e}")
+    _sfr_job_log(db, sess.get("job_id", ""), "Disk unmounted (user action)")
     db.execute(
         "UPDATE netapp_sfr_sessions "
         "SET snap_name='',disk_file='',nbd_device='',mount_path='',partition='',"
@@ -661,12 +753,21 @@ def _cleanup_expired():
                 if _copy_progress.get(sid, {}).get("status") != "running":
                     break
                 time.sleep(0.1)
+        job_id = sess.get("job_id", "")
+        _sfr_job_log(db, job_id, "Session expired (30 min inactivity) — auto-cleanup")
+        _sfr_job_finish(db, job_id, "done")
         try:
             pve = build_pve_client(db, sess["pve_host_id"])
             if sess.get("san_state"):
                 _san_cleanup(db, pve, sess)
             else:
-                sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"])
+                san_state = {}
+                try:
+                    san_state = json.loads(sess.get("san_state") or "{}")
+                except Exception:
+                    pass
+                sfr_engine.umount_session(pve, sess["nbd_device"], sess["mount_path"],
+                                          guest_lvm_vgs=san_state.get("guest_lvm_vgs", []))
         except Exception as e:
             log.warning(f"[sfr] cleanup umount {sid}: {e}")
         db.execute("DELETE FROM netapp_sfr_sessions WHERE id=?", (sid,))

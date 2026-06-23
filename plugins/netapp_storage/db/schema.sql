@@ -349,6 +349,8 @@ CREATE TABLE IF NOT EXISTS netapp_sfr_sessions (
     partition    TEXT NOT NULL DEFAULT '',
     guest_os     TEXT NOT NULL DEFAULT 'linux',
     san_state    TEXT NOT NULL DEFAULT '',
+    job_id       TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT '',
     last_active  TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE netapp_sfr_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT '';
