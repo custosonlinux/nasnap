@@ -11071,14 +11071,15 @@ async function pveHealthCheck() {
 function _renderPveHealth() {
   var hosts = _pveHealthData;
   var hasIssues = hosts.some(function(h) {
-    return h.stale_nfs.length || h.sfr_dirs.length || h.nasnap_vgs.length;
+    return h.stale_nfs.length || h.sfr_dirs.length || h.nasnap_vgs.length || (h.orphan_nbds||[]).length;
   });
   document.getElementById('pveHealthEmpty').style.display = hasIssues ? 'none' : '';
   if (!hasIssues) { document.getElementById('pveHealthList').innerHTML = ''; return; }
 
   var html = '';
   hosts.forEach(function(h, idx) {
-    var total = h.stale_nfs.length + h.sfr_dirs.length + h.nasnap_vgs.length;
+    h.orphan_nbds = h.orphan_nbds || [];
+    var total = h.stale_nfs.length + h.sfr_dirs.length + h.nasnap_vgs.length + h.orphan_nbds.length;
     if (!total && !h.error) return;
     html += '<div style="border-top:1px solid var(--border);padding:12px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px" id="pveHealthHost' + idx + '">';
     html += '<div style="flex:1;min-width:0">';
@@ -11105,9 +11106,16 @@ function _renderPveHealth() {
       html += '</div>';
     }
     if (h.nasnap_vgs.length) {
-      html += '<div><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Leftover LVM VGs (' + h.nasnap_vgs.length + ')</span>';
+      html += '<div style="margin-bottom:5px"><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Leftover LVM VGs (' + h.nasnap_vgs.length + ')</span>';
       h.nasnap_vgs.forEach(function(vg) {
         html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(vg) + '</div>';
+      });
+      html += '</div>';
+    }
+    if (h.orphan_nbds.length) {
+      html += '<div><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Orphaned NBD Devices (' + h.orphan_nbds.length + ')</span>';
+      h.orphan_nbds.forEach(function(dev) {
+        html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(dev) + ' <span style="color:var(--danger)">[no process]</span></div>';
       });
       html += '</div>';
     }
@@ -11126,10 +11134,11 @@ async function pveCleanupHost(idx, btn) {
   btn.disabled = true; btn.textContent = 'Cleaning…';
   try {
     var r = await apiPost('settings/pve-cleanup', {
-      host_id:    h.host_id,
-      stale_nfs:  h.stale_nfs,
-      sfr_dirs:   h.sfr_dirs,
-      nasnap_vgs: h.nasnap_vgs,
+      host_id:     h.host_id,
+      stale_nfs:   h.stale_nfs,
+      sfr_dirs:    h.sfr_dirs,
+      nasnap_vgs:  h.nasnap_vgs,
+      orphan_nbds: h.orphan_nbds,
     });
     var failed = (r.results || []).filter(function(x) { return !x.ok; });
     if (!failed.length) {

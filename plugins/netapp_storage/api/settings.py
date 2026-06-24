@@ -1188,6 +1188,18 @@ def _pve_health_check():
                 if vg:
                     rec["nasnap_vgs"].append(vg)
 
+            # Orphaned NBD devices: connected (non-zero size) but no qemu-nbd process
+            out4 = ssh_run(host, user, pw,
+                "for d in /dev/nbd*; do "
+                "  [[ \"$d\" =~ p[0-9]+$ ]] && continue; "   # skip partition nodes
+                "  sz=$(blockdev --getsize64 \"$d\" 2>/dev/null || echo 0); "
+                "  [ \"$sz\" -gt 0 ] 2>/dev/null || continue; "
+                "  pid=$(fuser \"$d\" 2>/dev/null | tr -s ' ' '\\n' | grep -v '^$' | head -1); "
+                "  [ -z \"$pid\" ] && echo \"$d\"; "
+                "done 2>/dev/null || true",
+                capture=True, timeout=15)
+            rec["orphan_nbds"] = [l.strip() for l in out4.strip().splitlines() if l.strip()]
+
         except Exception as e:
             rec["error"] = str(e)
 
@@ -1205,11 +1217,12 @@ def _pve_cleanup():
     import shlex
     from ..core._helpers import ssh_run, build_pve_client
 
-    data       = request.get_json() or {}
-    host_id    = str(data.get("host_id", "")).strip()
-    stale_nfs  = data.get("stale_nfs",  [])
-    sfr_dirs   = data.get("sfr_dirs",   [])
-    nasnap_vgs = data.get("nasnap_vgs", [])
+    data        = request.get_json() or {}
+    host_id     = str(data.get("host_id", "")).strip()
+    stale_nfs   = data.get("stale_nfs",   [])
+    sfr_dirs    = data.get("sfr_dirs",    [])
+    nasnap_vgs  = data.get("nasnap_vgs",  [])
+    orphan_nbds = data.get("orphan_nbds", [])
 
     if not host_id:
         return {"error": "host_id required"}, 400
@@ -1262,6 +1275,17 @@ def _pve_cleanup():
         except Exception as e:
             ok, errmsg = False, str(e)
         items.append({"type": "nasnap_vg", "target": vg, "ok": ok, "error": errmsg})
+
+    # Orphaned NBD devices: disconnect
+    for dev in orphan_nbds:
+        ok, errmsg = True, ""
+        try:
+            ssh_run(host, user, pw,
+                f"qemu-nbd --disconnect {shlex.quote(dev)} 2>/dev/null || true",
+                timeout=15)
+        except Exception as e:
+            ok, errmsg = False, str(e)
+        items.append({"type": "orphan_nbd", "target": dev, "ok": ok, "error": errmsg})
 
     return {"results": items}
 
