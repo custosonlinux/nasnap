@@ -586,6 +586,8 @@ def create_app():
         '</svg>'
         'Users'
         '</a>'
+        # Help button
+        '<button id="globalHelpBtn" class="btn-tab-help" onclick="showTabHelp()" title="Help">?</button>'
         '<button onclick="nasnapLogout()" title="Sign out" '
         'style="display:flex;align-items:center;gap:5px;padding:5px 10px;'
         'font-size:11px;font-weight:500;color:var(--muted);background:none;'
