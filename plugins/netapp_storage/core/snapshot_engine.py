@@ -409,8 +409,8 @@ def _run_snapshot(job_id, params, username):
         # ── 9. Update DB ──────────────────────────────────────────────
         completed = datetime.now(timezone.utc).isoformat()
         db.execute(
-            "UPDATE netapp_snapshots SET status='done', ontap_snap_uuid=?, completed_at=? WHERE id=?",
-            (ontap_snap_uuid, completed, snapshot_id),
+            "UPDATE netapp_snapshots SET status='done', ontap_snap_uuid=?, completed_at=?, lock_expires=? WHERE id=?",
+            (ontap_snap_uuid, completed, expiry_time or '', snapshot_id),
         )
         db.execute(
             "UPDATE netapp_jobs SET status='done', progress_pct=100, completed_at=? WHERE id=?",

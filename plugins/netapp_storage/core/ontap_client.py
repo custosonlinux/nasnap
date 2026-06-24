@@ -173,7 +173,7 @@ class OntapClient:
 
     def list_snapshots(self, volume_uuid):
         data = self._get(f"storage/volumes/{volume_uuid}/snapshots",
-                         params={"fields": "uuid,name,create_time,comment,snapmirror_label"})
+                         params={"fields": "uuid,name,create_time,comment,snapmirror_label,expiry_time"})
         return data.get("records", [])
 
     def create_snapshot(self, volume_uuid, snap_name, comment="", snapmirror_label="", expiry_time=""):

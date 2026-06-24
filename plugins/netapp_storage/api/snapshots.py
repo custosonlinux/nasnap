@@ -507,6 +507,7 @@ def _list_snapshots():
                     "manifest_path": "",
                     "created_at": s.get("create_time", ""),
                     "completed_at": "",
+                    "lock_expires": s.get("expiry_time", "") or "",
                     "source": "ontap_native",
                     "san_optimized": bool(m.get("san_optimized", 0)),
                 })

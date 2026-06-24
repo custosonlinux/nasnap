@@ -1563,18 +1563,29 @@ function applyI18n() {
     <!-- ════════════════════════ SNAPSHOTS ════════════════════════ -->
     <div id="tab-snapshots" class="tab-panel" style="display:none">
       <div class="section-actions" style="gap:8px;align-items:center">
-        <button class="btn btn-primary" onclick="showCreateSnapshotForm()" data-i18n="btn_create_snapshot">+ Create Snapshot</button>
-        <button class="btn btn-ghost"   onclick="loadSnapshots()" data-i18n="btn_refresh">Refresh</button>
+        <button class="btn btn-primary" id="snapCreateBtn" onclick="showCreateSnapshotForm()" data-i18n="btn_create_snapshot">+ Create Snapshot</button>
+        <button class="btn btn-ghost"   onclick="_snapSource==='secondary'?loadSnapSecondary():loadSnapshots()" data-i18n="btn_refresh">Refresh</button>
+        <div style="display:flex;gap:4px;margin-left:4px">
+          <button id="snapSrcPrimary"   class="btn btn-primary btn-sm" onclick="snapSetSource('primary')">Primary</button>
+          <button id="snapSrcSecondary" class="btn btn-ghost btn-sm"   onclick="snapSetSource('secondary')">SnapMirror Secondary</button>
+        </div>
+        <div id="snapDrRow" style="display:none;gap:8px;align-items:center">
+          <select id="snapDrRelSel" onchange="loadSnapSecondary()" style="flex:1;max-width:380px;font-size:13px">
+            <option value="">— Select relationship —</option>
+          </select>
+        </div>
         <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
           <input id="snap_filter_text" type="search" data-i18n-placeholder="filter_search" placeholder="Search …"
                  style="width:160px;padding:5px 8px;font-size:13px"
                  oninput="filterSnapshots()">
+          <span id="snapSrcFilterWrap">
           <select id="snap_filter_source" onchange="filterSnapshots()"
                   style="padding:5px 8px;font-size:13px">
             <option value="" data-i18n="opt_all_sources">All Sources</option>
             <option value="plugin" data-i18n="opt_plugin">Plugin</option>
             <option value="ontap_native" data-i18n="opt_ontap_native">ONTAP native</option>
           </select>
+          </span>
           <select id="snap_filter_datastore" onchange="filterSnapshots()"
                   style="padding:5px 8px;font-size:13px;max-width:160px">
             <option value="" data-i18n="opt_all_datastores">All Datastores</option>
@@ -1642,13 +1653,14 @@ function applyI18n() {
                 <th class="sortable" onclick="snapSort('consistency')"><span data-i18n="th_consistency">Consistency</span> <span class="si" id="ss_consistency">⇅</span></th>
                 <th class="sortable" onclick="snapSort('label')"><span data-i18n="th_label">Label</span> <span class="si" id="ss_label">⇅</span></th>
                 <th class="sortable" onclick="snapSort('status')"><span data-i18n="th_status">Status</span> <span class="si" id="ss_status">⇅</span></th>
+                <th>Lock</th>
                 <th class="sortable" onclick="snapSort('source')"><span data-i18n="th_source">Source</span> <span class="si" id="ss_source">⇅</span></th>
                 <th class="sortable" onclick="snapSort('created_at')"><span data-i18n="th_created">Created</span> <span class="si" id="ss_created_at">↓</span></th>
                 <th data-i18n="th_actions">Actions</th>
               </tr>
             </thead>
             <tbody id="snapshotsBody">
-              <tr><td colspan="10" class="empty"><span class="spinner"></span></td></tr>
+              <tr><td colspan="11" class="empty"><span class="spinner"></span></td></tr>
             </tbody>
           </table>
         </div>
@@ -2413,7 +2425,10 @@ function applyI18n() {
 <script>
 const API = '/api/plugins/netapp_storage/api';
 let _mappingsCache = [];
-let _allSnapshots  = [];   // cached snapshot list (for pagination + restore)
+let _allSnapshots  = [];   // cached primary snapshot list (for pagination + restore)
+let _snapSecSnaps  = [];   // cached secondary snapshot list
+var _snapSource    = 'primary';
+var _snapSecRelId  = '';
 let _snapPage      = 0;
 const _snapPageSize = 25;
 var _snapSortCol = 'created_at';
@@ -3495,6 +3510,74 @@ async function loadSnapshots() {
   } catch(e) { toast(e.message,'error'); }
 }
 
+function snapSetSource(src) {
+  _snapSource = src;
+  document.getElementById('snapSrcPrimary').className   = src==='primary'   ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+  document.getElementById('snapSrcSecondary').className = src==='secondary' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+  document.getElementById('snapDrRow').style.display    = src==='secondary' ? 'flex' : 'none';
+  document.getElementById('snapCreateBtn').style.display = src==='secondary' ? 'none' : '';
+  var srcWrap = document.getElementById('snapSrcFilterWrap');
+  if (srcWrap) srcWrap.style.display = src==='secondary' ? 'none' : '';
+  if (src === 'primary') { _snapSecSnaps = []; loadSnapshots(); }
+  else { _snapSecSnaps = []; _snapPage = 0; renderSnapshots(); loadSnapDrRelationships(); }
+}
+
+async function loadSnapDrRelationships() {
+  var sel = document.getElementById('snapDrRelSel');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select relationship —</option>';
+  try {
+    var rels = await apiFetch('snapmirror/relationships');
+    var matched = rels.filter(function(r){ return r.dest_endpoint_id; });
+    sel.innerHTML = '<option value="">— Select relationship —</option>'+
+      matched.map(function(r){
+        return '<option value="'+r.id+'">'+esc(r.source_volume)+' → '+esc(r.dest_cluster_name||'?')+':'+esc(r.dest_volume||'?')+'</option>';
+      }).join('');
+    if (!matched.length) toast('No SnapMirror relationships with secondary endpoint configured','error');
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function loadSnapSecondary() {
+  var relId = (document.getElementById('snapDrRelSel')||{}).value||'';
+  _snapSecRelId = relId; _snapSecSnaps = []; _snapPage = 0;
+  if (!relId) { renderSnapshots(); return; }
+  var tbody = document.getElementById('snapshotsBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="11" class="empty"><span class="spinner"></span></td></tr>';
+  try {
+    var rels = await apiFetch('snapmirror/relationships');
+    var rel  = (rels||[]).find(function(r){ return r.id===relId; });
+    var data = await apiFetch('snapmirror/secondary-snapshots?relationship_id='+encodeURIComponent(relId));
+    var snaps = (data.snapshots||[]);
+    var volName = rel ? (rel.dest_volume||rel.dest_cluster_name||'') : '';
+    var svm = rel ? (rel.dest_svm||'') : '';
+    var ep  = rel ? (rel.dest_cluster_name||'') : '';
+    _snapSecSnaps = snaps
+      .filter(function(s){ return !s.name.startsWith('snapmirror.'); })
+      .map(function(s){
+        return {
+          id:             s.uuid||'',
+          ontap_snap_uuid: s.uuid||'',
+          mapping_id:     relId,
+          snap_name:      s.name||'',
+          source:         'secondary',
+          status:         'done',
+          consistency:    '–',
+          pve_storage_id: '',
+          volume_name:    volName,
+          svm_name:       svm,
+          endpoint_name:  ep,
+          vmids:          [],
+          vm_names:       {},
+          label:          s.snapmirror_label||'',
+          schedule_id:    '',
+          created_at:     s.create_time||'',
+          lock_expires:   s.expiry_time||'',
+        };
+      });
+    renderSnapshots();
+  } catch(e) { toast(e.message,'error'); }
+}
+
 function filterSnapshots() { renderSnapshots(); }
 function snapSort(col) {
   if (_snapSortCol === col) { _snapSortDir = -_snapSortDir; }
@@ -3502,48 +3585,82 @@ function snapSort(col) {
   renderSnapshots();
 }
 
+function _snapLockHtml(lockIso) {
+  if (!lockIso) return '<span style="color:var(--muted)">–</span>';
+  var exp = Date.parse(lockIso);
+  var now = Date.now();
+  if (isNaN(exp)) return '<span style="color:var(--muted)">–</span>';
+  var diff = exp - now;
+  var active = diff > 0;
+  var absDate = new Date(exp).toISOString().replace('T',' ').slice(0,16)+' UTC';
+  var remaining = '';
+  if (active) {
+    var days = Math.floor(diff / 86400000);
+    var hrs  = Math.floor((diff % 86400000) / 3600000);
+    remaining = days > 0 ? (days+'d '+hrs+'h') : (hrs+'h');
+  }
+  var lockSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+  if (active) {
+    return '<span title="Tamperproof — locked until '+absDate+'" style="display:inline-flex;align-items:center;color:var(--accent);font-size:12px;white-space:nowrap">'
+      +lockSvg+remaining+'</span>';
+  } else {
+    return '<span title="Tamperproof lock expired '+absDate+'" style="display:inline-flex;align-items:center;color:var(--muted);font-size:12px;white-space:nowrap">'
+      +lockSvg+'expired</span>';
+  }
+}
+
 function _snapRowHtml(s) {
-  var isNative = s.source === 'ontap_native';
-  var vmsHtml = isNative
+  var isNative   = s.source === 'ontap_native';
+  var isSecondary = s.source === 'secondary';
+  var vmsHtml = (isNative || isSecondary)
     ? '<span style="color:var(--muted)">–</span>'
     : '<div class="vm-bubble-box">'+(s.vmids||[]).map(function(id){
         return vmBadge(id, (s.vm_names||{})[String(id)]);
       }).join('')+'</div>';
   var actions = '';
-  if (s.status === 'done') {
-    actions += _icoBtn('ghost', t('act_restore'), 'prepareRestore(\''+s.id+'\')', 'restore');
-    if (!isNative) {
-      actions += _icoBtn('ghost', t('act_clone'), 'prepareClone(\''+s.id+'\')', 'clone');
-    } else {
-      actions += _icoBtn('ghost', t('act_clone'), 'prepareCloneNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')', 'clone');
+  if (!isSecondary) {
+    if (s.status === 'done') {
+      actions += _icoBtn('ghost', t('act_restore'), 'prepareRestore(\''+s.id+'\')', 'restore');
+      if (!isNative) {
+        actions += _icoBtn('ghost', t('act_clone'), 'prepareClone(\''+s.id+'\')', 'clone');
+      } else {
+        actions += _icoBtn('ghost', t('act_clone'), 'prepareCloneNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')', 'clone');
+      }
     }
+    var delCall = isNative
+      ? 'deleteSnapshotNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')'
+      : 'deleteSnapshot(\''+s.id+'\',\''+esc(s.snap_name)+'\')';
+    actions += _icoBtn('danger', t('act_delete'), delCall, 'trash');
   }
-  var delCall = isNative
-    ? 'deleteSnapshotNative(\''+esc(s.ontap_snap_uuid)+'\',\''+esc(s.mapping_id)+'\',\''+esc(s.snap_name)+'\')'
-    : 'deleteSnapshot(\''+s.id+'\',\''+esc(s.snap_name)+'\')';
-  actions += _icoBtn('danger', t('act_delete'), delCall, 'trash');
-  var sourceBadge = isNative
-    ? '<span class="corp-badge corp-badge-stopped">'+t('badge_ontap')+'</span>'
-    : (s.schedule_id ? '<span class="corp-badge corp-badge-ha">'+t('badge_schedule')+'</span>' : '<span style="color:var(--muted)">–</span>');
+  var sourceBadge = isSecondary
+    ? '<span class="corp-badge corp-badge-maintenance">Secondary</span>'
+    : isNative
+      ? '<span class="corp-badge corp-badge-stopped">'+t('badge_ontap')+'</span>'
+      : (s.schedule_id ? '<span class="corp-badge corp-badge-ha">'+t('badge_schedule')+'</span>' : '<span style="color:var(--muted)">–</span>');
   var cbData = isNative
     ? 'data-native="1" data-uuid="'+esc(s.ontap_snap_uuid||'')+'" data-mid="'+esc(s.mapping_id||'')+'" data-name="'+esc(s.snap_name||'')+'"'
     : 'data-native="0" data-id="'+esc(s.id||'')+'"';
-  var snapKey = isNative
-    ? ('n_'+(s.ontap_snap_uuid||'')+'_'+(s.mapping_id||''))
-    : ('p_'+String(s.id||''));
+  var snapKey = isSecondary
+    ? ('s_'+(s.ontap_snap_uuid||s.id||'')+'_'+(s.mapping_id||''))
+    : isNative
+      ? ('n_'+(s.ontap_snap_uuid||'')+'_'+(s.mapping_id||''))
+      : ('p_'+String(s.id||''));
   var isSel = _vsSelectedKeys.has(snapKey);
-  return '<tr data-snap-key="'+snapKey+'"'+(isNative?' style="opacity:.85"':'')+'>'
-    +'<td style="padding:4px 8px"><input type="checkbox" class="snap-cb"'+(isSel?' checked':'')
-    +' onchange="snapCbChange(\''+snapKey+'\',this)" '+cbData+'></td>'
+  var lockHtml = _snapLockHtml(s.lock_expires || s.expiry_time || '');
+  var rowStyle = (isNative||isSecondary) ? ' style="opacity:.85"' : '';
+  return '<tr data-snap-key="'+snapKey+'"'+rowStyle+'>'
+    +'<td style="padding:4px 8px">'+(isSecondary?'':'<input type="checkbox" class="snap-cb"'+(isSel?' checked':'')
+    +' onchange="snapCbChange(\''+snapKey+'\',this)" '+cbData+'>')+'</td>'
     +'<td data-label="Name"><code>'+esc(s.snap_name)+'</code></td>'
     +'<td data-label="Datastore"><strong>'+esc(s.pve_storage_id||s.volume_name||'')+'</strong>'
     +(s.pve_storage_id&&s.volume_name&&s.volume_name!==s.pve_storage_id?'<br><code style="font-size:11px;opacity:.7">'+esc(s.volume_name)+'</code>':'')
     +(s.svm_name||s.endpoint_name?'<br><span style="font-size:.75rem;color:var(--muted);font-family:monospace">'+esc(s.svm_name||'')+(s.svm_name&&s.endpoint_name?' · ':'')+esc(s.endpoint_name||'')+'</span>':'')
     +'</td>'
     +'<td data-label="VMs" style="max-width:200px;word-break:break-word">'+vmsHtml+'</td>'
-    +'<td data-label="Consistency">'+(isNative?'<span style="color:var(--muted)">–</span>':esc(s.consistency))+'</td>'
+    +'<td data-label="Consistency">'+(isNative||isSecondary?'<span style="color:var(--muted)">–</span>':esc(s.consistency))+'</td>'
     +'<td data-label="Label">'+(s.label?'<span class="corp-badge corp-badge-ha">'+esc(s.label)+'</span>':'<span style="color:var(--muted)">–</span>')+'</td>'
     +'<td data-label="Status">'+statusBadge(s.status)+'</td>'
+    +'<td data-label="Lock">'+lockHtml+'</td>'
     +'<td data-label="Source">'+sourceBadge+'</td>'
     +'<td data-label="Created" style="color:var(--muted)">'+fmtDateRel(s.created_at)+'</td>'
     +'<td data-label="Actions"><div class="row-actions">'+actions+'</div></td></tr>';
@@ -3605,11 +3722,12 @@ function _vsUpdateSelectAll() {
 
 function renderSnapshots() {
   var text   = (document.getElementById('snap_filter_text').value||'').toLowerCase();
-  var source = document.getElementById('snap_filter_source').value;
+  var source = _snapSource === 'secondary' ? '' : document.getElementById('snap_filter_source').value;
   var ds     = document.getElementById('snap_filter_datastore').value;
 
+  var baseData = _snapSource === 'secondary' ? _snapSecSnaps : _allSnapshots;
   var _win = _tlEffectiveWindow();
-  var filtered = _allSnapshots.filter(function(s) {
+  var filtered = baseData.filter(function(s) {
     if (source && s.source !== source) return false;
     var sDs = s.pve_storage_id || s.volume_name || '';
     if (ds && sDs !== ds) return false;
@@ -3659,7 +3777,11 @@ function renderSnapshots() {
 
   var tbody = document.getElementById('snapshotsBody');
   if (!total) {
-    tbody.innerHTML = _emptyRow(10, _svgCamera, 'No snapshots yet', 'Start protecting your VMs with on-demand or scheduled NetApp Snapshots.', '+ Create Snapshot', 'showCreateSnapshotForm()');
+    var emptyMsg = _snapSource === 'secondary' ? 'No secondary snapshots' : 'No snapshots yet';
+    var emptySub = _snapSource === 'secondary' ? 'Select a SnapMirror relationship to load snapshots from the secondary volume.' : 'Start protecting your VMs with on-demand or scheduled NetApp Snapshots.';
+    var emptyBtn = _snapSource === 'secondary' ? null : '+ Create Snapshot';
+    var emptyAct = _snapSource === 'secondary' ? null : 'showCreateSnapshotForm()';
+    tbody.innerHTML = _emptyRow(11, _svgCamera, emptyMsg, emptySub, emptyBtn, emptyAct);
     _vsUpdateSelectAll();
     renderTimeline(filtered);
     return;

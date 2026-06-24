@@ -121,6 +121,8 @@ def _init_db():
         _add_column_if_missing(db, "netapp_snapshot_schedules", "sm_tamperproof_enabled", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_snapshot_schedules", "sm_tamperproof_days",    "INTEGER NOT NULL DEFAULT 0")
 
+        _add_column_if_missing(db, "netapp_snapshots", "lock_expires", "TEXT NOT NULL DEFAULT ''")
+
         _add_column_if_missing(db, "netapp_pve_hosts",  "nfs_ip",        "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(db, "netapp_endpoints", "skip_nfs",      "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_endpoints", "san_optimized", "INTEGER NOT NULL DEFAULT 0")
