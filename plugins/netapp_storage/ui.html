@@ -10749,7 +10749,7 @@ function _dbBakLoadNfsDatastores(selectedId) {
   if (!sel) return;
   apiFetch('provisioning/datastores')
     .then(function(d){
-      var datastores = (d.provisioned || []).filter(function(ds){ return (ds.protocol||'').toLowerCase() === 'nfs' || !ds.protocol; });
+      var datastores = (d.datastores || []).filter(function(ds){ return (ds.protocol||'').toLowerCase() === 'nfs' || !ds.protocol; });
       sel.innerHTML = datastores.length
         ? datastores.map(function(ds){
             return '<option value="' + esc(ds.id) + '"' + (ds.id === selectedId ? ' selected' : '') + '>' + esc(ds.name || ds.pve_storage_id) + '</option>';
