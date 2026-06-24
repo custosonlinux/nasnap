@@ -210,7 +210,7 @@
   .btn-warning { background: transparent; color: #f0a040; border-color: transparent; }
   .btn-warning:hover { background: rgba(229,112,0,.1); border-color: #f0a040; }
   .btn-sm { padding: 4px 10px; font-size: 11px; }
-  .btn-icon { padding: 5px; width: 28px; height: 28px; justify-content: center; }
+  .btn-icon { padding: 5px; width: 34px; height: 34px; justify-content: center; }
   .btn-icon[data-tip] { position: relative; }
   .btn-icon[data-tip]::after {
     content: attr(data-tip);
@@ -398,8 +398,8 @@
   .empty { color: var(--muted); padding: 32px; text-align: center; font-size: 13px; }
   .spinner {
     display: inline-block;
-    width: 14px; height: 14px;
-    border: 2px solid var(--border);
+    width: 22px; height: 22px;
+    border: 3px solid var(--border);
     border-top-color: var(--primary);
     border-radius: 50%;
     animation: spin .7s linear infinite;
@@ -408,6 +408,8 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes tlFlash { 0%,100%{background:transparent} 50%{background:rgba(224,120,0,.18)} }
   .tl-highlight { animation: tlFlash .5s ease 3; }
+  @keyframes sfrMountHint { 0%,100%{box-shadow:0 0 0 0 rgba(0,94,184,0)} 50%{box-shadow:0 0 0 6px rgba(0,94,184,.5)} }
+  .sfr-mount-hint { animation: sfrMountHint .55s ease 4; }
 
   @media (max-width: 680px) {
     #snapTableScroller { max-height: none !important; }
@@ -3761,9 +3763,10 @@ var _I = {
   resize:  'M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4',
   addHost: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z',
   link:    'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
+  play:    'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
 };
 function _ico(key, sz) {
-  sz = sz || 15;
+  sz = sz || 18;
   return '<svg width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="'+_I[key]+'"/></svg>';
 }
@@ -5109,11 +5112,11 @@ function _renderSchedules() {
       '<td>'+esc(cronHuman(s.cron_expr))+'</td>' +
       '<td>'+(s.label?'<span class="corp-badge corp-badge-ha">'+esc(s.label)+'</span>':'<span style="color:var(--muted)">–</span>')+'</td>' +
       '<td>'+s.retention_count+'× '+(s.tamperproof_enabled ? _dbPill('Lock '+s.tamperproof_days+'d','rgba(86,131,210,.15)','var(--primary)') : '')+(s.sm_tamperproof_enabled ? _dbPill('Dest '+s.sm_tamperproof_days+'d','rgba(86,131,210,.08)','var(--primary)') : '')+'</td>' +
-      '<td>'+(s.enabled?'<span class="corp-badge corp-badge-online">'+t('badge_active')+'</span>':'<span class="corp-badge corp-badge-stopped">'+t('badge_inactive')+'</span>')+'</td>' +
+      '<td>'+(s.enabled?'<span class="badge badge-green">'+t('badge_active')+'</span>':'<span class="badge badge-red">'+t('badge_inactive')+'</span>')+'</td>' +
       '<td style="color:var(--muted)">'+lastRun+'</td>' +
       '<td>'+schedSmBadge(s.snapmirror)+'</td>' +
       '<td><div class="row-actions">' +
-        _icoBtn(s.enabled?'ghost':'success', s.enabled?t('act_deactivate'):t('act_activate'), 'toggleSchedule(\''+s.id+'\','+s.enabled+')', s.enabled?'pause':'check') +
+        _icoBtn(s.enabled?'warning':'success', s.enabled?t('act_deactivate'):t('act_activate'), 'toggleSchedule(\''+s.id+'\','+s.enabled+',this)', s.enabled?'pause':'play') +
         _icoBtn('primary', t('act_run_now'), 'runNow(\''+s.id+'\',\''+esc(s.name)+'\')', 'run') +
         _icoBtn('ghost',   t('act_edit'),    'editSchedule(\''+s.id+'\')', 'edit') +
         _icoBtn('danger',  t('act_delete'),  'deleteSchedule(\''+s.id+'\',\''+esc(s.name)+'\')', 'trash') +
@@ -6315,12 +6318,16 @@ async function addSchedule() {
   finally { if (_sbtn) _sbtn.disabled = false; }
 }
 
-async function toggleSchedule(id, enabled) {
+async function toggleSchedule(id, enabled, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="animation:spin .7s linear infinite"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" opacity=".25"/><path d="M12 3a9 9 0 019 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+  }
   try {
     await apiPost('schedules/update', {id:id, enabled: enabled?0:1});
     toast(enabled?t('msg_sched_disabled'):t('msg_sched_enabled'),'success');
-    loadSchedules();
   } catch(e) { toast(e.message,'error'); }
+  loadSchedules();
 }
 
 async function runNow(id, name) {
@@ -12997,7 +13004,6 @@ actLogPoll();
       </div>
       <div style="flex:1"></div>
       <span id="sfrGuestBadge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border);color:var(--muted);display:none"></span>
-      <button id="sfrFinishBtn" class="btn btn-primary btn-sm" onclick="sfrFinish()" title="Mark restore as complete — unmounts snapshot and closes the session cleanly">✓ Finish Restore</button>
       <button class="btn btn-ghost btn-sm" onclick="closeSfrModal()" title="Close without waiting for cleanup (emergency exit)">✕ Close</button>
     </div>
 
@@ -13006,7 +13012,7 @@ actLogPoll();
       <select id="sfrSnapSel" onchange="sfrSnapChanged()" style="min-width:180px;font-size:12px">
         <option value="">— select snapshot —</option>
       </select>
-      <select id="sfrDiskSel" style="min-width:160px;font-size:12px;display:none"></select>
+      <select id="sfrDiskSel" onchange="sfrDiskChanged()" style="min-width:160px;font-size:12px;display:none"></select>
       <button class="btn btn-primary btn-sm" id="sfrMountBtn" onclick="sfrMount()" style="display:none">Mount</button>
       <button class="btn btn-ghost btn-sm" id="sfrUmountBtn" onclick="sfrUmount()" style="display:none">⏏ Unmount</button>
       <div id="sfrPartChips" style="display:none;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
@@ -13081,6 +13087,10 @@ actLogPoll();
           <div id="sfrCopyBar2" style="height:100%;background:var(--primary);width:0%;transition:width .4s;border-radius:4px"></div>
         </div>
         <div id="sfrCopyProgressText" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+      </div>
+      <!-- Finish button — shown as soon as copy is initiated -->
+      <div id="sfrFinishRow" style="display:none;justify-content:flex-end">
+        <button id="sfrFinishBtn" class="btn btn-success btn-sm" onclick="sfrFinish()" title="Unmount snapshot, close session and clean up">✓ Finish Restore</button>
       </div>
     </div>
 
@@ -13343,12 +13353,24 @@ async function sfrSnapChanged() {
       return '<option value="' + esc(val) + '">' + esc(name) + esc(sz) + '</option>';
     }).join('');
     ds.style.display = disks.length > 1 ? '' : 'none';
-    document.getElementById('sfrMountBtn').style.display = '';
+    var _mb = document.getElementById('sfrMountBtn');
+    _mb.style.display = '';
+    _mb.classList.remove('sfr-mount-hint');
+    void _mb.offsetWidth;
+    _mb.classList.add('sfr-mount-hint');
     document.getElementById('sfrToolbarStatus').textContent =
       disks.length === 1 ? 'Ready to mount' : disks.length + ' disks — select and mount';
   } catch(e) {
     document.getElementById('sfrToolbarStatus').textContent = 'Error: ' + (e.message || e);
   }
+}
+
+function sfrDiskChanged() {
+  var mb = document.getElementById('sfrMountBtn');
+  if (!mb || mb.style.display === 'none') return;
+  mb.classList.remove('sfr-mount-hint');
+  void mb.offsetWidth;
+  mb.classList.add('sfr-mount-hint');
 }
 
 var _fsPref = {ext4:4,xfs:4,btrfs:4,ext3:3,ext2:3,reiserfs:3,f2fs:3,ntfs:2,fuseblk:2,vfat:1,fat32:1,fat16:1};
@@ -13805,6 +13827,7 @@ async function sfrDoCopy() {
   statusEl.textContent = 'Starting…';
   copyBtn.disabled = true;
   progWrap.style.display = 'none';
+  document.getElementById('sfrFinishRow').style.display = 'flex';
 
   try {
     var selVals      = Object.values(_sfr.snapSels);

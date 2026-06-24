@@ -1408,11 +1408,11 @@ def _copy_single_file_windows(pve, vmid, node, src_full_path, vm_dest_dir,
             "$sb=[System.Text.StringBuilder]::new();"
             f"@({chunks_ps})|ForEach-Object{{$sb.Append("
             "[System.IO.File]::ReadAllText($_, [System.Text.Encoding]::ASCII)"
-            ")|Out-Null}};"
+            ")|Out-Null};"
             f"[System.IO.File]::WriteAllBytes('{dest_ps}',"
             "[System.Convert]::FromBase64String($sb.ToString()));"
             f"@({chunks_ps})|ForEach-Object"
-            "{{Remove-Item $_ -Force -ErrorAction SilentlyContinue}}"
+            "{Remove-Item $_ -Force -ErrorAction SilentlyContinue}"
         )
         log.info(f"[sfr] win copy: {len(chunk_paths)} chunk(s) → {dest_file} ({vmid})")
         _, stderr, rc = _qga_exec(
@@ -1434,7 +1434,7 @@ def _copy_single_file_windows(pve, vmid, node, src_full_path, vm_dest_dir,
                     pve, vmid, node,
                     ["powershell.exe", "-NonInteractive", "-Command",
                      f"@({chunks_cl})|ForEach-Object"
-                     "{{Remove-Item $_ -Force -ErrorAction SilentlyContinue}}"],
+                     "{Remove-Item $_ -Force -ErrorAction SilentlyContinue}"],
                     timeout=30,
                 )
             except Exception:

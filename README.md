@@ -40,7 +40,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Tamperproof Snapshots (ONTAP Snapshot Locking / WORM, requires ONTAP 9.12.1+) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | SnapMirror Destination Tamperproof (independent lock duration) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Restore — SFSR (Single File / VM Disk, NFS only) | ✅ | ❌ n/a | ❌ n/a |
-| Single File Restore (SFR) — copy single file or multi-file/dir from snapshot into live VM via QGA | ✅ | ❌ n/a | ❌ n/a |
+| Single File Restore (SFR) — browse snapshot filesystem, copy files/dirs into live VM via QGA | ✅ | 🟠 Alpha | 🟠 Alpha |
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
 | VM Clone from snapshot | ✅ | 🟡 Beta | 🟡 Beta¹ |
@@ -54,6 +54,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Import VMs from Datastore (adopt existing volumes with VMs) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Datastore Index (self-describing index per snapshot) | ✅ NFS | ✅ snapmanifest LV | ✅ snapmanifest LV |
 | Startup auto-scan (reconcile index into DB on start) | ✅ | ✅ | ✅ |
+| PVE Host Maintenance (check/clean stale NFS mounts, SFR temp dirs, leftover LVM VGs on all PVE nodes) | ✅ | ✅ | ✅ |
 | Dashboard (7-day stats, timeline, protection overview, alerts) | ✅ | ✅ | ✅ |
 | Full DR Failover (planned & emergency) | 🔵 In Development | 🔵 In Development | 🔵 In Development |
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
@@ -489,6 +490,30 @@ Notification emails include:
 
 ---
 
+## PVE Host Maintenance
+
+**Settings → PVE Host Maintenance** scans all configured Proxmox hosts via SSH and reports stale resources left behind by interrupted or failed operations. A single click cleans up any individual host.
+
+### What it checks (per host)
+
+| Category | Details |
+|---|---|
+| Stale NFS mounts | NFS paths that return "Stale file handle" — typically from deleted or migrated ONTAP volumes. These cause `df` and PVE storage operations to hang. |
+| SFR temp directories | `/tmp/nasnap-sfr-*` directories left by interrupted Single File Restore sessions — including any active NBD device and mount. |
+| Leftover LVM VGs | LVM VGs named `nasnap_sfr_*` left by aborted SFR SAN sessions. |
+
+### Cleanup
+
+For each item, NaSnap performs a full teardown in the correct order:
+
+- **Stale NFS:** `umount -l <path>`
+- **SFR dirs:** `fuser -km` on the mount → NBD disconnect → `umount` → `rm -rf`
+- **LVM VGs:** `vgchange -an` → `vgremove -f`
+
+After cleanup, the health check re-runs automatically to confirm.
+
+---
+
 ## Job management
 
 All snapshot, restore, and clone operations run as background jobs visible under **Jobs & History**.
@@ -511,7 +536,7 @@ If a clone or restore job fails after the temporary ONTAP LUN was mapped to the 
 2. Disable I/O queuing: `multipathd disablequeueing map <WWID>`
 3. Flush the device: `multipath -f <WWID>`
 4. Remove stale SCSI paths: `echo 1 > /sys/block/<dev>/device/delete` for each path
-5. Delete the temporary ONTAP clone volume (`pgxclone_*`) via System Manager or CLI
+5. Delete the temporary ONTAP clone volume (named `pgxclone_<job_id>` in current builds) via System Manager or CLI
 6. Verify: `multipath -ll` and `vgs` must return cleanly
 
 ### SQLite "database is locked"
@@ -529,10 +554,13 @@ This is the default since v1.0.0 and prevents lock contention from background th
 
 ## Single File Restore (SFR) — Performance & Limits
 
-Single File Restore lets you copy individual files from an ONTAP snapshot directly into a running VM without mounting a full restore volume. It supports Linux and Windows VMs and requires the QEMU Guest Agent to be running inside the VM.
+Single File Restore lets you browse the filesystem inside an ONTAP snapshot and copy individual files or entire directories into a running VM — without a full volume restore. It supports Linux and Windows VMs and requires the QEMU Guest Agent to be running inside the VM.
+
+SFR works for NFS datastores (stable) and SAN datastores — iSCSI and NVMe-oF (Alpha). For SAN, NaSnap creates a temporary read-only ONTAP clone, maps it to the PVE host, imports it as an LVM VG, and attaches a single LV via `qemu-nbd --read-only`. From that point, browsing and copying works identically to NFS.
 
 ### How data travels
 
+**NFS:**
 ```
 NFS snapshot (PVE host)
   └─ SSH / cat ──▶ NaSnap (Python)
@@ -540,7 +568,16 @@ NFS snapshot (PVE host)
                                                └─ QMP socket ──▶ QEMU GA ──▶ VM disk
 ```
 
-No VM network access is required. Everything flows through the QGA socket on the PVE host.
+**SAN (iSCSI / NVMe-oF):**
+```
+ONTAP clone (read-only) ──▶ LUN/NS mapped to PVE
+  └─ vgimportclone + qemu-nbd ──▶ block device (PVE host)
+       └─ SSH / cat ──▶ NaSnap (Python)
+                            └─ HTTPS / PVE API ──▶ pveproxy
+                                                     └─ QMP socket ──▶ QEMU GA ──▶ VM disk
+```
+
+No VM network access is required in either case. Everything flows through the QGA socket on the PVE host.
 
 ### Why it is slower than a direct file copy
 
@@ -580,6 +617,8 @@ Before the first byte is sent, NaSnap auto-probes PVE's actual `file-write` payl
 
 ### Supported VM types
 
+The copy mechanism is the same regardless of whether the source snapshot is on NFS or SAN — once mounted, the file browser and transfer logic are identical.
+
 | VM | Copy to VM | Multi-file / directory |
 |---|---|---|
 | Linux (QEMU GA) | ✅ Single file + multi-file + directories | ✅ tar stream via QGA |
@@ -616,7 +655,7 @@ dd if=<src_lv> of=<dst_lv> bs=512M iflag=direct oflag=direct conv=fsync
 
 ### Temporary ONTAP objects
 
-All temporary objects created during a clone or restore operation are deleted automatically when the job completes or fails.
+All temporary objects created during a clone or restore operation are deleted automatically when the job completes or fails. The naming patterns below reflect the current build; they will be updated to a `nasnap_` prefix in a future release.
 
 | Object | Pattern |
 |---|---|
@@ -944,10 +983,22 @@ DEBUG=1 .venv/bin/python app.py
 - **Snapshot progress tracking** — the Activity Log progress bar now shows real progress through 8 engine milestones instead of staying at 0%.
 - **Activity Log linger** — the log panel stays visible for 10 seconds after job completion so you can read the result.
 
-### v1.5 — Planned
+### v1.5 — Released
+
+- **Single File Restore (SFR)** — Total Commander-style two-panel browser. Browse the filesystem inside any ONTAP snapshot, select files or directories, and copy them directly into a running VM via the QEMU Guest Agent — no full volume restore required.
+  - **NFS** (✅ Stable): direct SSH read from the NFS mount.
+  - **SAN — iSCSI / NVMe-oF** (🟠 Alpha): temporary read-only ONTAP clone → LUN/namespace mapped to PVE host → LVM import → `qemu-nbd --read-only` → same file browser.
+  - **Linux VMs**: single file, multi-file, and directory copy via tar stream through QGA.
+  - **Windows VMs**: single-file copy via PowerShell QGA path (base64 chunked); multi-file/directory: use ↓ tar.gz and restore manually.
+  - **Batch OS detection**: all VMs in the Restore & Clone view are probed concurrently (up to 12 threads) via a single cluster/resources call per PVE cluster.
+- **Active Directory / LDAP Authentication** (🟡 Beta) — connect NaSnap to an AD domain. Users authenticate with domain credentials; group membership maps to Admin or Viewer role. Local accounts (including the built-in `admin`) always remain active as a fallback — they are never blocked by LDAP configuration.
+- **PVE Host Maintenance** — Settings panel to scan all configured Proxmox nodes for stale NFS mounts, leftover SFR temp directories, and orphaned LVM VGs, with one-click cleanup per host.
+
+### v1.6 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
+- **VM Garbage Collection** — daily background scan comparing the NaSnap database against live ONTAP snapshots; removes DB entries for snapshots that no longer exist on ONTAP, keeping the Restore & Clone view clean after manual ONTAP-side deletions.
 - **Login rate limiting** — brute-force protection for the `/api/auth/login` endpoint.
 - **Health endpoint** — `/api/health` for external monitoring and load balancer probes.
 - **Audit log export** — CSV/JSON download of the audit log.
