@@ -6893,6 +6893,10 @@ async function prepareCloneNative(uuid, mappingId, snapName) {
   var btn = document.getElementById('ncm_submit');
   btn.disabled = false; btn.textContent = 'Start Clone';
 
+  document.querySelectorAll('.subtab').forEach(function(x){ x.classList.remove('active'); });
+  document.querySelectorAll('.tab-panel').forEach(function(x){ x.style.display='none'; });
+  document.querySelector('[data-tab="restore"]').classList.add('active');
+  document.getElementById('tab-restore').style.display = 'block';
   document.getElementById('ncModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
 
@@ -14002,6 +14006,18 @@ async function sfrVmDelete() {
 var _helpLang = 'en';
 var _helpTab  = '';
 
+// small inline icon helper for help text (same SVGs as the UI uses)
+function _hi(key) {
+  return '<span style="display:inline-flex;align-items:center;vertical-align:middle;margin-right:3px;opacity:.85">'
+    + _ico(key, 14) + '</span>';
+}
+var _hiSfr = '<span style="display:inline-flex;align-items:center;vertical-align:middle;margin-right:3px;opacity:.85">'
+  + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+  + '<path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+  + '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>'
+  + '<line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>'
+  + '</svg></span>';
+
 var _helpData = {
   dashboard: {
     title: { en: 'Dashboard', de: 'Dashboard' },
@@ -14034,39 +14050,45 @@ var _helpData = {
   snapshots: {
     title: { en: 'Snapshots', de: 'Snapshots' },
     en: '<h3>Overview</h3>'
-      + '<p>The Snapshots tab shows all ONTAP snapshots managed by NaSnap. Use the filters at the top to search and narrow down the list.</p>'
-      + '<h3>Toolbar buttons</h3><ul>'
-      + '<li><strong>+ Create Snapshot</strong> — Opens a wizard to take a new snapshot immediately. You choose the datastore, which VMs to include, a label, and consistency options.</li>'
+      + '<p>The Snapshots tab shows all ONTAP snapshots managed by NaSnap. Use the filters to search and narrow down the list.</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>+ Create Snapshot</strong> — Opens a wizard to take a new snapshot immediately. Choose the datastore, which VMs to include, a label, and consistency options.</li>'
       + '<li><strong>Refresh</strong> — Reloads the snapshot list from the database.</li>'
-      + '<li><strong>Search box</strong> — Filter by datastore name, snapshot name, or label.</li>'
-      + '<li><strong>Source filter</strong> — Show all, plugin-managed, or ONTAP-native snapshots.</li>'
-      + '<li><strong>Datastore filter</strong> — Restrict view to one datastore.</li>'
+      + '<li><strong>Search box</strong> — Filter by snapshot name, datastore, or label.</li>'
+      + '<li><strong>Source filter</strong> — Show all, plugin-managed (scheduled/manual), or ONTAP-native snapshots.</li>'
+      + '<li><strong>Datastore filter</strong> — Restrict the view to one specific datastore.</li>'
       + '</ul>'
+      + '<h3>Table columns</h3>'
+      + '<p><strong>Name</strong> — snapshot identifier &nbsp;·&nbsp; <strong>Datastore</strong> — storage volume &nbsp;·&nbsp; <strong>VMs</strong> — protected virtual machines &nbsp;·&nbsp; <strong>Consistency</strong> — crash / app-consistent &nbsp;·&nbsp; <strong>Label</strong> — SnapMirror label &nbsp;·&nbsp; <strong>Status</strong> — done / running / failed &nbsp;·&nbsp; <strong>Source</strong> — scheduled or ONTAP-native &nbsp;·&nbsp; <strong>Created</strong> — relative timestamp</p>'
       + '<h3>Row action icons</h3><ul>'
-      + '<li><strong>↩ Restore</strong> — Revert the VM(s) to this snapshot state (in-place rollback).</li>'
-      + '<li><strong>⎗ Clone</strong> — Create a new VM from this snapshot without touching the original.</li>'
-      + '<li><strong>🗂 Single File Restore</strong> — Mount the snapshot and browse/copy individual files into a running VM.</li>'
-      + '<li><strong>🗑 Delete</strong> — Delete the ONTAP snapshot. This is permanent.</li>'
+      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Navigates to <em>VM Restore &amp; Clone</em> and opens the restore wizard to roll back the VM(s) to this snapshot.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Navigates to <em>VM Restore &amp; Clone</em> and opens the clone wizard to create a new VM from this snapshot.</li>'
+      + '<li>'+_hi('trash')+'<strong>Delete</strong> — Permanently deletes the ONTAP snapshot after confirmation.</li>'
       + '</ul>'
+      + '<h3>Bulk selection</h3>'
+      + '<p>Use the checkboxes on the left to select multiple snapshots, then click <strong>Delete selection</strong> to delete them all at once.</p>'
       + '<h3>Snapshot states</h3>'
-      + '<p><code>done</code> = available for restore. <code>running</code> = being created. <code>failed</code> = error occurred (hover for details). <code>tamperproof</code> = locked by SnapLock, cannot be deleted until the lock expires.</p>',
+      + '<p><code>done</code> = available &nbsp;·&nbsp; <code>running</code> = in progress &nbsp;·&nbsp; <code>failed</code> = error (hover the badge for details) &nbsp;·&nbsp; <code>tamperproof</code> = SnapLock WORM locked, cannot be deleted before expiry</p>',
     de: '<h3>Übersicht</h3>'
-      + '<p>Der Snapshots-Tab zeigt alle von NaSnap verwalteten ONTAP-Snapshots. Mit den Filtern oben können Sie die Liste eingrenzen.</p>'
-      + '<h3>Toolbar-Buttons</h3><ul>'
-      + '<li><strong>+ Snapshot erstellen</strong> — Öffnet einen Assistenten für einen sofortigen Snapshot. Sie wählen Datastore, VMs, Label und Konsistenz-Optionen.</li>'
+      + '<p>Der Snapshots-Tab zeigt alle von NaSnap verwalteten ONTAP-Snapshots. Mit den Filtern lässt sich die Liste eingrenzen.</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>+ Snapshot erstellen</strong> — Öffnet einen Assistenten für einen sofortigen Snapshot. Datastore, VMs, Label und Konsistenz-Optionen auswählen.</li>'
       + '<li><strong>Aktualisieren</strong> — Lädt die Snapshot-Liste neu aus der Datenbank.</li>'
-      + '<li><strong>Suchfeld</strong> — Filtert nach Datastore-Name, Snapshot-Name oder Label.</li>'
-      + '<li><strong>Quell-Filter</strong> — Alle, plugin-verwaltete oder ONTAP-native Snapshots anzeigen.</li>'
-      + '<li><strong>Datastore-Filter</strong> — Ansicht auf einen Datastore beschränken.</li>'
+      + '<li><strong>Suchfeld</strong> — Filtert nach Snapshot-Name, Datastore oder Label.</li>'
+      + '<li><strong>Quell-Filter</strong> — Alle, plugin-verwaltete (geplant/manuell) oder ONTAP-native Snapshots anzeigen.</li>'
+      + '<li><strong>Datastore-Filter</strong> — Ansicht auf einen bestimmten Datastore beschränken.</li>'
       + '</ul>'
+      + '<h3>Tabellen-Spalten</h3>'
+      + '<p><strong>Name</strong> — Snapshot-Kennung &nbsp;·&nbsp; <strong>Datastore</strong> — Speicher-Volume &nbsp;·&nbsp; <strong>VMs</strong> — geschützte virtuelle Maschinen &nbsp;·&nbsp; <strong>Consistency</strong> — crash / app-konsistent &nbsp;·&nbsp; <strong>Label</strong> — SnapMirror-Label &nbsp;·&nbsp; <strong>Status</strong> — done / running / failed &nbsp;·&nbsp; <strong>Source</strong> — geplant oder ONTAP-nativ &nbsp;·&nbsp; <strong>Created</strong> — relativer Zeitstempel</p>'
       + '<h3>Zeilen-Icons</h3><ul>'
-      + '<li><strong>↩ Wiederherstellen</strong> — Setzt die VM(s) auf den Snapshot-Zustand zurück (In-Place-Rollback).</li>'
-      + '<li><strong>⎗ Klonen</strong> — Erstellt eine neue VM aus diesem Snapshot, ohne das Original zu verändern.</li>'
-      + '<li><strong>🗂 Einzeldatei-Wiederherstellung</strong> — Mounted den Snapshot und ermöglicht das Durchsuchen/Kopieren einzelner Dateien in eine laufende VM.</li>'
-      + '<li><strong>🗑 Löschen</strong> — Löscht den ONTAP-Snapshot permanent.</li>'
+      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Wechselt zu <em>VM Restore &amp; Clone</em> und öffnet den Wiederherstellungs-Assistenten für diesen Snapshot.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Wechselt zu <em>VM Restore &amp; Clone</em> und öffnet den Klon-Assistenten zum Erstellen einer neuen VM aus diesem Snapshot.</li>'
+      + '<li>'+_hi('trash')+'<strong>Löschen</strong> — Löscht den ONTAP-Snapshot nach Bestätigung dauerhaft.</li>'
       + '</ul>'
+      + '<h3>Mehrfachauswahl</h3>'
+      + '<p>Mit den Checkboxen links mehrere Snapshots auswählen, dann <strong>Delete selection</strong> klicken, um alle auf einmal zu löschen.</p>'
       + '<h3>Snapshot-Zustände</h3>'
-      + '<p><code>done</code> = bereit zur Wiederherstellung. <code>running</code> = wird gerade erstellt. <code>failed</code> = Fehler aufgetreten (Hover für Details). <code>tamperproof</code> = durch SnapLock gesperrt, kann erst nach Ablauf der Sperrdauer gelöscht werden.</p>'
+      + '<p><code>done</code> = verfügbar &nbsp;·&nbsp; <code>running</code> = läuft &nbsp;·&nbsp; <code>failed</code> = Fehler (Hover für Details) &nbsp;·&nbsp; <code>tamperproof</code> = SnapLock-WORM gesperrt, Löschung erst nach Ablauf möglich</p>'
   },
 
   schedules: {
@@ -14081,11 +14103,13 @@ var _helpData = {
       + '<li><span style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;border-radius:4px;padding:1px 7px;font-size:11px">Active</span> — Plan is running on schedule.</li>'
       + '<li><span style="background:#f8585822;color:#f85858;border:1px solid #f8585844;border-radius:4px;padding:1px 7px;font-size:11px">Inactive</span> — Plan is paused, no snapshots will be created.</li>'
       + '</ul>'
+      + '<h3>Table columns</h3>'
+      + '<p><strong>Name</strong> &nbsp;·&nbsp; <strong>Volume</strong> (datastore) &nbsp;·&nbsp; <strong>VMs</strong> &nbsp;·&nbsp; <strong>Schedule</strong> (cron expression) &nbsp;·&nbsp; <strong>Label</strong> (SnapMirror label) &nbsp;·&nbsp; <strong>Retention</strong> (number of snapshots to keep) &nbsp;·&nbsp; <strong>Status</strong> (Active / Inactive) &nbsp;·&nbsp; <strong>Last run</strong> &nbsp;·&nbsp; <strong>SnapMirror®</strong></p>'
       + '<h3>Row action icons</h3><ul>'
-      + '<li><strong>▶ Play (green)</strong> — Plan is inactive; click to activate it.</li>'
-      + '<li><strong>⏸ Pause (orange)</strong> — Plan is active; click to pause it.</li>'
-      + '<li><strong>✏ Edit</strong> — Modify plan settings (schedule, retention, VMs, etc.).</li>'
-      + '<li><strong>🗑 Delete</strong> — Permanently delete the protection plan (does not delete existing snapshots).</li>'
+      + '<li>'+_hi('play')+'<strong>Activate</strong> (green) — Plan is currently inactive; click to start scheduled snapshots.</li>'
+      + '<li>'+_hi('pause')+'<strong>Deactivate</strong> (orange) — Plan is currently active; click to pause it.</li>'
+      + '<li>'+_hi('edit')+'<strong>Edit</strong> — Modify plan settings (schedule, retention, VMs, etc.).</li>'
+      + '<li>'+_hi('trash')+'<strong>Delete</strong> — Permanently remove the protection plan. Existing snapshots are not deleted.</li>'
       + '</ul>'
       + '<h3>Plan Wizard — key settings</h3><ul>'
       + '<li><strong>Datastore(s)</strong> — One or more NFS/SAN datastores to snapshot together.</li>'
@@ -14105,11 +14129,13 @@ var _helpData = {
       + '<li><span style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;border-radius:4px;padding:1px 7px;font-size:11px">Active</span> — Plan läuft planmäßig.</li>'
       + '<li><span style="background:#f8585822;color:#f85858;border:1px solid #f8585844;border-radius:4px;padding:1px 7px;font-size:11px">Inactive</span> — Plan ist pausiert, keine Snapshots werden erstellt.</li>'
       + '</ul>'
+      + '<h3>Tabellen-Spalten</h3>'
+      + '<p><strong>Name</strong> &nbsp;·&nbsp; <strong>Volume</strong> (Datastore) &nbsp;·&nbsp; <strong>VMs</strong> &nbsp;·&nbsp; <strong>Schedule</strong> (Cron-Ausdruck) &nbsp;·&nbsp; <strong>Label</strong> (SnapMirror-Label) &nbsp;·&nbsp; <strong>Retention</strong> (Anzahl zu haltender Snapshots) &nbsp;·&nbsp; <strong>Status</strong> (Active / Inactive) &nbsp;·&nbsp; <strong>Last run</strong> &nbsp;·&nbsp; <strong>SnapMirror®</strong></p>'
       + '<h3>Zeilen-Icons</h3><ul>'
-      + '<li><strong>▶ Play (grün)</strong> — Plan ist inaktiv; Klick aktiviert ihn.</li>'
-      + '<li><strong>⏸ Pause (orange)</strong> — Plan ist aktiv; Klick pausiert ihn.</li>'
-      + '<li><strong>✏ Bearbeiten</strong> — Plan-Einstellungen ändern (Zeitplan, Aufbewahrung, VMs usw.).</li>'
-      + '<li><strong>🗑 Löschen</strong> — Schutzplan dauerhaft löschen (löscht keine vorhandenen Snapshots).</li>'
+      + '<li>'+_hi('play')+'<strong>Aktivieren</strong> (grün) — Plan ist inaktiv; Klick startet die geplanten Snapshots.</li>'
+      + '<li>'+_hi('pause')+'<strong>Deaktivieren</strong> (orange) — Plan ist aktiv; Klick pausiert ihn.</li>'
+      + '<li>'+_hi('edit')+'<strong>Bearbeiten</strong> — Plan-Einstellungen ändern (Zeitplan, Aufbewahrung, VMs usw.).</li>'
+      + '<li>'+_hi('trash')+'<strong>Löschen</strong> — Schutzplan dauerhaft entfernen. Vorhandene Snapshots werden nicht gelöscht.</li>'
       + '</ul>'
       + '<h3>Plan-Assistent — wichtige Einstellungen</h3><ul>'
       + '<li><strong>Datastore(s)</strong> — Einen oder mehrere NFS/SAN-Datastores gemeinsam sichern.</li>'
@@ -14130,14 +14156,14 @@ var _helpData = {
       + '<li><strong>SnapMirror Secondary</strong> — Snapshots on a DR replica. Select the SnapMirror relationship from the dropdown that appears.</li>'
       + '</ul>'
       + '<h3>VM table</h3>'
-      + '<p>Lists all VMs that have at least one snapshot. Columns: VMID, Name, Datastore, Protocol, Snapshot count, Last Snapshot. Click a column header to sort. Use the search box to filter. The <strong>Imported</strong> filter shows only VMs whose snapshots were imported via the datastore index.</p>'
+      + '<p>Lists all VMs that have at least one snapshot. Columns: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (count), <strong>Last Snapshot</strong>, <strong>OS</strong> (detected via QEMU Guest Agent). Click any column header to sort. Use the search box to filter by VMID, name, or datastore. The <strong>Imported</strong> filter shows only VMs with index-imported snapshots.</p>'
       + '<h3>Row action icons</h3><ul>'
-      + '<li><strong>↩ Restore</strong> — Opens the restore wizard to roll back the VM to a chosen snapshot. You select the snapshot, confirm the target VM, and start the restore.</li>'
-      + '<li><strong>⎗ Clone</strong> — Opens the clone wizard to create a new independent VM from a snapshot. Choose a target PVE node, new VMID, and storage.</li>'
-      + '<li><strong>🗂 Single File Restore</strong> — Opens a file browser (Total Commander style) that mounts the snapshot disk and lets you copy individual files directly into the running VM via the QEMU Guest Agent.</li>'
+      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Opens the restore wizard inline. Choose a snapshot and confirm to roll the VM back in-place.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Opens the clone wizard inline. Choose a snapshot, target PVE node, new VMID and name to create an independent VM copy.</li>'
+      + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Opens a file browser (Total Commander style) that mounts the snapshot disk and lets you copy individual files directly into the running VM via QEMU Guest Agent. The button activates automatically once the OS type is detected (Linux or Windows).</li>'
       + '</ul>'
       + '<h3>Refresh button</h3>'
-      + '<p>Reloads the VM list from the snapshot database. Use this after new snapshots have been created or after snapshots have been deleted.</p>',
+      + '<p>Reloads the VM list from the snapshot database. Use this after new snapshots have been taken or deleted.</p>',
     de: '<h3>Übersicht</h3>'
       + '<p>Dieser Tab ermöglicht die Wiederherstellung von VMs auf einen früheren Zustand oder die Erstellung von Klonen aus vorhandenen Snapshots.</p>'
       + '<h3>Quell-Auswahl</h3><ul>'
@@ -14145,14 +14171,14 @@ var _helpData = {
       + '<li><strong>SnapMirror Secondary</strong> — Snapshots auf einem DR-Replikat. Die SnapMirror-Beziehung aus dem Dropdown auswählen.</li>'
       + '</ul>'
       + '<h3>VM-Tabelle</h3>'
-      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: VMID, Name, Datastore, Protokoll, Snapshot-Anzahl, Letzter Snapshot. Spaltenköpfe klicken zum Sortieren. Suchfeld zum Filtern nutzen. Der Filter <strong>Imported</strong> zeigt nur VMs mit per Datastore-Index importierten Snapshots.</p>'
+      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (Anzahl), <strong>Last Snapshot</strong>, <strong>OS</strong> (per QEMU Guest Agent erkannt). Spaltenköpfe klicken zum Sortieren. Suchfeld filtert nach VMID, Name oder Datastore. Filter <strong>Imported</strong> zeigt nur VMs mit per Datastore-Index importierten Snapshots.</p>'
       + '<h3>Zeilen-Icons</h3><ul>'
-      + '<li><strong>↩ Wiederherstellen</strong> — Öffnet den Wiederherstellungs-Assistenten zum Zurücksetzen der VM auf einen gewählten Snapshot.</li>'
-      + '<li><strong>⎗ Klonen</strong> — Öffnet den Klon-Assistenten zum Erstellen einer neuen unabhängigen VM aus einem Snapshot.</li>'
-      + '<li><strong>🗂 Einzeldatei-Wiederherstellung</strong> — Öffnet einen Datei-Browser (Total Commander-Stil), der den Snapshot-Datenträger einbindet und das Kopieren einzelner Dateien direkt in die laufende VM via QEMU Guest Agent ermöglicht.</li>'
+      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Öffnet den Wiederherstellungs-Assistenten direkt. Snapshot auswählen und bestätigen, um die VM zurückzusetzen.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Öffnet den Klon-Assistenten direkt. Snapshot, Ziel-PVE-Node, neue VMID und Name wählen, um eine unabhängige VM-Kopie zu erstellen.</li>'
+      + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Öffnet einen Datei-Browser (Total Commander-Stil), der den Snapshot-Datenträger einbindet und das Kopieren einzelner Dateien direkt in die laufende VM via QEMU Guest Agent ermöglicht. Der Button aktiviert sich automatisch, sobald der OS-Typ erkannt wurde (Linux oder Windows).</li>'
       + '</ul>'
       + '<h3>Refresh-Button</h3>'
-      + '<p>Lädt die VM-Liste aus der Snapshot-Datenbank neu. Verwenden Sie diesen nach dem Erstellen neuer oder Löschen vorhandener Snapshots.</p>'
+      + '<p>Lädt die VM-Liste aus der Snapshot-Datenbank neu. Verwenden nach dem Erstellen neuer oder Löschen vorhandener Snapshots.</p>'
   },
 
   storage: {
@@ -14200,39 +14226,43 @@ var _helpData = {
   jobs: {
     title: { en: 'Jobs & Logs', de: 'Jobs & Protokolle' },
     en: '<h3>Overview</h3>'
-      + '<p>Jobs &amp; Logs shows the history of all snapshot operations — scheduled runs, manual triggers, restores, and clones.</p>'
+      + '<p>Jobs &amp; Logs shows the full history of all snapshot operations — scheduled runs, manual triggers, restores, and clones.</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>Refresh</strong> — Reloads the job list.</li>'
-      + '<li><strong>Status filter</strong> — Show all jobs, or filter by running / done / failed.</li>'
-      + '<li><strong>Date filter</strong> — Limit view to jobs from a specific date range.</li>'
-      + '<li><strong>Datastore filter</strong> — Show only jobs for a specific datastore.</li>'
+      + '<li><strong>Refresh</strong> — Reloads the job list from the server.</li>'
+      + '<li><strong>Clean up completed</strong> — Removes finished (done/failed) job records from the database to free space. Running jobs are not affected.</li>'
       + '</ul>'
-      + '<h3>Job table columns</h3><ul>'
-      + '<li><strong>ID</strong> — Unique job identifier.</li>'
-      + '<li><strong>Type</strong> — snapshot / restore / clone / sfr (single file restore).</li>'
-      + '<li><strong>Status</strong> — running (yellow), done (green), failed (red).</li>'
-      + '<li><strong>Datastore</strong> — Which storage was involved.</li>'
-      + '<li><strong>Started / Duration</strong> — Timestamps and runtime.</li>'
+      + '<h3>Pagination</h3>'
+      + '<p>Use <strong>← Back</strong> and <strong>Next →</strong> at the bottom to page through older jobs.</p>'
+      + '<h3>Table columns</h3><ul>'
+      + '<li><strong>Type</strong> — snapshot / restore / clone / sfr (single file restore) / provision.</li>'
+      + '<li><strong>VMID</strong> — Virtual machine ID involved in the job.</li>'
+      + '<li><strong>Node</strong> — PVE node where the operation ran.</li>'
+      + '<li><strong>Status</strong> — <span style="color:#f59e0b">running</span> / <span style="color:#22c55e">done</span> / <span style="color:#f85858">failed</span></li>'
+      + '<li><strong>Created by</strong> — schedule name, or "manual" for on-demand jobs.</li>'
+      + '<li><strong>Started</strong> — timestamp and duration.</li>'
+      + '<li><strong>Log</strong> — click the log icon to expand the full output.</li>'
       + '</ul>'
       + '<h3>Log detail</h3>'
-      + '<p>Click any row to expand the full log output for that job. Useful for diagnosing failures — the log includes every step NaSnap performed and any error messages from ONTAP or Proxmox VE.</p>',
+      + '<p>Expand any row to see the complete step-by-step log. Useful for diagnosing failures — the log includes every action NaSnap took and any error messages from ONTAP or Proxmox VE.</p>',
     de: '<h3>Übersicht</h3>'
-      + '<p>Jobs &amp; Protokolle zeigt den Verlauf aller Snapshot-Operationen — geplante Läufe, manuelle Auslöser, Wiederherstellungen und Klone.</p>'
+      + '<p>Jobs &amp; Protokolle zeigt den vollständigen Verlauf aller Snapshot-Operationen — geplante Läufe, manuelle Auslöser, Wiederherstellungen und Klone.</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>Aktualisieren</strong> — Lädt die Job-Liste neu.</li>'
-      + '<li><strong>Status-Filter</strong> — Alle Jobs oder gefiltert nach laufend / abgeschlossen / fehlgeschlagen.</li>'
-      + '<li><strong>Datums-Filter</strong> — Ansicht auf einen bestimmten Zeitraum beschränken.</li>'
-      + '<li><strong>Datastore-Filter</strong> — Nur Jobs für einen bestimmten Datastore anzeigen.</li>'
+      + '<li><strong>Aktualisieren</strong> — Lädt die Job-Liste neu vom Server.</li>'
+      + '<li><strong>Clean up completed</strong> — Entfernt abgeschlossene (done/failed) Job-Einträge aus der Datenbank. Laufende Jobs sind nicht betroffen.</li>'
       + '</ul>'
-      + '<h3>Job-Tabellen-Spalten</h3><ul>'
-      + '<li><strong>ID</strong> — Eindeutige Job-Kennung.</li>'
-      + '<li><strong>Typ</strong> — snapshot / restore / clone / sfr (Einzeldatei-Wiederherstellung).</li>'
-      + '<li><strong>Status</strong> — laufend (gelb), abgeschlossen (grün), fehlgeschlagen (rot).</li>'
-      + '<li><strong>Datastore</strong> — Welcher Speicher beteiligt war.</li>'
-      + '<li><strong>Gestartet / Dauer</strong> — Zeitstempel und Laufzeit.</li>'
+      + '<h3>Seitennavigation</h3>'
+      + '<p>Mit <strong>← Back</strong> und <strong>Next →</strong> unten durch ältere Jobs blättern.</p>'
+      + '<h3>Tabellen-Spalten</h3><ul>'
+      + '<li><strong>Type</strong> — snapshot / restore / clone / sfr (Einzeldatei) / provision.</li>'
+      + '<li><strong>VMID</strong> — ID der beteiligten virtuellen Maschine.</li>'
+      + '<li><strong>Node</strong> — PVE-Node, auf dem die Operation lief.</li>'
+      + '<li><strong>Status</strong> — <span style="color:#f59e0b">running</span> / <span style="color:#22c55e">done</span> / <span style="color:#f85858">failed</span></li>'
+      + '<li><strong>Created by</strong> — Name des Zeitplans oder "manual" für manuelle Jobs.</li>'
+      + '<li><strong>Started</strong> — Zeitstempel und Dauer.</li>'
+      + '<li><strong>Log</strong> — Log-Icon klicken, um die vollständige Ausgabe einzublenden.</li>'
       + '</ul>'
       + '<h3>Log-Detail</h3>'
-      + '<p>Klicken Sie auf eine Zeile, um die vollständige Log-Ausgabe des Jobs einzublenden. Hilfreich zur Fehleranalyse — das Log enthält jeden von NaSnap ausgeführten Schritt und alle Fehlermeldungen von ONTAP oder Proxmox VE.</p>'
+      + '<p>Zeile aufklappen für das vollständige Schritt-für-Schritt-Protokoll. Hilfreich zur Fehleranalyse — enthält jeden von NaSnap ausgeführten Schritt und alle Fehlermeldungen von ONTAP oder Proxmox VE.</p>'
   },
 
   dr: {
