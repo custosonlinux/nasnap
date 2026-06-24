@@ -274,9 +274,14 @@ def _activate_lvm_guests(host, user, pw, ssh_key, lvm_pv_devs):
                 continue
             vg_name = vg_out
             vg_q    = shlex.quote(vg_name)
-            # Activate — dm inherits read-only from nbd, so LVs become read-only automatically
+            # Activate — dm inherits read-only from nbd, so LVs become read-only automatically.
+            # udevadm settle is required: vgchange returns before /dev/mapper/ nodes are
+            # fully initialised, causing "can't read superblock" on the first mount attempt.
             ssh_run(host, user, pw,
                     f"vgchange -ay {vg_q} 2>/dev/null; true",
+                    key_material=ssh_key, timeout=15)
+            ssh_run(host, user, pw,
+                    "udevadm settle 2>/dev/null || true",
                     key_material=ssh_key, timeout=15)
             vg_names.append(vg_name)
             log.info(f"[sfr] Activated guest LVM VG '{vg_name}' from {pv_dev}")
