@@ -542,6 +542,27 @@
   }
   .db-stale { opacity: 0.55; transition: opacity .3s; }
   .db-stat-value.db-stale, .db-stat.db-stale { opacity: 0.55; transition: opacity .3s; }
+  /* ── Tab Help button ─────────────────────────────────────────────────────── */
+  .btn-tab-help {
+    position: absolute; top: 0; right: 0; z-index: 10;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: transparent; border: 1.5px solid var(--border);
+    color: var(--muted); font-size: 13px; font-weight: 700; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .btn-tab-help:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+  /* ── Tab Help modal ──────────────────────────────────────────────────────── */
+  #tabHelpModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:4500; padding:24px 16px; overflow-y:auto; }
+  #tabHelpBox   { max-width:680px; margin:0 auto; background:var(--card); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,.4); overflow:hidden; }
+  #tabHelpBody  { padding:20px 24px 24px; font-size:14px; line-height:1.65; }
+  #tabHelpBody h3 { font-size:15px; font-weight:700; margin:16px 0 6px; color:var(--primary); }
+  #tabHelpBody h3:first-child { margin-top:0; }
+  #tabHelpBody ul { margin:4px 0 10px 18px; padding:0; }
+  #tabHelpBody li { margin-bottom:4px; }
+  #tabHelpBody code { background:var(--bg); border:1px solid var(--border); border-radius:3px; padding:1px 5px; font-size:12px; }
+  .help-lang-btn { padding:3px 12px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12px; cursor:pointer; }
+  .help-lang-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
 </style>
 </head>
 <body>
@@ -13956,6 +13977,396 @@ async function sfrVmDelete() {
     _sfrLoadVm(_sfr.vmPath);
   } catch(e) { toast('Delete error', 'error'); }
 }
+</script>
+
+<!-- ── Tab Help Modal ─────────────────────────────────────────────────────── -->
+<div id="tabHelpModal" onclick="if(event.target===this)closeTabHelp()">
+  <div id="tabHelpBox">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:15px;font-weight:700" id="tabHelpTitle">Help</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="help-lang-btn" id="helpLangEN" onclick="setHelpLang('en')">EN</button>
+        <button class="help-lang-btn" id="helpLangDE" onclick="setHelpLang('de')">DE</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeTabHelp()" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
+      </div>
+    </div>
+    <div id="tabHelpBody"></div>
+  </div>
+</div>
+
+<script>
+// ── Tab Help system ────────────────────────────────────────────────────────
+var _helpLang = 'en';
+var _helpTab  = '';
+
+var _helpData = {
+  dashboard: {
+    title: { en: 'Dashboard', de: 'Dashboard' },
+    en: '<h3>Overview</h3>'
+      + '<p>The Dashboard gives you a quick summary of snapshot activity and storage health.</p>'
+      + '<h3>Stat cards (top row)</h3><ul>'
+      + '<li><strong>Snapshots</strong> — total snapshot jobs run in the last 7 days.</li>'
+      + '<li><strong>Completed</strong> — jobs that finished successfully (green).</li>'
+      + '<li><strong>Failed</strong> — jobs that encountered an error (red). Click to jump to Jobs &amp; Logs.</li>'
+      + '<li><strong>Running</strong> — jobs currently in progress.</li>'
+      + '</ul>'
+      + '<h3>Storage Overview table</h3>'
+      + '<p>Lists all known datastores with used/total capacity and the last snapshot timestamp. The <strong>↻ Refresh</strong> button fetches fresh data from Proxmox VE and ONTAP. A faded grey value means cached data is being displayed while a background refresh runs.</p>'
+      + '<h3>Job Timeline</h3>'
+      + '<p>Visual bar chart of snapshot jobs per day. Green = success, red = failed, yellow = running. Click a bar to open the Jobs &amp; Logs tab filtered to that day.</p>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Das Dashboard zeigt eine kompakte Zusammenfassung der Snapshot-Aktivitäten und des Speicherstatus.</p>'
+      + '<h3>Statistik-Kacheln (obere Zeile)</h3><ul>'
+      + '<li><strong>Snapshots</strong> — Gesamtanzahl der Snapshot-Jobs der letzten 7 Tage.</li>'
+      + '<li><strong>Completed</strong> — Erfolgreich abgeschlossene Jobs (grün).</li>'
+      + '<li><strong>Failed</strong> — Jobs mit Fehler (rot). Klicken öffnet Jobs &amp; Logs.</li>'
+      + '<li><strong>Running</strong> — Aktuell laufende Jobs.</li>'
+      + '</ul>'
+      + '<h3>Speicherübersichts-Tabelle</h3>'
+      + '<p>Listet alle bekannten Datastores mit genutzter/gesamter Kapazität und dem letzten Snapshot-Zeitstempel. <strong>↻ Refresh</strong> holt aktuelle Daten von Proxmox VE und ONTAP. Ausgegraute Werte bedeuten, dass im Hintergrund eine Aktualisierung läuft.</p>'
+      + '<h3>Job-Zeitleiste</h3>'
+      + '<p>Balkendiagramm der Snapshot-Jobs pro Tag. Grün = Erfolg, Rot = Fehler, Gelb = Laufend. Klick auf einen Balken öffnet Jobs &amp; Logs gefiltert auf diesen Tag.</p>'
+  },
+
+  snapshots: {
+    title: { en: 'Snapshots', de: 'Snapshots' },
+    en: '<h3>Overview</h3>'
+      + '<p>The Snapshots tab shows all ONTAP snapshots managed by NaSnap. Use the filters at the top to search and narrow down the list.</p>'
+      + '<h3>Toolbar buttons</h3><ul>'
+      + '<li><strong>+ Create Snapshot</strong> — Opens a wizard to take a new snapshot immediately. You choose the datastore, which VMs to include, a label, and consistency options.</li>'
+      + '<li><strong>Refresh</strong> — Reloads the snapshot list from the database.</li>'
+      + '<li><strong>Search box</strong> — Filter by datastore name, snapshot name, or label.</li>'
+      + '<li><strong>Source filter</strong> — Show all, plugin-managed, or ONTAP-native snapshots.</li>'
+      + '<li><strong>Datastore filter</strong> — Restrict view to one datastore.</li>'
+      + '</ul>'
+      + '<h3>Row action icons</h3><ul>'
+      + '<li><strong>↩ Restore</strong> — Revert the VM(s) to this snapshot state (in-place rollback).</li>'
+      + '<li><strong>⎗ Clone</strong> — Create a new VM from this snapshot without touching the original.</li>'
+      + '<li><strong>🗂 Single File Restore</strong> — Mount the snapshot and browse/copy individual files into a running VM.</li>'
+      + '<li><strong>🗑 Delete</strong> — Delete the ONTAP snapshot. This is permanent.</li>'
+      + '</ul>'
+      + '<h3>Snapshot states</h3>'
+      + '<p><code>done</code> = available for restore. <code>running</code> = being created. <code>failed</code> = error occurred (hover for details). <code>tamperproof</code> = locked by SnapLock, cannot be deleted until the lock expires.</p>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Der Snapshots-Tab zeigt alle von NaSnap verwalteten ONTAP-Snapshots. Mit den Filtern oben können Sie die Liste eingrenzen.</p>'
+      + '<h3>Toolbar-Buttons</h3><ul>'
+      + '<li><strong>+ Snapshot erstellen</strong> — Öffnet einen Assistenten für einen sofortigen Snapshot. Sie wählen Datastore, VMs, Label und Konsistenz-Optionen.</li>'
+      + '<li><strong>Aktualisieren</strong> — Lädt die Snapshot-Liste neu aus der Datenbank.</li>'
+      + '<li><strong>Suchfeld</strong> — Filtert nach Datastore-Name, Snapshot-Name oder Label.</li>'
+      + '<li><strong>Quell-Filter</strong> — Alle, plugin-verwaltete oder ONTAP-native Snapshots anzeigen.</li>'
+      + '<li><strong>Datastore-Filter</strong> — Ansicht auf einen Datastore beschränken.</li>'
+      + '</ul>'
+      + '<h3>Zeilen-Icons</h3><ul>'
+      + '<li><strong>↩ Wiederherstellen</strong> — Setzt die VM(s) auf den Snapshot-Zustand zurück (In-Place-Rollback).</li>'
+      + '<li><strong>⎗ Klonen</strong> — Erstellt eine neue VM aus diesem Snapshot, ohne das Original zu verändern.</li>'
+      + '<li><strong>🗂 Einzeldatei-Wiederherstellung</strong> — Mounted den Snapshot und ermöglicht das Durchsuchen/Kopieren einzelner Dateien in eine laufende VM.</li>'
+      + '<li><strong>🗑 Löschen</strong> — Löscht den ONTAP-Snapshot permanent.</li>'
+      + '</ul>'
+      + '<h3>Snapshot-Zustände</h3>'
+      + '<p><code>done</code> = bereit zur Wiederherstellung. <code>running</code> = wird gerade erstellt. <code>failed</code> = Fehler aufgetreten (Hover für Details). <code>tamperproof</code> = durch SnapLock gesperrt, kann erst nach Ablauf der Sperrdauer gelöscht werden.</p>'
+  },
+
+  schedules: {
+    title: { en: 'Protection Plans', de: 'Schutzpläne' },
+    en: '<h3>Overview</h3>'
+      + '<p>Protection Plans automate snapshot creation on a schedule. Each plan defines which datastore(s) and VMs to snapshot, how often, and how many copies to keep.</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>+ Add Protection Plan</strong> — Step-by-step wizard to create a new automated snapshot plan.</li>'
+      + '<li><strong>Filter box</strong> — Search by plan name, datastore, or label.</li>'
+      + '</ul>'
+      + '<h3>Plan status badges</h3><ul>'
+      + '<li><span style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;border-radius:4px;padding:1px 7px;font-size:11px">Active</span> — Plan is running on schedule.</li>'
+      + '<li><span style="background:#f8585822;color:#f85858;border:1px solid #f8585844;border-radius:4px;padding:1px 7px;font-size:11px">Inactive</span> — Plan is paused, no snapshots will be created.</li>'
+      + '</ul>'
+      + '<h3>Row action icons</h3><ul>'
+      + '<li><strong>▶ Play (green)</strong> — Plan is inactive; click to activate it.</li>'
+      + '<li><strong>⏸ Pause (orange)</strong> — Plan is active; click to pause it.</li>'
+      + '<li><strong>✏ Edit</strong> — Modify plan settings (schedule, retention, VMs, etc.).</li>'
+      + '<li><strong>🗑 Delete</strong> — Permanently delete the protection plan (does not delete existing snapshots).</li>'
+      + '</ul>'
+      + '<h3>Plan Wizard — key settings</h3><ul>'
+      + '<li><strong>Datastore(s)</strong> — One or more NFS/SAN datastores to snapshot together.</li>'
+      + '<li><strong>Schedule</strong> — Hourly, daily, weekly, or monthly with a specific time.</li>'
+      + '<li><strong>Retention</strong> — How many snapshots to keep; older ones are deleted automatically.</li>'
+      + '<li><strong>Label</strong> — Optional SnapMirror label for replication policies.</li>'
+      + '<li><strong>Tamperproof</strong> — SnapLock WORM lock on snapshots; prevents deletion until the lock period expires.</li>'
+      + '<li><strong>VM sync</strong> — Automatically keep the VM list in sync with the datastore.</li>'
+      + '</ul>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Schutzpläne automatisieren die Snapshot-Erstellung nach einem Zeitplan. Jeder Plan legt fest, welche Datastores und VMs gesichert werden, wie oft und wie viele Kopien aufbewahrt werden.</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>+ Schutzplan hinzufügen</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen Plans.</li>'
+      + '<li><strong>Filterfeld</strong> — Suche nach Planname, Datastore oder Label.</li>'
+      + '</ul>'
+      + '<h3>Status-Badges</h3><ul>'
+      + '<li><span style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;border-radius:4px;padding:1px 7px;font-size:11px">Active</span> — Plan läuft planmäßig.</li>'
+      + '<li><span style="background:#f8585822;color:#f85858;border:1px solid #f8585844;border-radius:4px;padding:1px 7px;font-size:11px">Inactive</span> — Plan ist pausiert, keine Snapshots werden erstellt.</li>'
+      + '</ul>'
+      + '<h3>Zeilen-Icons</h3><ul>'
+      + '<li><strong>▶ Play (grün)</strong> — Plan ist inaktiv; Klick aktiviert ihn.</li>'
+      + '<li><strong>⏸ Pause (orange)</strong> — Plan ist aktiv; Klick pausiert ihn.</li>'
+      + '<li><strong>✏ Bearbeiten</strong> — Plan-Einstellungen ändern (Zeitplan, Aufbewahrung, VMs usw.).</li>'
+      + '<li><strong>🗑 Löschen</strong> — Schutzplan dauerhaft löschen (löscht keine vorhandenen Snapshots).</li>'
+      + '</ul>'
+      + '<h3>Plan-Assistent — wichtige Einstellungen</h3><ul>'
+      + '<li><strong>Datastore(s)</strong> — Einen oder mehrere NFS/SAN-Datastores gemeinsam sichern.</li>'
+      + '<li><strong>Zeitplan</strong> — Stündlich, täglich, wöchentlich oder monatlich mit fester Uhrzeit.</li>'
+      + '<li><strong>Aufbewahrung</strong> — Anzahl der zu behaltenden Snapshots; ältere werden automatisch gelöscht.</li>'
+      + '<li><strong>Label</strong> — Optionales SnapMirror-Label für Replikations-Policies.</li>'
+      + '<li><strong>Tamperproof</strong> — SnapLock-WORM-Sperre auf Snapshots; verhindert Löschung bis Ablauf der Sperrfrist.</li>'
+      + '<li><strong>VM-Synchronisation</strong> — VM-Liste automatisch mit dem Datastore synchron halten.</li>'
+      + '</ul>'
+  },
+
+  restore: {
+    title: { en: 'VM Restore & Clone', de: 'VM-Wiederherstellung & Klon' },
+    en: '<h3>Overview</h3>'
+      + '<p>This tab lets you restore VMs to a previous state or create clones from any available snapshot. It also provides access to Single File Restore.</p>'
+      + '<h3>Source selector</h3><ul>'
+      + '<li><strong>Primary</strong> — Local snapshots taken directly on this ONTAP system.</li>'
+      + '<li><strong>SnapMirror Secondary</strong> — Snapshots on a DR replica. Select the SnapMirror relationship from the dropdown that appears.</li>'
+      + '</ul>'
+      + '<h3>VM table</h3>'
+      + '<p>Lists all VMs that have at least one snapshot. Columns: VMID, Name, Datastore, Protocol, Snapshot count, Last Snapshot. Click a column header to sort. Use the search box to filter. The <strong>Imported</strong> filter shows only VMs whose snapshots were imported via the datastore index.</p>'
+      + '<h3>Row action icons</h3><ul>'
+      + '<li><strong>↩ Restore</strong> — Opens the restore wizard to roll back the VM to a chosen snapshot. You select the snapshot, confirm the target VM, and start the restore.</li>'
+      + '<li><strong>⎗ Clone</strong> — Opens the clone wizard to create a new independent VM from a snapshot. Choose a target PVE node, new VMID, and storage.</li>'
+      + '<li><strong>🗂 Single File Restore</strong> — Opens a file browser (Total Commander style) that mounts the snapshot disk and lets you copy individual files directly into the running VM via the QEMU Guest Agent.</li>'
+      + '</ul>'
+      + '<h3>Refresh button</h3>'
+      + '<p>Reloads the VM list from the snapshot database. Use this after new snapshots have been created or after snapshots have been deleted.</p>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Dieser Tab ermöglicht die Wiederherstellung von VMs auf einen früheren Zustand oder die Erstellung von Klonen aus vorhandenen Snapshots.</p>'
+      + '<h3>Quell-Auswahl</h3><ul>'
+      + '<li><strong>Primary</strong> — Lokale Snapshots direkt auf diesem ONTAP-System.</li>'
+      + '<li><strong>SnapMirror Secondary</strong> — Snapshots auf einem DR-Replikat. Die SnapMirror-Beziehung aus dem Dropdown auswählen.</li>'
+      + '</ul>'
+      + '<h3>VM-Tabelle</h3>'
+      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: VMID, Name, Datastore, Protokoll, Snapshot-Anzahl, Letzter Snapshot. Spaltenköpfe klicken zum Sortieren. Suchfeld zum Filtern nutzen. Der Filter <strong>Imported</strong> zeigt nur VMs mit per Datastore-Index importierten Snapshots.</p>'
+      + '<h3>Zeilen-Icons</h3><ul>'
+      + '<li><strong>↩ Wiederherstellen</strong> — Öffnet den Wiederherstellungs-Assistenten zum Zurücksetzen der VM auf einen gewählten Snapshot.</li>'
+      + '<li><strong>⎗ Klonen</strong> — Öffnet den Klon-Assistenten zum Erstellen einer neuen unabhängigen VM aus einem Snapshot.</li>'
+      + '<li><strong>🗂 Einzeldatei-Wiederherstellung</strong> — Öffnet einen Datei-Browser (Total Commander-Stil), der den Snapshot-Datenträger einbindet und das Kopieren einzelner Dateien direkt in die laufende VM via QEMU Guest Agent ermöglicht.</li>'
+      + '</ul>'
+      + '<h3>Refresh-Button</h3>'
+      + '<p>Lädt die VM-Liste aus der Snapshot-Datenbank neu. Verwenden Sie diesen nach dem Erstellen neuer oder Löschen vorhandener Snapshots.</p>'
+  },
+
+  storage: {
+    title: { en: 'Storage', de: 'Speicher' },
+    en: '<h3>Overview</h3>'
+      + '<p>The Storage tab shows all datastores known to NaSnap — both provisioned (created via the wizard) and auto-discovered (via Detect &amp; Scan).</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>+ Provision Wizard</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE.</li>'
+      + '<li><strong>Detect &amp; Scan / Run Discovery</strong> — Scans connected ONTAP systems and Proxmox VE hosts to discover existing datastores and volume mappings automatically.</li>'
+      + '</ul>'
+      + '<h3>Datastore table columns</h3><ul>'
+      + '<li><strong>Name / ID</strong> — The Proxmox VE storage ID (e.g. <code>netapp-nfs-01</code>).</li>'
+      + '<li><strong>Protocol</strong> — NFS, iSCSI, or NVMe-oF.</li>'
+      + '<li><strong>Volume</strong> — The ONTAP volume name backing this datastore.</li>'
+      + '<li><strong>SVM</strong> — The ONTAP Storage Virtual Machine.</li>'
+      + '<li><strong>Capacity</strong> — Used / Total space.</li>'
+      + '<li><strong>Index</strong> — Whether a <code>.nasnap/index.json</code> exists in the datastore, enabling snapshot import.</li>'
+      + '<li><strong>SnapMirror</strong> — Replication status if a SnapMirror relationship exists.</li>'
+      + '</ul>'
+      + '<h3>Row actions</h3><ul>'
+      + '<li><strong>⚙ Manage</strong> — View details, manage hosts, update settings.</li>'
+      + '<li><strong>🗑 Remove</strong> — Detach and optionally destroy the datastore.</li>'
+      + '</ul>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Der Speicher-Tab zeigt alle NaSnap bekannten Datastores — provisionierte (über den Assistenten erstellt) und automatisch erkannte (via Erkennung &amp; Scan).</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>+ Provisionierungs-Assistent</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE.</li>'
+      + '<li><strong>Erkennen &amp; Scannen / Discovery</strong> — Scannt verbundene ONTAP-Systeme und Proxmox-VE-Hosts auf vorhandene Datastores und Volume-Zuordnungen.</li>'
+      + '</ul>'
+      + '<h3>Datastore-Tabellen-Spalten</h3><ul>'
+      + '<li><strong>Name / ID</strong> — Die Proxmox-VE-Storage-ID (z.B. <code>netapp-nfs-01</code>).</li>'
+      + '<li><strong>Protokoll</strong> — NFS, iSCSI oder NVMe-oF.</li>'
+      + '<li><strong>Volume</strong> — Der zugrundeliegende ONTAP-Volume-Name.</li>'
+      + '<li><strong>SVM</strong> — Die ONTAP Storage Virtual Machine.</li>'
+      + '<li><strong>Kapazität</strong> — Genutzt / Gesamt.</li>'
+      + '<li><strong>Index</strong> — Ob eine <code>.nasnap/index.json</code> im Datastore vorhanden ist (ermöglicht Snapshot-Import).</li>'
+      + '<li><strong>SnapMirror</strong> — Replikationsstatus bei vorhandener SnapMirror-Beziehung.</li>'
+      + '</ul>'
+      + '<h3>Zeilen-Aktionen</h3><ul>'
+      + '<li><strong>⚙ Verwalten</strong> — Details anzeigen, Hosts verwalten, Einstellungen aktualisieren.</li>'
+      + '<li><strong>🗑 Entfernen</strong> — Datastore trennen und optional löschen.</li>'
+      + '</ul>'
+  },
+
+  jobs: {
+    title: { en: 'Jobs & Logs', de: 'Jobs & Protokolle' },
+    en: '<h3>Overview</h3>'
+      + '<p>Jobs &amp; Logs shows the history of all snapshot operations — scheduled runs, manual triggers, restores, and clones.</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>Refresh</strong> — Reloads the job list.</li>'
+      + '<li><strong>Status filter</strong> — Show all jobs, or filter by running / done / failed.</li>'
+      + '<li><strong>Date filter</strong> — Limit view to jobs from a specific date range.</li>'
+      + '<li><strong>Datastore filter</strong> — Show only jobs for a specific datastore.</li>'
+      + '</ul>'
+      + '<h3>Job table columns</h3><ul>'
+      + '<li><strong>ID</strong> — Unique job identifier.</li>'
+      + '<li><strong>Type</strong> — snapshot / restore / clone / sfr (single file restore).</li>'
+      + '<li><strong>Status</strong> — running (yellow), done (green), failed (red).</li>'
+      + '<li><strong>Datastore</strong> — Which storage was involved.</li>'
+      + '<li><strong>Started / Duration</strong> — Timestamps and runtime.</li>'
+      + '</ul>'
+      + '<h3>Log detail</h3>'
+      + '<p>Click any row to expand the full log output for that job. Useful for diagnosing failures — the log includes every step NaSnap performed and any error messages from ONTAP or Proxmox VE.</p>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Jobs &amp; Protokolle zeigt den Verlauf aller Snapshot-Operationen — geplante Läufe, manuelle Auslöser, Wiederherstellungen und Klone.</p>'
+      + '<h3>Toolbar</h3><ul>'
+      + '<li><strong>Aktualisieren</strong> — Lädt die Job-Liste neu.</li>'
+      + '<li><strong>Status-Filter</strong> — Alle Jobs oder gefiltert nach laufend / abgeschlossen / fehlgeschlagen.</li>'
+      + '<li><strong>Datums-Filter</strong> — Ansicht auf einen bestimmten Zeitraum beschränken.</li>'
+      + '<li><strong>Datastore-Filter</strong> — Nur Jobs für einen bestimmten Datastore anzeigen.</li>'
+      + '</ul>'
+      + '<h3>Job-Tabellen-Spalten</h3><ul>'
+      + '<li><strong>ID</strong> — Eindeutige Job-Kennung.</li>'
+      + '<li><strong>Typ</strong> — snapshot / restore / clone / sfr (Einzeldatei-Wiederherstellung).</li>'
+      + '<li><strong>Status</strong> — laufend (gelb), abgeschlossen (grün), fehlgeschlagen (rot).</li>'
+      + '<li><strong>Datastore</strong> — Welcher Speicher beteiligt war.</li>'
+      + '<li><strong>Gestartet / Dauer</strong> — Zeitstempel und Laufzeit.</li>'
+      + '</ul>'
+      + '<h3>Log-Detail</h3>'
+      + '<p>Klicken Sie auf eine Zeile, um die vollständige Log-Ausgabe des Jobs einzublenden. Hilfreich zur Fehleranalyse — das Log enthält jeden von NaSnap ausgeführten Schritt und alle Fehlermeldungen von ONTAP oder Proxmox VE.</p>'
+  },
+
+  dr: {
+    title: { en: 'Disaster Recovery', de: 'Disaster Recovery' },
+    en: '<h3>Overview</h3>'
+      + '<p>The Disaster Recovery tab manages SnapMirror-based DR workflows between two NaSnap instances (primary and secondary site).</p>'
+      + '<h3>DR Peer</h3>'
+      + '<p>Configure the URL and credentials of the secondary NaSnap instance. Once connected, NaSnap can read SnapMirror replica snapshots at the secondary site and offer restore/clone from there.</p>'
+      + '<h3>DR Plans</h3>'
+      + '<p>Define named recovery plans that group one or more datastores and their associated VMs. Each plan can be triggered manually to:</p><ul>'
+      + '<li>Fail over VMs to the DR site (mount replica volumes, register VMs on target PVE).</li>'
+      + '<li>Test-fail-over into an isolated network without affecting production.</li>'
+      + '<li>Fail back after the primary site is recovered.</li>'
+      + '</ul>'
+      + '<h3>Plan actions</h3><ul>'
+      + '<li><strong>+ Add Entry</strong> — Add a datastore/VM group to the plan.</li>'
+      + '<li><strong>▶ Execute</strong> — Trigger the DR plan (confirm before running in production!).</li>'
+      + '<li><strong>✏ Edit / 🗑 Delete</strong> — Manage plan entries and groups.</li>'
+      + '</ul>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Der Disaster-Recovery-Tab verwaltet SnapMirror-basierte DR-Workflows zwischen zwei NaSnap-Instanzen (Primär- und Sekundärstandort).</p>'
+      + '<h3>DR Peer</h3>'
+      + '<p>URL und Zugangsdaten der sekundären NaSnap-Instanz konfigurieren. Danach kann NaSnap SnapMirror-Replikat-Snapshots am Sekundärstandort lesen und Wiederherstellungen/Klone von dort anbieten.</p>'
+      + '<h3>DR-Pläne</h3>'
+      + '<p>Benannte Wiederherstellungspläne definieren, die einen oder mehrere Datastores und deren VMs gruppieren. Jeder Plan kann manuell ausgeführt werden:</p><ul>'
+      + '<li>Failover von VMs auf den DR-Standort (Replikat-Volumes einbinden, VMs auf Ziel-PVE registrieren).</li>'
+      + '<li>Test-Failover in ein isoliertes Netzwerk ohne Auswirkung auf die Produktion.</li>'
+      + '<li>Failback nach Wiederherstellung des primären Standorts.</li>'
+      + '</ul>'
+      + '<h3>Plan-Aktionen</h3><ul>'
+      + '<li><strong>+ Eintrag hinzufügen</strong> — Datastore/VM-Gruppe zum Plan hinzufügen.</li>'
+      + '<li><strong>▶ Ausführen</strong> — DR-Plan auslösen (in der Produktion immer vorher bestätigen!).</li>'
+      + '<li><strong>✏ Bearbeiten / 🗑 Löschen</strong> — Plan-Einträge und Gruppen verwalten.</li>'
+      + '</ul>'
+  },
+
+  settings: {
+    title: { en: 'Settings', de: 'Einstellungen' },
+    en: '<h3>Overview</h3>'
+      + '<p>The Settings tab contains all system configuration for NaSnap. Changes take effect immediately unless noted.</p>'
+      + '<h3>Deploy Wizard</h3>'
+      + '<p>Step-by-step guided setup for new installations. Walks you through adding a NetApp endpoint, a Proxmox VE host, running discovery, and creating your first protection plan.</p>'
+      + '<h3>NetApp Systems</h3>'
+      + '<p>Add, edit, or remove ONTAP endpoints (cluster management IP or hostname, credentials, HTTPS port). Each endpoint represents one ONTAP cluster or SVM. <strong>Test</strong> the connection before saving.</p>'
+      + '<h3>Proxmox VE Hosts</h3>'
+      + '<p>Register PVE nodes or clusters. NaSnap uses these to enumerate VMs, manage storage, and perform restore/clone operations. SSH credentials are also stored here for direct host operations (mount, SFR, maintenance).</p>'
+      + '<h3>Email Notifications (SMTP)</h3>'
+      + '<p>Configure an SMTP relay for snapshot success/failure alerts. Set sender, recipients, and when to notify (always, on failure only, or on success only). Notifications can also be configured per protection plan.</p>'
+      + '<h3>Active Directory / LDAP</h3>'
+      + '<p>Enable AD/LDAP authentication so domain users can log into NaSnap. Local accounts (including the local admin) remain active as a fallback even when AD is configured.</p>'
+      + '<h3>Server / Network</h3>'
+      + '<p>Set the server hostname or IP (used in notification links), the listening port, and session timeout. Restart required after port changes.</p>'
+      + '<h3>UI Features</h3>'
+      + '<p>Toggle dark/light theme, change the UI language (EN, DE, FR, ES, PT, KO, IT), and configure other display preferences.</p>'
+      + '<h3>Data Backup / Restore</h3>'
+      + '<p>Export the full NaSnap configuration (endpoints, hosts, mappings, schedules, settings) as a JSON file for backup or migration. Import restores the configuration from a previously exported file.</p>'
+      + '<h3>Automated Backup Schedule</h3>'
+      + '<p>Automatically export the NaSnap database to SFTP, a CIFS/SMB share, or a local NFS datastore on a schedule. Configure frequency, target, credentials, subdirectory, and retention (how many backup files to keep).</p>'
+      + '<h3>PVE Host Maintenance</h3>'
+      + '<p>Scan all registered PVE hosts for leftover resources from interrupted operations: stale NFS mounts, SFR temporary directories, orphaned LVM volume groups. Click <strong>Scan</strong> to detect and <strong>Clean up</strong> to remove them safely.</p>'
+      + '<h3>Plugin Update</h3>'
+      + '<p>Check for and apply updates to the NaSnap plugin. The current and available versions are shown. Updates are downloaded and applied in-place; a container restart completes the process.</p>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Der Einstellungs-Tab enthält alle Systemkonfigurationen für NaSnap. Änderungen wirken sofort, sofern nicht anders angegeben.</p>'
+      + '<h3>Einrichtungsassistent</h3>'
+      + '<p>Geführte Schritt-für-Schritt-Einrichtung für Neuinstallationen. Führt durch das Hinzufügen eines NetApp-Endpunkts, eines Proxmox-VE-Hosts, die Erkennung und die Erstellung des ersten Schutzplans.</p>'
+      + '<h3>NetApp-Systeme</h3>'
+      + '<p>ONTAP-Endpunkte hinzufügen, bearbeiten oder entfernen (Cluster-Management-IP oder Hostname, Zugangsdaten, HTTPS-Port). Jeder Endpunkt repräsentiert einen ONTAP-Cluster oder eine SVM. Vor dem Speichern die Verbindung <strong>testen</strong>.</p>'
+      + '<h3>Proxmox-VE-Hosts</h3>'
+      + '<p>PVE-Nodes oder Cluster registrieren. NaSnap nutzt diese zur VM-Auflistung, Speicherverwaltung sowie für Wiederherstellungs- und Klon-Operationen. SSH-Zugangsdaten werden hier für direkte Host-Operationen gespeichert.</p>'
+      + '<h3>E-Mail-Benachrichtigungen (SMTP)</h3>'
+      + '<p>SMTP-Relay für Snapshot-Erfolgs- und Fehlermeldungen konfigurieren. Absender, Empfänger und Benachrichtigungszeitpunkt festlegen (immer, nur bei Fehler oder nur bei Erfolg). Benachrichtigungen können auch pro Schutzplan konfiguriert werden.</p>'
+      + '<h3>Active Directory / LDAP</h3>'
+      + '<p>AD/LDAP-Authentifizierung aktivieren, damit Domänenbenutzer sich bei NaSnap anmelden können. Lokale Konten (einschließlich des lokalen Admins) bleiben auch bei aktiviertem AD als Fallback aktiv.</p>'
+      + '<h3>Server / Netzwerk</h3>'
+      + '<p>Server-Hostname oder IP (für Benachrichtigungslinks), Listening-Port und Sitzungs-Timeout festlegen. Nach Port-Änderungen ist ein Neustart erforderlich.</p>'
+      + '<h3>UI-Funktionen</h3>'
+      + '<p>Hell-/Dunkel-Design umschalten, UI-Sprache wählen (EN, DE, FR, ES, PT, KO, IT) und weitere Anzeigeeinstellungen konfigurieren.</p>'
+      + '<h3>Datensicherung / Wiederherstellung</h3>'
+      + '<p>Die komplette NaSnap-Konfiguration (Endpunkte, Hosts, Zuordnungen, Pläne, Einstellungen) als JSON exportieren. Der Import stellt die Konfiguration aus einer zuvor exportierten Datei wieder her.</p>'
+      + '<h3>Automatischer Backup-Zeitplan</h3>'
+      + '<p>Die NaSnap-Datenbank automatisch per Zeitplan auf SFTP, eine CIFS/SMB-Freigabe oder einen lokalen NFS-Datastore exportieren. Häufigkeit, Ziel, Zugangsdaten, Unterverzeichnis und Aufbewahrungsanzahl konfigurierbar.</p>'
+      + '<h3>PVE-Host-Wartung</h3>'
+      + '<p>Alle registrierten PVE-Hosts auf verwaiste Ressourcen aus unterbrochenen Operationen scannen: veraltete NFS-Mounts, temporäre SFR-Verzeichnisse, verwaiste LVM-Volume-Groups. <strong>Scan</strong> zur Erkennung, <strong>Bereinigen</strong> zur sicheren Entfernung.</p>'
+      + '<h3>Plugin-Update</h3>'
+      + '<p>Updates für das NaSnap-Plugin prüfen und anwenden. Aktuelle und verfügbare Version werden angezeigt. Updates werden heruntergeladen und direkt angewendet; ein Container-Neustart schließt den Vorgang ab.</p>'
+  }
+};
+
+function showTabHelp(tabId) {
+  _helpTab = tabId;
+  var data = _helpData[tabId];
+  if (!data) return;
+  var lang = (_lang && (data[_lang] || data[_lang.split('-')[0]])) ? (_lang.split('-')[0] === 'de' ? 'de' : 'en') : 'en';
+  if (!data[lang]) lang = 'en';
+  _helpLang = lang;
+  document.getElementById('tabHelpTitle').textContent = data.title[lang] || data.title.en;
+  document.getElementById('tabHelpBody').innerHTML = data[lang] || data.en;
+  document.getElementById('helpLangEN').className = 'help-lang-btn' + (lang === 'en' ? ' active' : '');
+  document.getElementById('helpLangDE').className = 'help-lang-btn' + (lang === 'de' ? ' active' : '');
+  document.getElementById('tabHelpModal').style.display = '';
+  document.body.style.overflow = 'hidden';
+}
+
+function setHelpLang(lang) {
+  _helpLang = lang;
+  var data = _helpData[_helpTab];
+  if (!data) return;
+  document.getElementById('tabHelpTitle').textContent = data.title[lang] || data.title.en;
+  document.getElementById('tabHelpBody').innerHTML = data[lang] || data.en;
+  document.getElementById('helpLangEN').className = 'help-lang-btn' + (lang === 'en' ? ' active' : '');
+  document.getElementById('helpLangDE').className = 'help-lang-btn' + (lang === 'de' ? ' active' : '');
+}
+
+function closeTabHelp() {
+  document.getElementById('tabHelpModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// Inject ? buttons into every main tab panel
+(function() {
+  var tabs = ['dashboard','snapshots','schedules','restore','storage','jobs','dr','settings'];
+  tabs.forEach(function(tabId) {
+    var panel = document.getElementById('tab-' + tabId);
+    if (!panel) return;
+    panel.style.position = 'relative';
+    var btn = document.createElement('button');
+    btn.className = 'btn-tab-help';
+    btn.title = 'Help';
+    btn.setAttribute('aria-label', 'Help');
+    btn.textContent = '?';
+    btn.addEventListener('click', function(e) { e.stopPropagation(); showTabHelp(tabId); });
+    panel.insertBefore(btn, panel.firstChild);
+  });
+})();
 </script>
 
 </body>
