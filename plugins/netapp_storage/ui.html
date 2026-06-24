@@ -5013,19 +5013,22 @@ async function loadSchedules() {
   try {
     var rows = await apiFetch('schedules');
     _schedulesCache = rows;
-    _schedVmNameMap = {};
+    _renderSchedules(); // render immediately — VM names filled in below
+
     var midSet = {};
     rows.forEach(function(r){
       var dsList = r.datastores && r.datastores.length ? r.datastores : (r.mapping_id ? [{mapping_id:r.mapping_id}] : []);
       dsList.forEach(function(d){ if(d.mapping_id) midSet[d.mapping_id] = 1; });
     });
-    await Promise.all(Object.keys(midSet).map(async function(mid) {
+    var mids = Object.keys(midSet);
+    if (!mids.length) return;
+    // Enrich VM names in background — backend cache makes repeats instant
+    Promise.all(mids.map(async function(mid) {
       try {
         var d = await apiFetch('snapshots/vms-for-mapping?mapping_id='+encodeURIComponent(mid));
         (d.vms||[]).forEach(function(v){ _schedVmNameMap[v.vmid] = v.name || ''; });
       } catch(e) {}
-    }));
-    _renderSchedules();
+    })).then(function() { _renderSchedules(); });
   } catch(e) { toast(e.message,'error'); }
 }
 

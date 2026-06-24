@@ -23,6 +23,8 @@ Routes under /api/plugins/netapp_storage/api/...
 import uuid
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 
 from flask import request
@@ -652,75 +654,122 @@ def _delete_snapshot():
     return {"success": True}
 
 
+# ── VM-list cache (background-refresh, avoids blocking WORKERS=1) ─────────────
+_vm_cache: dict        = {}        # mapping_id → {"vms": [...], "ts": float}
+_vm_cache_lock         = threading.Lock()
+_vm_refreshing: set    = set()     # mapping_ids currently being refreshed in bg
+_VM_CACHE_TTL          = 300       # seconds — VM lists change infrequently
+
+
+def _do_fetch_vms_for_mapping(mapping_id: str) -> list:
+    """Blocking PVE fetch. Safe to call from background threads (get_db is thread-local)."""
+    db = get_db()
+    from ..core._helpers import get_mapping, build_pve_client
+    mapping   = get_mapping(db, mapping_id)
+    storage_id = mapping["pve_storage_id"]
+    volume_uuid = mapping["volume_uuid"]
+
+    host_rows = db.query(
+        "SELECT DISTINCT pve_cluster_id FROM netapp_volume_mapping WHERE volume_uuid=?",
+        (volume_uuid,)
+    )
+    host_ids = [r["pve_cluster_id"] for r in host_rows]
+    if mapping["pve_cluster_id"] not in host_ids:
+        host_ids.insert(0, mapping["pve_cluster_id"])
+
+    storage_vmids: set = set()
+    vm_info_map: dict  = {}
+    is_san = mapping.get("storage_protocol", "nfs") in ("iscsi", "nvme")
+
+    for hid in host_ids:
+        try:
+            pve   = build_pve_client(db, hid)
+            nodes = list(pve.get_node_status().keys())
+            for node_name in nodes:
+                rc = pve._api_get(f"{pve._base}/nodes/{node_name}/storage/{storage_id}/content")
+                if rc.ok:
+                    for item in rc.json().get("data", []):
+                        vmid = item.get("vmid")
+                        if vmid:
+                            storage_vmids.add(int(vmid))
+                    if not is_san:
+                        break  # NFS is shared — first node is sufficient
+            r = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
+            if r.ok:
+                for res in r.json().get("data", []):
+                    vmid = res.get("vmid")
+                    if vmid and int(vmid) not in vm_info_map:
+                        vm_info_map[int(vmid)] = {
+                            "vmid": int(vmid),
+                            "name": res.get("name", f"vm-{vmid}"),
+                            "node": res.get("node"),
+                            "type": res.get("type", "qemu"),
+                            "status": res.get("status"),
+                        }
+        except Exception as _exc:
+            log.debug(f"[netapp_storage] vms-for-mapping {storage_id} host {hid}: {_exc}")
+
+    return [
+        vm_info_map.get(vid, {"vmid": vid, "name": f"vm-{vid}",
+                               "node": "", "type": "qemu", "status": "unknown"})
+        for vid in sorted(storage_vmids)
+    ]
+
+
+def _refresh_vm_cache_bg(mapping_id: str) -> None:
+    """Background thread: refresh one mapping's VM list and store in cache."""
+    try:
+        vms = _do_fetch_vms_for_mapping(mapping_id)
+        with _vm_cache_lock:
+            _vm_cache[mapping_id] = {"vms": vms, "ts": time.monotonic()}
+    except Exception as exc:
+        log.debug(f"[netapp_storage] vm-cache bg refresh {mapping_id}: {exc}")
+    finally:
+        with _vm_cache_lock:
+            _vm_refreshing.discard(mapping_id)
+
+
 def _vms_for_mapping():
-    """Returns VMs that have disks on the given storage."""
+    """Returns VMs that have disks on the given storage.
+
+    Always returns immediately when the cache is warm (TTL=5 min).
+    On a cold cache (first call per mapping after startup) it fetches
+    synchronously and populates the cache for all subsequent callers.
+    Stale entries are served immediately while a background thread refreshes.
+    """
     mapping_id = request.args.get("mapping_id") or (request.get_json() or {}).get("mapping_id")
     if not mapping_id:
         return {"error": "mapping_id required"}, 400
-    db = get_db()
+
+    now = time.monotonic()
+    with _vm_cache_lock:
+        entry      = _vm_cache.get(mapping_id)
+        refreshing = mapping_id in _vm_refreshing
+
+    if entry:
+        if now - entry["ts"] < _VM_CACHE_TTL:
+            return {"vms": entry["vms"]}          # fresh — instant return
+        # Stale: serve the stale list immediately and kick a background refresh
+        if not refreshing:
+            with _vm_cache_lock:
+                _vm_refreshing.add(mapping_id)
+            threading.Thread(target=_refresh_vm_cache_bg,
+                             args=(mapping_id,), daemon=True).start()
+        return {"vms": entry["vms"]}
+
+    # Cold cache — fetch synchronously (only happens once per mapping after startup)
+    with _vm_cache_lock:
+        _vm_refreshing.add(mapping_id)
     try:
-        from ..core._helpers import get_mapping, build_pve_client
-        mapping = get_mapping(db, mapping_id)
-        storage_id = mapping["pve_storage_id"]
-        volume_uuid = mapping["volume_uuid"]
-
-        # All PVE hosts that know this volume (for multi-host setups without cluster)
-        host_rows = db.query(
-            "SELECT DISTINCT pve_cluster_id FROM netapp_volume_mapping WHERE volume_uuid=?",
-            (volume_uuid,)
-        )
-        host_ids = [r["pve_cluster_id"] for r in host_rows]
-        if mapping["pve_cluster_id"] not in host_ids:
-            host_ids.insert(0, mapping["pve_cluster_id"])
-
-        storage_vmids = set()
-        vm_info_map = {}
-        is_san = mapping.get("storage_protocol", "nfs") in ("iscsi", "nvme")
-
-        for hid in host_ids:
-            try:
-                pve = build_pve_client(db, hid)
-
-                nodes = list(pve.get_node_status().keys())
-                log.warning(f"[netapp_storage] vms-for-mapping {storage_id}: host={pve.host} nodes={nodes}")
-                for node_name in nodes:
-                    rc = pve._api_get(
-                        f"{pve._base}/nodes/{node_name}/storage/{storage_id}/content"
-                    )
-                    log.warning(f"[netapp_storage] vms-for-mapping content {node_name}/{storage_id}: HTTP {rc.status_code} data={rc.json().get('data') if rc.ok else rc.text[:200]}")
-                    if rc.ok:
-                        for item in rc.json().get("data", []):
-                            vmid = item.get("vmid")
-                            if vmid:
-                                storage_vmids.add(int(vmid))
-                        if not is_san:
-                            break  # NFS is shared — first OK is sufficient
-
-                r = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
-                if r.ok:
-                    for res in r.json().get("data", []):
-                        vmid = res.get("vmid")
-                        if vmid and int(vmid) not in vm_info_map:
-                            vm_info_map[int(vmid)] = {
-                                "vmid": int(vmid),
-                                "name": res.get("name", f"vm-{vmid}"),
-                                "node": res.get("node"),
-                                "type": res.get("type", "qemu"),
-                                "status": res.get("status"),
-                            }
-            except Exception as _exc:
-                log.warning(f"[netapp_storage] vms-for-mapping {storage_id} host {hid}: {_exc}")
-                continue
-
-        log.warning(f"[netapp_storage] vms-for-mapping {storage_id}: found vmids={storage_vmids}")
-        vms = [
-            vm_info_map.get(vid, {"vmid": vid, "name": f"vm-{vid}",
-                                  "node": "", "type": "qemu", "status": "unknown"})
-            for vid in sorted(storage_vmids)
-        ]
+        vms = _do_fetch_vms_for_mapping(mapping_id)
+        with _vm_cache_lock:
+            _vm_cache[mapping_id] = {"vms": vms, "ts": time.monotonic()}
         return {"vms": vms}
     except Exception as exc:
         return {"error": str(exc)}, 500
+    finally:
+        with _vm_cache_lock:
+            _vm_refreshing.discard(mapping_id)
 
 
 def _protection_summary():
