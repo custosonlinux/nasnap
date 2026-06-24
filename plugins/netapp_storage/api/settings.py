@@ -1134,26 +1134,28 @@ def _pve_health_check():
         return err
 
     import shlex
-    from ..core._helpers import ssh_run
+    from ..core._helpers import ssh_run, build_pve_client
 
     db = get_db()
-    hosts = db.query("SELECT * FROM netapp_pve_hosts ORDER BY name") or []
+    hosts = db.query("SELECT id, name, host FROM netapp_pve_hosts ORDER BY name") or []
     results = []
 
     for h in hosts:
-        host = h["host"]
-        user = h["ssh_user"] or "root"
-        pw   = h["ssh_password"] or ""
         rec  = {
             "host_id":    h["id"],
             "host_name":  h["name"],
-            "host":       host,
+            "host":       h["host"],
             "stale_nfs":  [],
             "sfr_dirs":   [],
             "nasnap_vgs": [],
             "error":      "",
         }
         try:
+            pve  = build_pve_client(db, h["id"])
+            host = pve.host
+            user = pve.ssh_user
+            pw   = pve.ssh_password
+
             # Stale NFS: df stderr emits "df: <path>: Stale file handle"
             out = ssh_run(host, user, pw,
                 "timeout 30 df 2>&1 | grep 'Stale file handle' | sed 's/df: //;s/: Stale file handle//'",
@@ -1201,7 +1203,7 @@ def _pve_cleanup():
         return err
 
     import shlex
-    from ..core._helpers import ssh_run
+    from ..core._helpers import ssh_run, build_pve_client
 
     data       = request.get_json() or {}
     host_id    = str(data.get("host_id", "")).strip()
@@ -1213,13 +1215,13 @@ def _pve_cleanup():
         return {"error": "host_id required"}, 400
 
     db = get_db()
-    h  = db.query_one("SELECT * FROM netapp_pve_hosts WHERE id=?", (host_id,))
-    if not h:
+    if not db.query_one("SELECT id FROM netapp_pve_hosts WHERE id=?", (host_id,)):
         return {"error": "PVE host not found"}, 404
 
-    host = h["host"]
-    user = h["ssh_user"] or "root"
-    pw   = h["ssh_password"] or ""
+    pve  = build_pve_client(db, host_id)
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
     items = []
 
     for mp in stale_nfs:
