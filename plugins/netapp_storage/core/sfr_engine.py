@@ -1218,6 +1218,14 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
     # allowing the chunk files to be concatenated and decoded as one continuous stream.
     chunk_size  = (_probe_qga_fw_limit(pve, vmid, node) // 3) * 3
 
+    # Remove any leftover chunks from previous interrupted sessions before starting.
+    try:
+        _qga_exec(pve, vmid, node,
+                  ["bash", "-c", "rm -f /tmp/.nasnap_sfr_*_c?????? 2>/dev/null; true"],
+                  timeout=15)
+    except Exception:
+        pass
+
     token       = uuid.uuid4().hex[:8]
     tmp_prefix  = f"/tmp/.nasnap_sfr_{token}"
     chunk_paths = []
@@ -1279,9 +1287,10 @@ def _qga_write_chunked(pve, vmid, node, host, user, pw,
         log.info(f"[sfr] concat+decode {len(chunk_paths)} chunks → {vm_dest_path}")
         chunks_q = " ".join(shlex.quote(p) for p in chunk_paths)
         pat      = f"{tmp_prefix}_c??????"  # glob for cleanup only
+        # Always remove chunks regardless of decode success (;, not &&).
         cat_cmd  = (
-            f"cat {chunks_q} | base64 -d > {shlex.quote(vm_dest_path)}"
-            f" && rm -f {pat}"
+            f"cat {chunks_q} | base64 -d > {shlex.quote(vm_dest_path)};"
+            f" _ec=$?; rm -f {pat}; exit $_ec"
         )
         _, stderr, rc = _qga_exec(pve, vmid, node, ["bash", "-c", cat_cmd], timeout=300)
         if rc != 0:
@@ -1492,6 +1501,15 @@ def copy_tar_to_vm(pve, mount_path, snap_paths, vmid, node, vm_dest_dir,
         progress_cb(0, total_bytes)
 
     chunk_size  = (_probe_qga_fw_limit(pve, vmid, node) // 3) * 3
+
+    # Remove any leftover chunks from previous interrupted sessions before starting.
+    try:
+        _qga_exec(pve, vmid, node,
+                  ["bash", "-c", "rm -f /tmp/.nasnap_sfr_*_c?????? 2>/dev/null; true"],
+                  timeout=15)
+    except Exception:
+        pass
+
     token       = uuid.uuid4().hex[:8]
     tmp_prefix  = f"/tmp/.nasnap_sfr_{token}"
     chunk_paths = []
@@ -1546,9 +1564,10 @@ def copy_tar_to_vm(pve, mount_path, snap_paths, vmid, node, vm_dest_dir,
         chunks_q = " ".join(shlex.quote(p) for p in chunk_paths)
         pat      = f"{tmp_prefix}_c??????"  # glob for cleanup only
         dest_q   = shlex.quote(vm_dest_dir)
+        # Always remove chunks regardless of tar success (;, not &&).
         cmd      = (
-            f"cat {chunks_q} | base64 -d | tar xzf - -C {dest_q}"
-            f" && rm -f {pat}"
+            f"cat {chunks_q} | base64 -d | tar xzf - -C {dest_q};"
+            f" _ec=$?; rm -f {pat}; exit $_ec"
         )
         _, stderr, rc = _qga_exec(pve, vmid, node, ["bash", "-c", cmd], timeout=600)
         if rc != 0:
