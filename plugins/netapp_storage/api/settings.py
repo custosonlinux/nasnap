@@ -1408,6 +1408,33 @@ def _ldap_test():
         return jsonify({'success': False, 'error': str(exc)})
 
 
+def _job_retention_get():
+    db = get_db()
+    row = db.query_one("SELECT job_log_retention_days FROM netapp_plugin_config WHERE id='default'")
+    days = int((row or {}).get("job_log_retention_days") or 90)
+    return {"job_log_retention_days": days}
+
+
+def _job_retention_save():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    try:
+        days = int(data.get("job_log_retention_days", 90))
+    except (ValueError, TypeError):
+        return {"error": "Invalid value"}, 400
+    if days < 0:
+        return {"error": "Value must be 0 or greater"}, 400
+    db = get_db()
+    db.execute(
+        "UPDATE netapp_plugin_config SET job_log_retention_days=? WHERE id='default'",
+        (days,),
+    )
+    log.info(f"[netapp_storage] Job log retention set to {days} days.")
+    return {"success": True, "job_log_retention_days": days}
+
+
 def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/smtp',              _smtp_get)
     register_plugin_route(PLUGIN_ID, 'settings/smtp/save',         _smtp_save)
@@ -1425,3 +1452,5 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/ldap',              _ldap_get)
     register_plugin_route(PLUGIN_ID, 'settings/ldap/save',         _ldap_save)
     register_plugin_route(PLUGIN_ID, 'settings/ldap/test',         _ldap_test)
+    register_plugin_route(PLUGIN_ID, 'settings/job-retention',      _job_retention_get)
+    register_plugin_route(PLUGIN_ID, 'settings/job-retention/save', _job_retention_save)

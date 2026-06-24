@@ -363,12 +363,47 @@ def _execute_schedule(schedule):
             log.warning(f"[netapp_storage] Consolidated notification failed: {exc}")
 
 
+_last_job_purge_day: int = -1   # tracks calendar day of last auto-purge
+
+
+def _auto_purge_old_jobs(db):
+    """Delete completed/failed jobs older than job_log_retention_days. Runs once per day."""
+    global _last_job_purge_day
+    today = datetime.now(timezone.utc).timetuple().tm_yday
+    if today == _last_job_purge_day:
+        return
+    _last_job_purge_day = today
+    try:
+        cfg = db.query_one("SELECT job_log_retention_days FROM netapp_plugin_config WHERE id='default'")
+        days = int((cfg or {}).get("job_log_retention_days") or 90)
+        if days <= 0:
+            return
+        cutoff = datetime.now(timezone.utc).strftime(f"%Y-%m-%d")
+        # Use date arithmetic via SQLite: created_at is ISO-8601
+        result = db.query_one(
+            "SELECT COUNT(*) AS cnt FROM netapp_jobs "
+            "WHERE status IN ('done','failed') "
+            "AND created_at < date(?, ?)",
+            (cutoff, f"-{days} days"),
+        )
+        count = (result or {}).get("cnt", 0)
+        if count:
+            db.execute(
+                "DELETE FROM netapp_jobs WHERE status IN ('done','failed') AND created_at < date(?, ?)",
+                (cutoff, f"-{days} days"),
+            )
+            log.info(f"[netapp_storage] Auto-purged {count} job log(s) older than {days} days.")
+    except Exception as exc:
+        log.warning(f"[netapp_storage] Job auto-purge failed: {exc}")
+
+
 def _scheduler_loop():
     """Runs as daemon thread; checks for due schedules every minute."""
     log.info("[netapp_storage] Schedule thread started")
     while not _scheduler_stop.wait(60):
         try:
             db = get_db()
+            _auto_purge_old_jobs(db)
             schedules = db.query(
                 "SELECT * FROM netapp_snapshot_schedules WHERE enabled=1"
             )

@@ -2075,6 +2075,25 @@ function applyI18n() {
         <p class="hint" style="margin-top:10px">Changes take effect on next container restart. Certificate is auto-generated in <code>/data/tls/</code> when HTTPS is selected.</p>
       </div>
 
+      <!-- ═══════════════ JOB LOG RETENTION ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>Job Log Retention</span>
+      </div>
+      <div class="card">
+        <p class="hint" style="margin-bottom:14px">Completed and failed job logs are automatically deleted after the retention period. Running jobs are never deleted. Set to 0 to disable automatic cleanup.</p>
+        <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+          <div class="form-group" style="margin:0">
+            <label>Retention period (days)</label>
+            <input id="jobRetentionDays" type="number" min="0" max="3650" value="90" style="width:100px">
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding-bottom:1px">
+            <button class="btn btn-primary btn-sm" onclick="saveJobRetention()">Save</button>
+            <span id="jobRetentionStatus" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:10px">Cleanup runs automatically once per day in the background. You can still delete all completed/failed jobs manually from the <strong>Jobs &amp; Logs</strong> tab using the <em>Clean Up Done</em> button.</p>
+      </div>
+
       <!-- ═══════════════ UI FEATURES ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>UI Features</span>
@@ -2648,7 +2667,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); loadJobRetention(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -10768,6 +10787,24 @@ function _applyUiSettings(s) {
   if (thumb) thumb.style.transform  = s.dr_enabled ? 'translateX(20px)' : '';
 }
 
+async function loadJobRetention() {
+  try {
+    var d = await apiFetch('settings/job-retention');
+    var el = document.getElementById('jobRetentionDays');
+    if (el) el.value = d.job_log_retention_days ?? 90;
+  } catch(e) {}
+}
+
+async function saveJobRetention() {
+  var days = parseInt(document.getElementById('jobRetentionDays').value, 10);
+  if (isNaN(days) || days < 0) { toast('Enter a valid number of days (0 or more)', 'error'); return; }
+  var st = document.getElementById('jobRetentionStatus');
+  try {
+    await apiPost('settings/job-retention/save', { job_log_retention_days: days });
+    if (st) { st.textContent = 'Saved.'; setTimeout(function(){ st.textContent = ''; }, 2000); }
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 async function loadUiSettings() {
   try {
     var r = await fetch('/api/ui-settings', {credentials: 'include'});
@@ -14446,6 +14483,8 @@ var _helpData = {
       + '<p>Enable AD/LDAP authentication so domain users can log into NaSnap. Local accounts (including the local admin) remain active as a fallback even when AD is configured.</p>'
       + '<h3>Server / Network</h3>'
       + '<p>Set the server hostname or IP (used in notification links), the listening port, and session timeout. Restart required after port changes.</p>'
+      + '<h3>Job Log Retention</h3>'
+      + '<p>Completed and failed job logs are automatically purged once per day after the configured number of days. Running jobs are never deleted automatically. Set to <strong>0</strong> to disable automatic cleanup entirely — logs will accumulate until manually cleared via the <em>Clean Up Done</em> button in the Jobs &amp; Logs tab. Default: 90 days.</p>'
       + '<h3>UI Features</h3>'
       + '<p>Toggle dark/light theme, change the UI language (EN, DE, FR, ES, PT, KO, IT), and configure other display preferences.</p>'
       + '<h3>Data Backup / Restore</h3>'
@@ -14470,6 +14509,8 @@ var _helpData = {
       + '<p>AD/LDAP-Authentifizierung aktivieren, damit Domänenbenutzer sich bei NaSnap anmelden können. Lokale Konten (einschließlich des lokalen Admins) bleiben auch bei aktiviertem AD als Fallback aktiv.</p>'
       + '<h3>Server / Netzwerk</h3>'
       + '<p>Server-Hostname oder IP (für Benachrichtigungslinks), Listening-Port und Sitzungs-Timeout festlegen. Nach Port-Änderungen ist ein Neustart erforderlich.</p>'
+      + '<h3>Job-Log-Aufbewahrung</h3>'
+      + '<p>Erledigte und fehlgeschlagene Job-Logs werden einmal täglich automatisch gelöscht, sobald die konfigurierte Anzahl an Tagen überschritten ist. Laufende Jobs werden nie automatisch gelöscht. <strong>0</strong> deaktiviert das automatische Cleanup — Logs akkumulieren dann bis zur manuellen Bereinigung über <em>Erledigte aufräumen</em> im Jobs-Tab. Standard: 90 Tage.</p>'
       + '<h3>UI-Funktionen</h3>'
       + '<p>Hell-/Dunkel-Design umschalten, UI-Sprache wählen (EN, DE, FR, ES, PT, KO, IT) und weitere Anzeigeeinstellungen konfigurieren.</p>'
       + '<h3>Datensicherung / Wiederherstellung</h3>'
