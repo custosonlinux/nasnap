@@ -125,6 +125,23 @@
     color: var(--text);
   }
 
+  /* ── Settings tile grid ──────────────────────────────────────── */
+  .stile-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: stretch;
+    margin-top: 16px;
+  }
+  .stile {
+    flex: 1 1 260px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .stile > .sub-header { margin-top: 0; margin-bottom: 8px; }
+  .stile > .card { flex: 1; }
+
   /* ── Deploy Wizard ──────────────────────────────────────────── */
   .setup-step-pill {
     flex: 1;
@@ -1879,13 +1896,71 @@ function applyI18n() {
     <!-- ════════════════════════ SETTINGS ════════════════════════ -->
     <div id="tab-settings" class="tab-panel" style="display:none">
 
-      <!-- ═══════════════════════ DEPLOY WIZARD ═══════════════════════ -->
-      <div class="sub-header">
-        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>Deploy Wizard</span>
-        <button class="btn btn-primary btn-sm" onclick="setupWizardOpen()">+ Initial Setup</button>
-      </div>
+      <!-- ═══════════════ TILE ROW 1: system config ═══════════════ -->
+      <div class="stile-row">
 
-      <div class="sub-header">
+        <!-- Deploy Wizard -->
+        <div class="stile" style="flex:0 1 260px">
+          <div class="sub-header">
+            <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>Deploy Wizard</span>
+          </div>
+          <div class="card" style="flex:1">
+            <p class="hint" style="margin-bottom:12px">Guided setup for new installations — connect a NetApp endpoint, register a PVE host, run discovery, and create your first protection plan.</p>
+            <button class="btn btn-primary btn-sm" onclick="setupWizardOpen()">+ Initial Setup</button>
+          </div>
+        </div>
+
+        <!-- Server / Network -->
+        <div class="stile" style="flex:1 1 300px">
+          <div class="sub-header">
+            <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>Server / Network</span>
+          </div>
+          <div class="card" style="flex:1">
+            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <div class="form-group" style="margin:0">
+                <label>Port</label>
+                <input id="srv_port" type="number" min="1" max="65535" value="5000" style="width:90px">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>TLS</label>
+                <select id="srv_tls">
+                  <option value="http">HTTP — behind proxy</option>
+                  <option value="self-signed">HTTPS — self-signed (auto-generated)</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;padding-bottom:1px">
+                <button class="btn btn-primary btn-sm" onclick="saveServerSettings()">Save</button>
+                <span id="srvSaveStatus" style="font-size:12px;color:var(--muted)"></span>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:10px">Changes take effect on next container restart. Certificate is auto-generated in <code>/data/tls/</code> when HTTPS is selected.</p>
+          </div>
+        </div>
+
+        <!-- Job Log Retention -->
+        <div class="stile" style="flex:1 1 280px">
+          <div class="sub-header">
+            <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>Job Log Retention</span>
+          </div>
+          <div class="card" style="flex:1">
+            <p class="hint" style="margin-bottom:14px">Completed and failed job logs are automatically deleted after the retention period. Set to 0 to disable.</p>
+            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <div class="form-group" style="margin:0">
+                <label>Retention (days)</label>
+                <input id="jobRetentionDays" type="number" min="0" max="3650" value="90" style="width:90px">
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;padding-bottom:1px">
+                <button class="btn btn-primary btn-sm" onclick="saveJobRetention()">Save</button>
+                <span id="jobRetentionStatus" style="font-size:12px;color:var(--muted)"></span>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:10px">Cleanup runs once per day in the background. Use <em>Clean Up Done</em> in Jobs &amp; Logs for immediate cleanup.</p>
+          </div>
+        </div>
+
+      </div><!-- /stile-row 1 -->
+
+      <div class="sub-header" style="margin-top:20px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg><span data-i18n="sect_netapp">NetApp Systems</span></span>
         <button class="btn btn-primary btn-sm" onclick="showAddEndpointForm()" data-i18n="btn_add_netapp">+ Add NetApp System</button>
       </div>
@@ -2050,96 +2125,57 @@ function applyI18n() {
         </div>
       </div>
 
-      <!-- ═══════════════ SERVER / NETWORK ═══════════════ -->
-      <div class="sub-header" style="margin-top:16px">
-        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>Server / Network</span>
-      </div>
-      <div class="card">
-        <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
-          <div class="form-group" style="margin:0">
-            <label>Port</label>
-            <input id="srv_port" type="number" min="1" max="65535" value="5000" style="width:90px">
+      <!-- ═══════════════ TILE ROW 2: features + data ═══════════════ -->
+      <div class="stile-row">
+
+        <!-- UI Features -->
+        <div class="stile" style="flex:1 1 320px">
+          <div class="sub-header">
+            <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>UI Features</span>
           </div>
-          <div class="form-group" style="margin:0">
-            <label>TLS</label>
-            <select id="srv_tls">
-              <option value="http">HTTP — behind proxy</option>
-              <option value="self-signed">HTTPS — self-signed (auto-generated)</option>
-            </select>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;padding-bottom:1px">
-            <button class="btn btn-primary btn-sm" onclick="saveServerSettings()">Save</button>
-            <span id="srvSaveStatus" style="font-size:12px;color:var(--muted)"></span>
+          <div class="card" style="flex:1">
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:4px 0">
+              <div>
+                <div style="font-weight:500;font-size:13px">Disaster Recovery Module</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">Shows the Disaster Recovery tab. Disable for environments without a DR site.</div>
+              </div>
+              <div id="drToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleDrEnabled()">
+                <div id="drToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
+                <div id="drToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:10px 0 4px;margin-top:8px;border-top:1px solid var(--border)">
+              <div>
+                <div style="font-weight:500;font-size:13px">Auto-scan datastore indexes on startup</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">When NaSnap starts, scan all NFS datastores for <code>.nasnap/index.json</code> and import any missing snapshots into the local database.</div>
+              </div>
+              <div id="autoScanToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleAutoScan()">
+                <div id="autoScanToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
+                <div id="autoScanToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
+              </div>
+            </label>
           </div>
         </div>
-        <p class="hint" style="margin-top:10px">Changes take effect on next container restart. Certificate is auto-generated in <code>/data/tls/</code> when HTTPS is selected.</p>
-      </div>
 
-      <!-- ═══════════════ JOB LOG RETENTION ═══════════════ -->
-      <div class="sub-header" style="margin-top:16px">
-        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>Job Log Retention</span>
-      </div>
-      <div class="card">
-        <p class="hint" style="margin-bottom:14px">Completed and failed job logs are automatically deleted after the retention period. Running jobs are never deleted. Set to 0 to disable automatic cleanup.</p>
-        <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
-          <div class="form-group" style="margin:0">
-            <label>Retention period (days)</label>
-            <input id="jobRetentionDays" type="number" min="0" max="3650" value="90" style="width:100px">
+        <!-- Data Backup / Restore -->
+        <div class="stile" style="flex:1 1 320px">
+          <div class="sub-header">
+            <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>Data Backup / Restore</span>
           </div>
-          <div style="display:flex;align-items:center;gap:10px;padding-bottom:1px">
-            <button class="btn btn-primary btn-sm" onclick="saveJobRetention()">Save</button>
-            <span id="jobRetentionStatus" style="font-size:12px;color:var(--muted)"></span>
+          <div class="card" style="flex:1">
+            <p class="hint" style="margin-bottom:12px">Export all plugin configuration (endpoints, hosts, mappings, schedules, SMTP) as JSON. Passwords are encrypted — the key must match on the target server. Snapshot history is not included.</p>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+              <a id="exportDataLink" href="#" onclick="triggerExport(event)" class="btn btn-primary btn-sm">Export Plugin Data</a>
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin:0">
+                Import from File
+                <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importPluginData(this)">
+              </label>
+              <span id="importStatus" style="font-size:13px;color:var(--muted)"></span>
+            </div>
           </div>
         </div>
-        <p class="hint" style="margin-top:10px">Cleanup runs automatically once per day in the background. You can still delete all completed/failed jobs manually from the <strong>Jobs &amp; Logs</strong> tab using the <em>Clean Up Done</em> button.</p>
-      </div>
 
-      <!-- ═══════════════ UI FEATURES ═══════════════ -->
-      <div class="sub-header" style="margin-top:16px">
-        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>UI Features</span>
-      </div>
-      <div class="card">
-        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:4px 0">
-          <div>
-            <div style="font-weight:500;font-size:13px">Disaster Recovery Module</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px">Shows the Disaster Recovery tab. Disable for environments without a DR site.</div>
-          </div>
-          <div id="drToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleDrEnabled()">
-            <div id="drToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
-            <div id="drToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
-          </div>
-        </label>
-        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:16px;padding:10px 0 4px;margin-top:8px;border-top:1px solid var(--border)">
-          <div>
-            <div style="font-weight:500;font-size:13px">Auto-scan datastore indexes on startup</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px">When NaSnap starts, scan all NFS datastores for <code>.nasnap/index.json</code> and import any missing snapshots into the local database.</div>
-          </div>
-          <div id="autoScanToggleWrap" style="position:relative;flex-shrink:0;width:44px;height:24px;cursor:pointer" onclick="toggleAutoScan()">
-            <div id="autoScanToggleTrack" style="position:absolute;inset:0;border-radius:12px;background:var(--border);transition:background .2s"></div>
-            <div id="autoScanToggleThumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s"></div>
-          </div>
-        </label>
-      </div>
-
-      <!-- ═══════════════ DATA BACKUP / RESTORE ═══════════════ -->
-      <div class="sub-header" style="margin-top:16px">
-        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>Data Backup / Restore</span>
-      </div>
-      <div class="card">
-        <p class="hint" style="margin-bottom:12px">
-          Export plugin configuration (endpoints, PVE hosts, volume mappings, schedules, provisioned datastores, SMTP config) as a JSON file.
-          Use the exported file to restore the plugin on a new or rebuilt server. Passwords are exported in encrypted form — they will only work if the encryption key is the same on the target server.
-          Snapshot history and SnapMirror relationship cache are not included — both are repopulated automatically.
-        </p>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <a id="exportDataLink" href="#" onclick="triggerExport(event)" class="btn btn-primary">Export Plugin Data</a>
-          <label class="btn btn-ghost" style="cursor:pointer;margin:0">
-            Import from File
-            <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importPluginData(this)">
-          </label>
-          <span id="importStatus" style="font-size:13px;color:var(--muted)"></span>
-        </div>
-      </div>
+      </div><!-- /stile-row 2 -->
 
       <!-- ═══════════════ AUTOMATED BACKUP SCHEDULE ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
