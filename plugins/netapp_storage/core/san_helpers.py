@@ -658,6 +658,15 @@ def vg_import_clone(ssh_host, ssh_user, ssh_pass, ssh_key, device, base_vg_name)
             f"xargs -r -I{{}} dmsetup remove --force {{}} 2>/dev/null; true",
             key_material=ssh_key)
 
+    # If the production VG spanned multiple PVs (multiple NVMe namespaces / LUNs),
+    # the cloned VG metadata still references those other PVs by UUID — but only
+    # one namespace was cloned.  Remove the missing-PV references from the clone VG
+    # so that lvchange -ay can activate the LVs that reside on the available PV.
+    # This is safe: we operate on the renamed clone (new UUIDs), not the live VG.
+    ssh_run(ssh_host, ssh_user, ssh_pass,
+            f"vgreduce --removemissing --force {shlex.quote(actual)} 2>/dev/null; true",
+            key_material=ssh_key)
+
     log.info(f"[netapp_storage] VG clone imported as '{actual}' from {device}")
     return actual
 
