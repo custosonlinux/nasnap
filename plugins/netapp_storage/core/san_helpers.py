@@ -586,6 +586,39 @@ def vg_import_clone(ssh_host, ssh_user, ssh_pass, ssh_key, device, base_vg_name)
             f"pvscan --cache {dev_q} 2>/dev/null; true",
             key_material=ssh_key)
 
+    # vgimportclone rejects a whole-disk device that carries a partition table
+    # (exit 5, "Device is excluded: device is partitioned").  Ubuntu-style VMs
+    # put the LVM PV on a partition (e.g. /dev/nvme1n3p2), not the whole disk.
+    # Detect this and redirect to the actual lvm2_member partition.
+    try:
+        out = ssh_run(ssh_host, ssh_user, ssh_pass,
+                      f"udevadm settle 2>/dev/null; lsblk -J -o NAME,FSTYPE {dev_q}",
+                      capture=True, key_material=ssh_key, timeout=15)
+        children = (json.loads(out).get("blockdevices") or [{}])[0].get("children") or []
+        for child in children:
+            cname = child.get("name", "")
+            if not cname:
+                continue
+            fs = (child.get("fstype") or "").lower()
+            if not fs:
+                try:
+                    fs = ssh_run(ssh_host, ssh_user, ssh_pass,
+                                 f"blkid -s TYPE -o value /dev/{cname} 2>/dev/null || true",
+                                 capture=True, key_material=ssh_key, timeout=10).strip().lower()
+                except Exception:
+                    pass
+            if fs == "lvm2_member":
+                pv_dev = f"/dev/{cname}"
+                log.info(f"[netapp_storage] {device} is partitioned; using LVM PV partition {pv_dev}")
+                device = pv_dev
+                dev_q  = shlex.quote(device)
+                ssh_run(ssh_host, ssh_user, ssh_pass,
+                        f"pvscan --cache {dev_q} 2>/dev/null; true",
+                        key_material=ssh_key)
+                break
+    except Exception as exc:
+        log.warning(f"[netapp_storage] partition scan before vgimportclone {device}: {exc}")
+
     # Remove any stale VG with the same target name from a previous failed run.
     # vgchange -an ensures dm devices are removed; vgremove -f wipes VG metadata.
     # Without this, dm-create fails with "Device or resource busy" on the same UUID.
