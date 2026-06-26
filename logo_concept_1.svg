@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 250" width="200" height="250">
+  <!-- Concept 1: "Snapshot Stack" — Server bars + circular snapshot arrow, blue badge -->
+
+  <!-- Badge background -->
+  <rect x="20" y="8" width="160" height="160" rx="34" fill="#3B6CC7"/>
+
+  <!-- Circular snapshot arrow — 220° clockwise arc, center approx (100,77), radius 32 -->
+  <!-- Start at SVG ~150° (lower-left), end at SVG ~10° (right, slightly below) -->
+  <!-- 150°: x=100+32*cos150°=72.3, y=77+32*sin150°=93  -->
+  <!-- 10°:  x=100+32*cos10°=131.5, y=77+32*sin10°=82.6 -->
+  <path d="M 72 93 A 32 32 0 1 1 132 83"
+        fill="none" stroke="white" stroke-width="8.5" stroke-linecap="round"/>
+  <!-- Arrowhead at (132,83): clockwise tangent at 10° = direction 100° (slightly-left, steeply down) -->
+  <!-- Wings at 280°+/-30°: (137,73) and (124,77) -->
+  <polyline points="138,74 132,83 124,77"
+            fill="none" stroke="white" stroke-width="8.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Three NetApp-style server/volume bars -->
+  <rect x="34" y="117" width="132" height="14" rx="4" fill="white"/>
+  <rect x="34" y="135" width="132" height="14" rx="4" fill="white" opacity="0.72"/>
+  <rect x="34" y="153" width="132" height="14" rx="4" fill="white" opacity="0.44"/>
+
+  <!-- LED status dots on first two bars -->
+  <circle cx="151" cy="124" r="3.8" fill="#3B6CC7"/>
+  <circle cx="161" cy="124" r="3.8" fill="#3B6CC7"/>
+  <circle cx="151" cy="142" r="3.8" fill="#3B6CC7" opacity="0.85"/>
+  <circle cx="161" cy="142" r="3.8" fill="#3B6CC7" opacity="0.85"/>
+
+  <!-- Wordmark -->
+  <text x="100" y="200" text-anchor="middle"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+        font-weight="700" font-size="22" fill="#e2e8f0">NaSnap</text>
+  <text x="100" y="222" text-anchor="middle"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+        font-size="9.5" fill="#6b7280">NetApp Storage Manager for Proxmox</text>
+</svg>

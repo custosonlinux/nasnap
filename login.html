@@ -204,17 +204,22 @@
 <div class="wrap">
   <!-- Logo -->
   <div class="logo-icon">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0118.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
-      <g stroke-width="1">
-        <ellipse cx="12" cy="12" rx="3" ry="0.9"/>
-        <path d="M9 12v4a3 0.9 0 0 1 6 0v-4"/>
-        <path d="M9 14a3 0.9 0 0 1 6 0"/>
-      </g>
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Circular snapshot arrow -->
+      <path d="M 17 21 A 8 8 0 1 1 32 18.4" stroke-width="2.5"/>
+      <polyline points="33.9,16.1 32,18.4 31.0,15.6" stroke-width="2.5"/>
+      <!-- Server/volume bars -->
+      <rect x="7" y="29" width="34" height="5" rx="1.5" fill="currentColor" stroke="none"/>
+      <rect x="7" y="36" width="34" height="5" rx="1.5" fill="currentColor" stroke="none" opacity="0.65"/>
+      <rect x="7" y="43" width="34" height="5" rx="1.5" fill="currentColor" stroke="none" opacity="0.38"/>
+      <!-- Proxmox accent -->
+      <circle cx="40" cy="10" r="8" fill="#E57000" stroke="none"/>
+      <polyline points="35,6 40,10 35,14" stroke="white" stroke-width="1.8"/>
+      <polyline points="43,6 38,10 43,14" stroke="white" stroke-width="1.8"/>
     </svg>
   </div>
   <div class="logo-title">NaSnap</div>
-  <div class="logo-sub">NetApp Storage Manager for Proxmox</div>
+  <div class="logo-sub">Snapshot Management for Proxmox with NetApp Storage</div>
 
   <!-- Card -->
   <div class="card">
