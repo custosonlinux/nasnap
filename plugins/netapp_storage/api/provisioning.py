@@ -3002,7 +3002,25 @@ def _provision_nfs(ds_id, params, db, jlog):
                         f" && echo EXISTS || echo MISSING",
                         capture=True, key_material=sk)
         if "EXISTS" not in check:
-            ssh_run(sh, su, sp, pvesm_cmd, key_material=sk, timeout=120)
+            # ONTAP can take a few seconds to propagate the export policy to its
+            # NFS daemon after volume creation. Retry up to 3 times with backoff
+            # so a transient "access denied" doesn't fail the whole provisioning.
+            _pvesm_exc = None
+            for _attempt in range(3):
+                if _attempt > 0:
+                    wait = _attempt * 5
+                    jlog.log(f"[{sh}] NFS export not ready yet — retrying in {wait}s …")
+                    time.sleep(wait)
+                try:
+                    ssh_run(sh, su, sp, pvesm_cmd, key_material=sk, timeout=120)
+                    _pvesm_exc = None
+                    break
+                except Exception as _e:
+                    _pvesm_exc = _e
+                    if "access denied" not in str(_e).lower() and "mount error" not in str(_e).lower():
+                        break  # non-transient error, no point retrying
+            if _pvesm_exc:
+                raise _pvesm_exc
             jlog.log(f"[{sh}] PVE storage registered.")
         else:
             jlog.log(f"[{sh}] PVE storage already exists.")
