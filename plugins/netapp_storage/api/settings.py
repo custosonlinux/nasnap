@@ -778,20 +778,37 @@ def apply_import_payload(payload):
     return {'success': True, 'rows_imported': total, 'per_table': stats}
 
 
+def _load_payload_bytes(raw: bytes):
+    """Decompress if gzip, then JSON-parse. Returns payload dict."""
+    import gzip as _gzip
+    if raw[:2] == b'\x1f\x8b':
+        raw = _gzip.decompress(raw)
+    return json.loads(raw)
+
+
+def _decrypt_backup_cfg(row, db):
+    cfg = dict(row)
+    if cfg.get('sftp_password_enc'):
+        cfg['sftp_password'] = db._decrypt(cfg['sftp_password_enc'])
+    if cfg.get('cifs_password_enc'):
+        cfg['cifs_password'] = db._decrypt(cfg['cifs_password_enc'])
+    return cfg
+
+
 def _db_import():
     err = _require_admin()
     if err:
         return err
 
-    # Accept both JSON body and multipart file upload
+    # Accept multipart file upload (JSON or gzip JSON) or raw JSON body
     if request.content_type and 'multipart' in request.content_type:
         f = request.files.get('file')
         if not f:
             return jsonify({'error': 'No file uploaded'}), 400
         try:
-            payload = json.load(f)
+            payload = _load_payload_bytes(f.read())
         except Exception as exc:
-            return jsonify({'error': f'Invalid JSON: {exc}'}), 400
+            return jsonify({'error': f'Invalid file: {exc}'}), 400
     else:
         try:
             payload = request.get_json(force=True) or {}
@@ -803,6 +820,50 @@ def _db_import():
         return jsonify(result)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
+
+
+def _backup_list_remote():
+    err = _require_admin()
+    if err:
+        return err
+    db = get_db()
+    _ensure_backup_config_row(db)
+    row = db.query_one("SELECT * FROM netapp_db_backup_config WHERE id='default'")
+    if not row or not dict(row).get('target_type'):
+        return jsonify({'error': 'No backup target configured'}), 400
+    cfg = _decrypt_backup_cfg(dict(row), db)
+    from ..core.db_backup import DbBackupRunner
+    try:
+        files = DbBackupRunner().list(cfg, db)
+        return jsonify({'files': files})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
+def _backup_restore_from_remote():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    filename = data.get('filename', '').strip()
+    if not filename:
+        return jsonify({'error': 'filename required'}), 400
+    db = get_db()
+    _ensure_backup_config_row(db)
+    row = db.query_one("SELECT * FROM netapp_db_backup_config WHERE id='default'")
+    if not row or not dict(row).get('target_type'):
+        return jsonify({'error': 'No backup target configured'}), 400
+    cfg = _decrypt_backup_cfg(dict(row), db)
+    from ..core.db_backup import DbBackupRunner
+    try:
+        raw = DbBackupRunner().fetch(cfg, db, filename)
+        payload = _load_payload_bytes(raw)
+        result = apply_import_payload(payload)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 # ── Plugin Updater ────────────────────────────────────────────────────────────
@@ -1470,9 +1531,11 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/import',            _db_import)
     register_plugin_route(PLUGIN_ID, 'settings/update/info',       _update_info)
     register_plugin_route(PLUGIN_ID, 'settings/update/apply',      _update_apply)
-    register_plugin_route(PLUGIN_ID, 'settings/db-backup-config',  _backup_config_get)
-    register_plugin_route(PLUGIN_ID, 'settings/db-backup-save',    _backup_config_save)
-    register_plugin_route(PLUGIN_ID, 'settings/db-backup-run-now', _backup_run_now)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-config',         _backup_config_get)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-save',           _backup_config_save)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-run-now',        _backup_run_now)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-list',           _backup_list_remote)
+    register_plugin_route(PLUGIN_ID, 'settings/db-backup-restore-remote', _backup_restore_from_remote)
     register_plugin_route(PLUGIN_ID, 'settings/pve-health',        _pve_health_check)
     register_plugin_route(PLUGIN_ID, 'settings/pve-cleanup',       _pve_cleanup)
     register_plugin_route(PLUGIN_ID, 'settings/ldap',              _ldap_get)

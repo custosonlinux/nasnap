@@ -182,7 +182,7 @@ def _find_system_ssh_key():
     return None
 
 
-def ssh_run(host, user, password, cmd, capture=False, stdin_data=None, timeout=60, key_material=""):
+def ssh_run(host, user, password, cmd, capture=False, capture_bytes=False, stdin_data=None, timeout=60, key_material=""):
     """Runs an SSH command. Raises RuntimeError on failure.
 
     Authentication priority:
@@ -254,6 +254,8 @@ def ssh_run(host, user, password, cmd, capture=False, stdin_data=None, timeout=6
             stderr = result.stderr.decode(errors="replace").strip()
             raise RuntimeError(f"SSH command failed (rc={result.returncode}): {stderr[:300]}")
 
+        if capture_bytes:
+            return result.stdout
         if capture:
             return result.stdout.decode(errors="replace")
         return ""

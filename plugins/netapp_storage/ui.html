@@ -2135,7 +2135,7 @@ function applyI18n() {
           <a id="exportDataLink" href="#" onclick="triggerExport(event)" class="btn btn-primary">Export Plugin Data</a>
           <label class="btn btn-ghost" style="cursor:pointer;margin:0">
             Import from File
-            <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importPluginData(this)">
+            <input type="file" id="importFileInput" accept=".json,.json.gz" style="display:none" onchange="importPluginData(this)">
           </label>
           <span id="importStatus" style="font-size:13px;color:var(--muted)"></span>
         </div>
@@ -2299,6 +2299,16 @@ function applyI18n() {
             <button class="btn btn-ghost btn-sm" onclick="dbBakRunNow()" id="dbBakRunBtn">Run now</button>
             <button class="btn btn-primary btn-sm" onclick="dbBakSave()" id="dbBakSaveBtn">Save</button>
           </div>
+        </div>
+        <!-- Browse & Restore -->
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="dbBakBrowse()" id="dbBakBrowseBtn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Browse &amp; Restore
+            </button>
+            <span id="dbBakBrowseStatus" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+          <div id="dbBakBrowseList" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:6px;overflow:hidden"></div>
         </div>
       </div>
 
@@ -3923,7 +3933,7 @@ var _I = {
   log:     'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
   stop:    'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636',
   resize:  'M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4',
-  addHost: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z',
+  addHost: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
   link:    'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
   play:    'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
 };
@@ -4839,11 +4849,15 @@ async function doRestoreConfirmed() {
 var _deleteConfirmData = null;
 
 function showDeleteConfirm(id, name, isNative, ontap_snap_uuid, mapping_id) {
-  var snap    = id ? _allSnapshots.find(function(s){ return String(s.id) === String(id); }) : null;
+  var snap = id
+    ? _allSnapshots.find(function(s){ return String(s.id) === String(id); })
+    : _allSnapshots.find(function(s){ return s.ontap_snap_uuid === ontap_snap_uuid || s.id === ontap_snap_uuid; });
   var vmids   = snap ? (snap.vmids    || []) : [];
   var vmNames = snap ? (snap.vm_names || {}) : {};
 
-  _deleteConfirmData = { id: id, name: name, isNative: isNative, ontap_snap_uuid: ontap_snap_uuid, mapping_id: mapping_id, isBulk: false };
+  var lockExp = snap ? (snap.lock_expires || snap.expiry_time || '') : '';
+  var isLocked = !!(lockExp && Date.parse(lockExp) - Date.now() > 0);
+  _deleteConfirmData = { id: id, name: name, isNative: isNative, ontap_snap_uuid: ontap_snap_uuid, mapping_id: mapping_id, isBulk: false, isLocked: isLocked };
 
   document.getElementById('dcm_title').textContent  = 'Delete Snapshot';
   document.getElementById('dcm_submit').textContent = 'Delete Snapshot';
@@ -4853,7 +4867,20 @@ function showDeleteConfirm(id, name, isNative, ontap_snap_uuid, mapping_id) {
   document.getElementById('dcm_single_section').style.display = '';
   document.getElementById('dcm_bulk_section').style.display   = 'none';
   document.getElementById('dcm_confirm_cb').checked = false;
+  document.getElementById('dcm_confirm_cb').disabled = isLocked;
+  document.getElementById('dcm_confirm_label').style.opacity = isLocked ? '0.45' : '';
+  document.getElementById('dcm_confirm_label').style.cursor  = isLocked ? 'not-allowed' : 'pointer';
   document.getElementById('dcm_submit').disabled = true;
+
+  var lockWarn = document.getElementById('dcm_lock_warn');
+  if (isLocked) {
+    var absDate = new Date(Date.parse(lockExp)).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    document.getElementById('dcm_lock_msg').textContent =
+      'This snapshot is tamperproof-locked until ' + absDate + '. Deletion is not permitted while the lock is active.';
+    lockWarn.style.display = '';
+  } else {
+    lockWarn.style.display = 'none';
+  }
 
   var modal = document.getElementById('deleteConfirmModal');
   modal.style.display = 'flex';
@@ -4862,7 +4889,13 @@ function showDeleteConfirm(id, name, isNative, ontap_snap_uuid, mapping_id) {
 }
 
 function showDeleteConfirmBulk(snapshots) {
-  _deleteConfirmData = { isBulk: true, snapshots: snapshots };
+  var now = Date.now();
+  var lockedCount = snapshots.filter(function(s) {
+    var lk = s.lock_expires || s.expiry_time || '';
+    return lk && Date.parse(lk) - now > 0;
+  }).length;
+  var hasLocked = lockedCount > 0;
+  _deleteConfirmData = { isBulk: true, snapshots: snapshots, isLocked: hasLocked };
 
   var n = snapshots.length;
   var label = n + ' Snapshot' + (n !== 1 ? 's' : '');
@@ -4871,13 +4904,28 @@ function showDeleteConfirmBulk(snapshots) {
   document.getElementById('dcm_bulk_text').textContent =
     n + ' snapshot' + (n !== 1 ? 's' : '') + ' will be permanently deleted. This action cannot be undone.';
   var names = snapshots.slice(0, 6).map(function(s) {
-    return '<div style="font-size:11px;font-family:var(--mono);padding:2px 0;color:var(--text)">' + esc(s.snap_name) + '</div>';
+    var lk = s.lock_expires || s.expiry_time || '';
+    var isSnLocked = lk && Date.parse(lk) - now > 0;
+    var lockBadge = isSnLocked ? ' <span style="font-size:10px;color:#f0a040">🔒 locked</span>' : '';
+    return '<div style="font-size:11px;font-family:var(--mono);padding:2px 0;color:var(--text)">' + esc(s.snap_name) + lockBadge + '</div>';
   });
   if (n > 6) names.push('<div style="font-size:11px;color:var(--muted);padding:2px 0">… and ' + (n - 6) + ' more</div>');
   document.getElementById('dcm_bulk_names').innerHTML = names.join('');
   document.getElementById('dcm_single_section').style.display = 'none';
   document.getElementById('dcm_bulk_section').style.display   = '';
+  var lockWarn = document.getElementById('dcm_lock_warn');
+  if (hasLocked) {
+    document.getElementById('dcm_lock_msg').textContent =
+      lockedCount + ' of these snapshot' + (lockedCount !== 1 ? 's are' : ' is') +
+      ' tamperproof-locked. Deletion is not permitted while locks are active. Deselect locked snapshots to proceed.';
+    lockWarn.style.display = '';
+  } else {
+    lockWarn.style.display = 'none';
+  }
   document.getElementById('dcm_confirm_cb').checked = false;
+  document.getElementById('dcm_confirm_cb').disabled = hasLocked;
+  document.getElementById('dcm_confirm_label').style.opacity = hasLocked ? '0.45' : '';
+  document.getElementById('dcm_confirm_label').style.cursor  = hasLocked ? 'not-allowed' : 'pointer';
   document.getElementById('dcm_submit').disabled = true;
 
   var modal = document.getElementById('deleteConfirmModal');
@@ -4893,7 +4941,8 @@ function hideDeleteConfirm() {
 }
 
 function dcmToggleCb() {
-  document.getElementById('dcm_submit').disabled = !document.getElementById('dcm_confirm_cb').checked;
+  var locked = _deleteConfirmData && _deleteConfirmData.isLocked;
+  document.getElementById('dcm_submit').disabled = locked || !document.getElementById('dcm_confirm_cb').checked;
 }
 
 async function doDeleteConfirmed() {
@@ -5286,7 +5335,7 @@ function _renderSchedules() {
       '<td>'+vmDisplay+'</td>' +
       '<td>'+esc(cronHuman(s.cron_expr))+'</td>' +
       '<td>'+(s.label?'<span class="corp-badge corp-badge-ha">'+esc(s.label)+'</span>':'<span style="color:var(--muted)">–</span>')+'</td>' +
-      '<td>'+s.retention_count+'× '+(s.tamperproof_enabled ? _dbPill('Lock '+s.tamperproof_days+'d','rgba(86,131,210,.15)','var(--primary)') : '')+(s.sm_tamperproof_enabled ? _dbPill('Dest '+s.sm_tamperproof_days+'d','rgba(86,131,210,.08)','var(--primary)') : '')+'</td>' +
+      '<td>'+s.retention_count+'× '+(s.tamperproof_enabled ? _dbPill(_lockSvgPill+s.tamperproof_days+'d','rgba(240,160,64,.15)','#f0a040','Tamperproof: source snapshots locked for '+s.tamperproof_days+' day'+(s.tamperproof_days!==1?'s':'')+' after creation. ONTAP refuses deletion until the lock expires.') : '')+(s.sm_tamperproof_enabled ? _dbPill(_lockSvgPill+'Dest '+s.sm_tamperproof_days+'d','rgba(240,160,64,.1)','#f0a040','Tamperproof: SnapMirror destination snapshots locked for '+s.sm_tamperproof_days+' day'+(s.sm_tamperproof_days!==1?'s':'')+' independently of the source lock.') : '')+'</td>' +
       '<td>'+(s.enabled?'<span class="badge badge-green">'+t('badge_active')+'</span>':'<span class="badge badge-red">'+t('badge_inactive')+'</span>')+'</td>' +
       '<td style="color:var(--muted)">'+lastRun+'</td>' +
       '<td>'+schedSmBadge(s.snapmirror)+'</td>' +
@@ -7208,6 +7257,7 @@ function _emptyRow(cols, svgIcon, title, subtitle, btnLabel, btnOnclick) {
 
 var _svgCamera = '<svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>';
 var _svgClock  = '<svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+var _lockSvgPill = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-right:3px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 var _svgCog    = '<svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>';
 
 function fmtRelative(iso) {
@@ -7616,8 +7666,9 @@ function loadProvDatastores() { loadStorageUnified(); }
 var _DB_CACHE_KEY = 'nasnap_db_cache';
 
 // ── Shared dashboard UI helpers ───────────────────────────────────────────────
-function _dbPill(text, bg, textColor) {
-  return '<span style="display:inline-block;background:' + (bg || 'rgba(139,148,158,.14)') + ';'
+function _dbPill(text, bg, textColor, title) {
+  return '<span' + (title ? ' title="' + title.replace(/"/g, '&quot;') + '"' : '')
+    + ' style="display:inline-flex;align-items:center;background:' + (bg || 'rgba(139,148,158,.14)') + ';'
     + 'color:' + (textColor || 'var(--fg)') + ';font-size:10px;font-weight:600;'
     + 'padding:2px 9px;border-radius:20px;white-space:nowrap;letter-spacing:.02em">'
     + text + '</span>';
@@ -11047,6 +11098,64 @@ async function dbBakRunNow() {
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Run now'; } }
 }
 
+async function dbBakBrowse() {
+  var btn    = document.getElementById('dbBakBrowseBtn');
+  var status = document.getElementById('dbBakBrowseStatus');
+  var list   = document.getElementById('dbBakBrowseList');
+  btn.disabled = true;
+  status.textContent = 'Loading…';
+  list.style.display = 'none';
+  try {
+    var r = await apiFetch('settings/db-backup-list');
+    var files = r.files || [];
+    if (!files.length) {
+      status.textContent = 'No backup files found on remote target.';
+    } else {
+      status.textContent = files.length + ' backup file' + (files.length !== 1 ? 's' : '') + ' found';
+      list.innerHTML = files.map(function(f) {
+        var size = f.size ? _fmtFileSize(f.size) : '';
+        var mtime = f.mtime ? (' · ' + fmtDateRel(f.mtime)) : '';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px">'
+          + '<span style="font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.filename) + '</span>'
+          + '<span style="color:var(--muted);white-space:nowrap;flex-shrink:0">' + esc(size + mtime) + '</span>'
+          + '<button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="dbBakRestoreFile(' + JSON.stringify(f.filename) + ',this)">Restore</button>'
+          + '</div>';
+      }).join('');
+      list.style.display = '';
+    }
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function _fmtFileSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function dbBakRestoreFile(filename, btn) {
+  if (!await uiConfirm(
+    'Restore configuration from:\n"' + filename + '"\n\n' +
+    'This will overwrite all current plugin configuration (endpoints, hosts, schedules, datastores). ' +
+    'Snapshot history is not affected.\n\nThe page will reload after restore.',
+    'Restore from Backup', 'btn-danger')) return;
+  var origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Restoring…';
+  try {
+    var r = await apiPost('settings/db-backup-restore-remote', { filename: filename });
+    toast('Restored ' + r.rows_imported + ' rows from ' + filename, 'success');
+    setTimeout(function(){ location.reload(); }, 1500);
+  } catch(e) {
+    toast('Restore failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
 // ── PVE Host Maintenance ──────────────────────────────────────────────────
 var _pveHealthData = [];
 
@@ -12852,8 +12961,13 @@ actLogPoll();
         <p id="dcm_bulk_text" style="margin:0;font-size:13px"></p>
         <div id="dcm_bulk_names" style="margin-top:10px;padding:8px 12px;border:1px solid rgba(217,83,79,.25);border-radius:6px;background:rgba(217,83,79,.04);max-height:150px;overflow-y:auto"></div>
       </div>
+      <!-- Tamperproof lock warning (both modes) -->
+      <div id="dcm_lock_warn" style="display:none;background:rgba(240,160,64,.1);border:1px solid rgba(240,160,64,.4);border-radius:6px;padding:10px 14px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#f0a040;margin-bottom:5px;text-transform:uppercase;display:flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Tamperproof Snapshot</div>
+        <div id="dcm_lock_msg" style="font-size:12px;color:var(--text);line-height:1.5"></div>
+      </div>
       <!-- Checkbox (both modes) -->
-      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;padding:10px 14px;border:1px solid rgba(217,83,79,.35);border-radius:6px;background:rgba(217,83,79,.05)">
+      <label id="dcm_confirm_label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;padding:10px 14px;border:1px solid rgba(217,83,79,.35);border-radius:6px;background:rgba(217,83,79,.05)">
         <input type="checkbox" id="dcm_confirm_cb" onchange="dcmToggleCb()" style="width:15px;height:15px;flex-shrink:0;margin-top:1px;accent-color:var(--error)">
         <span>I understand that this action is <strong>irreversible</strong> and the snapshot(s) cannot be recovered.</span>
       </label>
@@ -13209,7 +13323,7 @@ actLogPoll();
         <div id="sfrVmTitle" style="font-size:11px;color:var(--muted)">—</div>
       </div>
       <div style="flex:1"></div>
-      <span id="sfrGuestBadge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border);color:var(--muted);display:none"></span>
+      <span id="sfrGuestBadge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border);color:var(--muted);display:none;align-items:center;gap:4px"></span>
       <button class="btn btn-ghost btn-sm" onclick="closeSfrModal()" title="Close without waiting for cleanup (emergency exit)">✕ Close</button>
     </div>
 
@@ -13445,8 +13559,9 @@ async function openSfrModal(vmid, vmName, mappingId) {
     document.getElementById('sfrVmTitle').textContent =
       'VM ' + vmid + (vmName ? ' — ' + vmName : '');
     var badge = document.getElementById('sfrGuestBadge');
-    badge.textContent = _sfr.osName;
-    badge.style.display = '';
+    badge.innerHTML = _sfrOsIcon(r.os_id || _sfr.guestOs, true)
+      + '<span style="vertical-align:middle">' + esc(_sfr.osName) + '</span>';
+    badge.style.display = 'inline-flex';
     // Update cached OS info for the VM list
     _sfrOsCache[vmid + '_' + mappingId] = {
       qga_ok: true, guest_os: _sfr.guestOs,

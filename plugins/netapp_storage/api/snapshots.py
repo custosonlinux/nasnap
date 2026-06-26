@@ -628,7 +628,6 @@ def _delete_snapshot():
     snap = dict(snap)
 
     vol_name = ""
-    ontap_err = ""
     try:
         from ..core._helpers import get_mapping, get_endpoint
         mapping = get_mapping(db, snap["mapping_id"])
@@ -643,14 +642,17 @@ def _delete_snapshot():
             if del_job:
                 client.poll_job(del_job, timeout_s=120)
     except Exception as exc:
-        ontap_err = str(exc)
         log.warning(f"[netapp_storage] ONTAP snapshot deletion failed: {exc}")
+        _write_audit(db, "snapshot_delete", user, "failed",
+                     target_name=snap.get("snap_name", ""), volume_name=vol_name,
+                     error_msg=str(exc),
+                     details={"snapshot_id": snapshot_id})
+        return {"error": str(exc)}, 500
 
     db.execute("DELETE FROM netapp_snapshots WHERE id=?", (snapshot_id,))
     _write_audit(db, "snapshot_delete", user, "success",
                  target_name=snap.get("snap_name", ""), volume_name=vol_name,
                  vmids=json.loads(snap.get("vmids_json") or "[]"),
-                 error_msg=ontap_err,
                  details={"snapshot_id": snapshot_id})
     return {"success": True}
 

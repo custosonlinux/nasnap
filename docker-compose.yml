@@ -16,6 +16,7 @@ services:
       NASNAP_ADMIN_PASSWORD: "${NASNAP_ADMIN_PASSWORD:-admin}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
       SESSION_HOURS: "8"
+      TZ: "${TZ:-UTC}"
       # DEBUG: "1"
     restart: unless-stopped
     healthcheck:
