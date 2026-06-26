@@ -1266,6 +1266,7 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "provisioning/pve-hosts",             _prov_pve_hosts)
     register_plugin_route(PLUGIN_ID, "provisioning/svms",                  _prov_svms)
     register_plugin_route(PLUGIN_ID, "provisioning/nfs-lifs",              _prov_nfs_lifs)
+    register_plugin_route(PLUGIN_ID, "provisioning/check-nfs-lif",        _prov_check_nfs_lif)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/index",      _prov_ds_index)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan",       _prov_ds_scan)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan-all",   _prov_ds_scan_all)
@@ -2879,6 +2880,77 @@ def _remove_host_nvme(ds_id, ds, host_id, db, jlog):
 
 # ── NFS helpers ───────────────────────────────────────────────────────────────
 
+def _check_nfs_lif_reachability(pve_host_ids, nfs_lif_ip, db, jlog=None):
+    """Ping + NFS port check from each PVE host to nfs_lif_ip.
+
+    Returns a list of dicts:
+        {host, host_id, client_ip, ping_ok, nfs_port_ok, error}
+
+    Runs the three checks in a single SSH call to minimise round-trips:
+        ip route get <ip>   → which source IP / interface would be used
+        ping -c2 -W3        → layer-3 reachability
+        nc -zw3 <ip> 2049   → NFS TCP port reachable
+    """
+    results = []
+    for hid in pve_host_ids:
+        entry = {"host_id": hid, "host": str(hid),
+                 "client_ip": "", "ping_ok": False, "nfs_port_ok": False}
+        try:
+            pve = build_pve_client(db, hid)
+            su, sp, sk = get_ssh_creds(pve)
+            entry["host"] = pve.host
+            ip_q = shlex.quote(nfs_lif_ip)
+            cmd = (
+                f"src=$(ip route get {ip_q} 2>/dev/null | grep -oP 'src \\K[0-9.]+' | head -1);"
+                f"echo \"SRC:$src\";"
+                f"ping -c2 -W3 {ip_q} >/dev/null 2>&1 && echo PING_OK || echo PING_FAIL;"
+                f"nc -zw3 {ip_q} 2049 >/dev/null 2>&1 && echo NFS_OK || echo NFS_FAIL"
+            )
+            out = ssh_run(pve.host, su, sp, cmd, capture=True,
+                          key_material=sk, timeout=25)
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("SRC:"):
+                    entry["client_ip"] = line[4:].strip()
+                elif line == "PING_OK":
+                    entry["ping_ok"] = True
+                elif line == "NFS_OK":
+                    entry["nfs_port_ok"] = True
+        except Exception as exc:
+            entry["error"] = str(exc)
+            if jlog:
+                jlog.log(f"  WARNING: connectivity check for host {hid}: {exc}")
+        results.append(entry)
+    return results
+
+
+def _prov_check_nfs_lif():
+    """GET provisioning/check-nfs-lif?nfs_lif_ip=<ip>[&pve_host_ids=1,2,3]
+
+    Tests whether PVE hosts can reach the selected NFS LIF IP (ping + port 2049).
+    If pve_host_ids is omitted, checks all configured PVE hosts.
+    """
+    err = _require_admin()
+    if err:
+        return err
+    from flask import request
+    nfs_lif_ip     = request.args.get("nfs_lif_ip", "").strip()
+    pve_host_ids_s = request.args.get("pve_host_ids", "").strip()
+    if not nfs_lif_ip:
+        return {"error": "nfs_lif_ip required"}, 400
+    db = get_db()
+    if pve_host_ids_s:
+        pve_host_ids = [int(x) for x in pve_host_ids_s.split(",")
+                        if x.strip().lstrip("-").isdigit()]
+    else:
+        rows = db.query("SELECT id FROM netapp_pve_hosts ORDER BY id")
+        pve_host_ids = [r["id"] for r in rows]
+    if not pve_host_ids:
+        return {"error": "No PVE hosts configured"}, 400
+    results = _check_nfs_lif_reachability(pve_host_ids, nfs_lif_ip, db)
+    return {"results": results}
+
+
 def _detect_nfs_client_ip(pve, nfs_lif_ip, jlog=None):
     """Return the IP the PVE host uses to reach nfs_lif_ip via 'ip route get'.
     Falls back to pve.nfs_ip (if manually set) or pve.host.
@@ -2923,6 +2995,29 @@ def _provision_nfs(ds_id, params, db, jlog):
     if not nfs_ip:
         raise RuntimeError(f"No NFS LIF found for SVM '{svm_name}'")
     jlog.log(f"NFS LIF: {nfs_ip}")
+
+    # ── Connectivity pre-check: abort before touching ONTAP if LIF is unreachable ─
+    jlog.log(f"Checking NFS LIF reachability from PVE hosts …")
+    reach = _check_nfs_lif_reachability(pve_host_ids, nfs_ip, db, jlog)
+    ok_hosts    = [r for r in reach if r.get("ping_ok")]
+    bad_hosts   = [r for r in reach if not r.get("ping_ok")]
+    no_nfs_port = [r for r in ok_hosts if not r.get("nfs_port_ok")]
+    for r in ok_hosts:
+        src = f" (src {r['client_ip']})" if r.get("client_ip") else ""
+        nfs = " · NFS port open" if r.get("nfs_port_ok") else " · NFS port CLOSED"
+        jlog.log(f"  ✓ {r['host']}{src}{nfs}")
+    for r in bad_hosts:
+        jlog.log(f"  ✗ {r['host']} — UNREACHABLE (wrong VLAN / LIF?)")
+    if no_nfs_port:
+        hosts_str = ", ".join(r["host"] for r in no_nfs_port)
+        jlog.log(f"  WARNING: NFS port 2049 not responding on {nfs_ip} from: {hosts_str}"
+                 f" — NFS may not be enabled on this SVM LIF.")
+    if not ok_hosts:
+        hosts_str = ", ".join(r["host"] for r in bad_hosts)
+        raise RuntimeError(
+            f"NFS LIF {nfs_ip} is not reachable (ping) from any PVE host "
+            f"({hosts_str}). Select the correct NFS LIF for your storage VLAN."
+        )
 
     volume_uuid = params.get("volume_uuid", "")
     if not volume_uuid:

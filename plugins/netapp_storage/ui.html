@@ -8407,7 +8407,64 @@ function renderProvOntapRes() {
 }
 
 function provWizNfsLifChange() {
-  // reserved for future use (e.g. show subnet hint)
+  var ip = document.getElementById('provWizNfsLif').value;
+  var box = document.getElementById('provWizNfsLifCheck');
+  var nextBtn = document.querySelector('#provWizStep2 .btn-primary');
+  if (!ip) { box.style.display = 'none'; if (nextBtn) nextBtn.disabled = false; return; }
+
+  box.style.display = 'block';
+  box.innerHTML = '<span style="color:var(--muted);font-size:12px">Checking reachability from PVE hosts…</span>';
+
+  apiGet('provisioning/check-nfs-lif?nfs_lif_ip=' + encodeURIComponent(ip))
+    .then(function(data) {
+      if (data.error) {
+        box.innerHTML = '<span style="color:var(--danger);font-size:12px">Check failed: ' + esc(data.error) + '</span>';
+        return;
+      }
+      var rows = (data.results || []);
+      var allOk = rows.every(function(r) { return r.ping_ok; });
+      var anyOk = rows.some(function(r) { return r.ping_ok; });
+
+      var html = '<div style="font-size:11px;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-top:2px">'
+        + '<div style="display:grid;grid-template-columns:16px 1fr auto auto;gap:0;background:var(--bg2)">'
+        + '<div style="padding:4px 6px;font-weight:600;color:var(--muted);grid-column:1/-1;border-bottom:1px solid var(--border)">NFS LIF Connectivity — ' + esc(ip) + '</div>'
+        + '</div>';
+
+      rows.forEach(function(r) {
+        var icon  = r.ping_ok ? '✓' : '✗';
+        var color = r.ping_ok ? 'var(--success,#3fb950)' : 'var(--danger,#f85149)';
+        var src   = r.client_ip ? (' <span style="color:var(--muted)">via ' + esc(r.client_ip) + '</span>') : '';
+        var nfsTag = r.ping_ok
+          ? (r.nfs_port_ok
+              ? '<span style="color:var(--success,#3fb950)">port 2049 open</span>'
+              : '<span style="color:var(--warning,#d29922)">port 2049 closed</span>')
+          : '<span style="color:var(--danger,#f85149)">unreachable</span>';
+        var errTip = r.error ? (' title="' + esc(r.error) + '"') : '';
+        html += '<div' + errTip + ' style="display:grid;grid-template-columns:22px 1fr auto;align-items:center;padding:5px 8px;border-bottom:1px solid var(--border);gap:6px">'
+          + '<span style="color:' + color + ';font-weight:700">' + icon + '</span>'
+          + '<span>' + esc(r.host) + src + '</span>'
+          + '<span>' + nfsTag + '</span>'
+          + '</div>';
+      });
+      html += '</div>';
+
+      if (!anyOk) {
+        html += '<div style="margin-top:6px;padding:7px 10px;background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.35);border-radius:6px;color:var(--danger,#f85149);font-size:11px">'
+          + '<strong>No PVE host can reach this LIF.</strong> This is likely the wrong network interface for NFS. '
+          + 'Check that the selected LIF is on the NFS VLAN.</div>';
+        if (nextBtn) nextBtn.disabled = true;
+      } else {
+        if (nextBtn) nextBtn.disabled = false;
+        if (!allOk) {
+          html += '<div style="margin-top:6px;padding:7px 10px;background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.35);border-radius:6px;color:var(--warning,#d29922);font-size:11px">'
+            + 'Some hosts cannot reach this LIF and will be excluded from the export rules.</div>';
+        }
+      }
+      box.innerHTML = html;
+    })
+    .catch(function(e) {
+      box.innerHTML = '<span style="color:var(--muted);font-size:12px">Connectivity check unavailable: ' + esc(String(e)) + '</span>';
+    });
 }
 
 function provWizVolumeChange() {
@@ -11731,11 +11788,12 @@ actLogPoll();
         <!-- NFS: LIF + Junction Path + Volume Size -->
         <div id="provWizNfsSection" style="display:none">
           <div class="form-grid" style="margin-bottom:14px">
-            <div class="form-group">
+            <div class="form-group" style="grid-column:1/-1">
               <label>NFS LIF <span style="font-weight:400;color:var(--muted)">(storage network interface)</span></label>
               <select class="form-control" id="provWizNfsLif" onchange="provWizNfsLifChange()">
                 <option value="">— loading… —</option>
               </select>
+              <div id="provWizNfsLifCheck" style="margin-top:8px;display:none"></div>
             </div>
             <div class="form-group">
               <label>Junction Path</label>
