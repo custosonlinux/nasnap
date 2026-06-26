@@ -379,7 +379,7 @@ class OntapClient:
     def create_flexclone(self, parent_vol_uuid, snap_name, clone_name, svm_name, junction_path=None):
         """Creates a FlexClone from a snapshot.
 
-        junction_path: NFS junction path for the clone, e.g. '/pgxclone_ab12cd34'.
+        junction_path: NFS junction path for the clone, e.g. '/nsclone_ab12cd34'.
         Returns (clone_volume_uuid, job_uuid).
         """
         body = {
@@ -1218,7 +1218,7 @@ class OntapClient:
         self._clone_vol_for_ns so delete_namespace() deletes the whole volume.
         Returns (clone_ns_uuid, "").
         """
-        clone_vol_name = f"pgxvol_{dest_ns_name}"[:64]
+        clone_vol_name = f"nsvol_{dest_ns_name}"[:64]
         log.info(f"[netapp_storage] FlexClone: {src_volume_name}@{snap_name} → {clone_vol_name}")
         body = {
             "name": clone_vol_name,
@@ -1290,7 +1290,7 @@ class OntapClient:
             volume clone create -flexclone <name> -type RW -parent-vserver <svm>
                 -parent-volume <vol> -parent-snapshot <snap> -junction-active true -foreground true
         """
-        clone_vol_name = f"pgxvol_{dest_ns_name}"[:64]
+        clone_vol_name = f"nsvol_{dest_ns_name}"[:64]
         log.info(f"[netapp_storage] CLI bridge volume clone: {src_volume_name}@{snap_name} → {clone_vol_name}")
 
         # Pre-fetch source namespace path + subsystem before creating clone

@@ -42,7 +42,7 @@ _urllib3.disable_warnings = lambda *a, **kw: None
 sys.modules.setdefault('urllib3', _urllib3)
 sys.modules.setdefault('urllib3.exceptions', _urllib3.exceptions)
 
-# PegaProx-Stubs
+# NaSnap module stubs
 for _m in ['pegaprox', 'pegaprox.core', 'pegaprox.core.db',
            'pegaprox.utils', 'pegaprox.utils.auth', 'pegaprox.constants']:
     sys.modules.setdefault(_m, types.ModuleType(_m))
@@ -102,24 +102,24 @@ class TestSnapshotOperations(unittest.TestCase):
     def test_list_snapshots(self):
         self.client._session.get.return_value = _mock_response(200, {
             'records': [
-                {'uuid': 'aaa', 'name': 'pegaprox-20240101', 'create_time': '2024-01-01T10:00:00Z'},
-                {'uuid': 'bbb', 'name': 'pegaprox-20240102', 'create_time': '2024-01-02T10:00:00Z'},
+                {'uuid': 'aaa', 'name': 'nasnap-20240101', 'create_time': '2024-01-01T10:00:00Z'},
+                {'uuid': 'bbb', 'name': 'nasnap-20240102', 'create_time': '2024-01-02T10:00:00Z'},
             ]
         })
         result = self.client.list_snapshots('vol-uuid-123')
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]['name'], 'pegaprox-20240101')
+        self.assertEqual(result[0]['name'], 'nasnap-20240101')
 
     def test_create_snapshot_returns_job_uuid(self):
         self.client._session.post.return_value = _mock_response(202, {
             'job': {'uuid': 'job-uuid-xyz'}
         })
-        job_uuid = self.client.create_snapshot('vol-uuid-123', 'pegaprox-test', comment='test')
+        job_uuid = self.client.create_snapshot('vol-uuid-123', 'nasnap-test', comment='test')
         self.assertEqual(job_uuid, 'job-uuid-xyz')
         call_args = self.client._session.post.call_args
         # kwargs contains json=...; explicit key access instead of or-fallback (empty dict is falsy)
         sent_body = call_args.kwargs.get('json', call_args[1].get('json', {}))
-        self.assertEqual(sent_body.get('name'), 'pegaprox-test')
+        self.assertEqual(sent_body.get('name'), 'nasnap-test')
 
     def test_delete_snapshot(self):
         self.client._session.delete.return_value = _mock_response(202, {
@@ -182,14 +182,14 @@ class TestRestoreFile(unittest.TestCase):
         self.client.restore_file(
             svm_name='svm-prod',
             volume_name='vol_vmstore',
-            snap_name='pegaprox-20240101',
+            snap_name='nasnap-20240101',
             file_path='images/100/vm-100-disk-0.qcow2',
             restore_path='images/100/vm-100-disk-0.qcow2',
         )
         body = self.client._session.post.call_args.kwargs.get('json') or {}
         self.assertEqual(body['vserver'], 'svm-prod')
         self.assertEqual(body['volume'], 'vol_vmstore')
-        self.assertEqual(body['snapshot'], 'pegaprox-20240101')
+        self.assertEqual(body['snapshot'], 'nasnap-20240101')
         self.assertTrue(body['path'].startswith('/'))
         self.assertTrue(body['restore-path'].startswith('/'))
 

@@ -163,7 +163,7 @@ def _run_restore_flexclone(job_id, params, username):
         vm_types = json.loads(snap.get("vm_types_json") or "{}")
         vm_type = vm_types.get(str(vmid), "qemu")
         snap_name = snap["snap_name"]
-        clone_name = f"pgxclone_{job_id[:8]}"
+        clone_name = f"nsclone_{job_id[:8]}"
         clone_junction = f"/{clone_name}"
 
         # ── VM/CT stoppen ─────────────────────────────────────────────
@@ -464,7 +464,7 @@ def _run_restore_san_single(job_id, params, username):
 
     Flow:
       1. Stop target VM
-      2. Clone LUN/namespace from snapshot on ONTAP (temp pgxclone_*)
+      2. Clone LUN/namespace from snapshot on ONTAP (temp nsclone_*)
       3. Map clone to PVE host, vgimportclone → temp VG
       4. For each of the VM's LVs: dd from temp VG → live VG (overwrite)
       5. Deactivate + delete temp VG, unmap + delete clone
@@ -543,7 +543,7 @@ def _run_restore_san_single(job_id, params, username):
         if not vol_name:
             raise RuntimeError(f"Cannot resolve volume name for UUID {vol_uuid}")
 
-        temp_clone_name = f"pgxclone_{job_id[:8]}"
+        temp_clone_name = f"nsclone_{job_id[:8]}"
         device = ""
 
         if protocol == "iscsi":
@@ -872,7 +872,7 @@ def _run_restore_dr_iscsi(job_id, params, username, db, jlog, mapping):
         _set_progress(db, job_id, 10)
 
         # ── 2. FlexClone from SnapMirror snapshot on secondary ───────────────
-        temp_clone_name = f"pgxdrclone_{job_id[:8]}"
+        temp_clone_name = f"nsdrclone_{job_id[:8]}"
         jlog.log(f"Cloning volume from secondary snapshot '{snap_name}' …")
         temp_lun_uuid, temp_clone_vol_uuid = secondary_client.clone_lun_from_snapshot(
             dest_vol_uuid, snap_name, dest_svm, temp_clone_name,
@@ -888,7 +888,7 @@ def _run_restore_dr_iscsi(job_id, params, username, db, jlog, mapping):
         if not host_iqn:
             raise RuntimeError(f"Cannot determine iSCSI IQN of PVE host {pve_host}")
 
-        temp_igroup_name = f"pgxdr_{job_id[:8]}"
+        temp_igroup_name = f"nsdr_{job_id[:8]}"
         jlog.log(f"Creating temporary igroup '{temp_igroup_name}' on secondary …")
         temp_igroup_uuid = secondary_client.create_igroup(
             dest_svm, temp_igroup_name, protocol="iscsi")
@@ -1155,7 +1155,7 @@ def _run_restore_dr_nvme(job_id, params, username, db, jlog, mapping):
         _set_progress(db, job_id, 10)
 
         # ── 2. FlexClone from SnapMirror snapshot on secondary ───────────────
-        temp_clone_name = f"pgxdrclone_{job_id[:8]}"
+        temp_clone_name = f"nsdrclone_{job_id[:8]}"
         jlog.log(f"Cloning volume from secondary snapshot '{snap_name}' …")
         temp_ns_uuid, temp_clone_vol_uuid = secondary_client.clone_namespace_from_snapshot(
             dest_vol_uuid, snap_name, dest_svm, temp_clone_name,
@@ -1170,7 +1170,7 @@ def _run_restore_dr_nvme(job_id, params, username, db, jlog, mapping):
         if not host_nqn:
             raise RuntimeError(f"Cannot determine NVMe NQN of PVE host {pve_host}")
 
-        temp_subsystem_name = f"pgxdr_{job_id[:8]}"
+        temp_subsystem_name = f"nsdr_{job_id[:8]}"
         jlog.log(f"Creating temporary NVMe subsystem '{temp_subsystem_name}' on secondary …")
         temp_subsystem_uuid = secondary_client.create_nvme_subsystem(
             dest_svm, temp_subsystem_name)

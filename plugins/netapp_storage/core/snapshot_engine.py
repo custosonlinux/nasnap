@@ -184,13 +184,13 @@ def _run_snapshot(job_id, params, username):
         _set_progress(db, job_id, 15)
         # ── 2. Build manifest ──────────────────────────────────────────
         manifest = {
-            "schema": "pegaprox-netapp-v1",
+            "schema": "nasnap-netapp-v1",
             "snapshot_name": snap_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "consistency": consistency,
             "cluster_id": cluster_id,
             "node": node,
-            "pegaprox_version": PEGAPROX_VERSION,
+            "nasnap_version": PEGAPROX_VERSION,
             "ontap_cluster": endpoint["host"],
             "mapping_id": mapping_id,
             "volume_uuid": mapping["volume_uuid"],

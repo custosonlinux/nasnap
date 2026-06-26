@@ -3025,7 +3025,7 @@ def _provision_nfs(ds_id, params, db, jlog):
         jlog.log(f"Creating NFS volume '{volume_name}' ({size_bytes} bytes)"
                  f" junction='{junction_path}'{ag_info} …")
         # Create a dedicated export policy for this datastore
-        policy_name = f"pgxpol-{name.replace(' ', '-').lower()}"[:64]
+        policy_name = f"nasnap-pol-{name.replace(' ', '-').lower()}"[:64]
         try:
             policy_id = client.create_export_policy(svm_name, policy_name)
             jlog.log(f"Export policy '{policy_name}' created (id={policy_id}).")
@@ -3210,7 +3210,7 @@ def _remove_nfs(ds_id, ds, delete_ontap, db, jlog):
         try:
             export_info = client.get_volume_export_info(volume_uuid)
             policy_name = export_info.get("export_policy_name", "")
-            if policy_name and policy_name.startswith("pgxpol-"):
+            if policy_name and (policy_name.startswith("nasnap-pol-") or policy_name.startswith("pgxpol-")):
                 policy_id = export_info.get("export_policy_id", 0)
                 if policy_id:
                     client.set_volume_export_policy(volume_uuid, "default")
