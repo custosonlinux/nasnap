@@ -7,6 +7,7 @@ End-to-end provisioning of iSCSI, NVMe-oF and NFS datastores:
 All mutating operations run as background jobs (same pattern as restore/clone).
 """
 
+import ipaddress
 import json
 import shlex
 import threading
@@ -2841,6 +2842,7 @@ def _remove_host_nvme(ds_id, ds, host_id, db, jlog):
     vg_name        = ds.get("vg_name", "")
     pve_storage_id = ds.get("pve_storage_id", "")
     subsystem_uuid = ds.get("subsystem_uuid", "")
+    subsystem_name = ds.get("subsystem_name", "")
 
     endpoint = get_endpoint(db, endpoint_id)
     client   = build_ontap_client(endpoint)
@@ -2862,6 +2864,7 @@ def _remove_host_nvme(ds_id, ds, host_id, db, jlog):
                     key_material=sk, timeout=30)
 
         nvme_disconnect_by_vg(sh, su, sp, sk, vg_name)
+        nvme_disconnect_by_subsystem_name(sh, su, sp, sk, subsystem_name)
 
         # Remove host NQN from subsystem
         if subsystem_uuid:
@@ -2880,42 +2883,85 @@ def _remove_host_nvme(ds_id, ds, host_id, db, jlog):
 
 # ── NFS helpers ───────────────────────────────────────────────────────────────
 
+def _nfs_same_subnet(ip1, ip2, prefix_len):
+    """True if ip1 and ip2 fall within the same /prefix_len network."""
+    try:
+        net = ipaddress.IPv4Network(f"{ip1}/{prefix_len}", strict=False)
+        return ipaddress.IPv4Address(ip2) in net
+    except Exception:
+        return False
+
+
 def _check_nfs_lif_reachability(pve_host_ids, nfs_lif_ip, db, jlog=None):
     """Ping + NFS port check from each PVE host to nfs_lif_ip.
 
-    Returns a list of dicts:
-        {host, host_id, client_ip, ping_ok, nfs_port_ok, error}
+    When pve.nfs_ip is configured the checks are bound to that IP so results
+    reflect actual NFS VLAN reachability rather than management-network routing.
 
-    Runs the three checks in a single SSH call to minimise round-trips:
-        ip route get <ip>   → which source IP / interface would be used
-        ping -c2 -W3        → layer-3 reachability
-        nc -zw3 <ip> 2049   → NFS TCP port reachable
+    Returns a list of dicts:
+        host, host_id, client_ip, nfs_ip_configured,
+        same_subnet, routed, ping_ok, nfs_port_ok, error
     """
     results = []
     for hid in pve_host_ids:
-        entry = {"host_id": hid, "host": str(hid),
-                 "client_ip": "", "ping_ok": False, "nfs_port_ok": False}
+        entry = {
+            "host_id": hid, "host": str(hid),
+            "client_ip": "", "nfs_ip_configured": False,
+            "same_subnet": False, "routed": False,
+            "ping_ok": False, "nfs_port_ok": False,
+        }
         try:
             pve = build_pve_client(db, hid)
             su, sp, sk = get_ssh_creds(pve)
             entry["host"] = pve.host
             ip_q = shlex.quote(nfs_lif_ip)
-            cmd = (
-                f"src=$(ip route get {ip_q} 2>/dev/null | grep -oP 'src \\K[0-9.]+' | head -1);"
-                f"echo \"SRC:$src\";"
-                f"ping -c2 -W3 {ip_q} >/dev/null 2>&1 && echo PING_OK || echo PING_FAIL;"
-                f"nc -zw3 {ip_q} 2049 >/dev/null 2>&1 && echo NFS_OK || echo NFS_FAIL"
-            )
-            out = ssh_run(pve.host, su, sp, cmd, capture=True,
-                          key_material=sk, timeout=25)
-            for line in out.splitlines():
-                line = line.strip()
-                if line.startswith("SRC:"):
-                    entry["client_ip"] = line[4:].strip()
-                elif line == "PING_OK":
-                    entry["ping_ok"] = True
-                elif line == "NFS_OK":
-                    entry["nfs_port_ok"] = True
+
+            if pve.nfs_ip:
+                entry["nfs_ip_configured"] = True
+                entry["client_ip"] = pve.nfs_ip
+                nfs_q = shlex.quote(pve.nfs_ip)
+                # Discover prefix length so we can test same-subnet vs. routed.
+                # Ping and nc are bound (-I / -s) to the NFS VLAN IP so the result
+                # reflects what ONTAP will actually see, not the management path.
+                cmd = (
+                    f"prefix=$(ip addr show"
+                    f" | grep -oP 'inet {nfs_q}/\\K[0-9]+' | head -1);"
+                    f"echo \"PREFIX:${{prefix:-}}\";"
+                    f"ping -c2 -W3 -I {nfs_q} {ip_q} >/dev/null 2>&1"
+                    f" && echo PING_OK || echo PING_FAIL;"
+                    f"nc -s {nfs_q} -zw3 {ip_q} 2049 >/dev/null 2>&1"
+                    f" && echo NFS_OK || echo NFS_FAIL"
+                )
+                out = ssh_run(pve.host, su, sp, cmd, capture=True,
+                              key_material=sk, timeout=25)
+                for line in out.splitlines():
+                    line = line.strip()
+                    if line.startswith("PREFIX:"):
+                        val = line[7:].strip()
+                        if val.isdigit():
+                            entry["same_subnet"] = _nfs_same_subnet(
+                                pve.nfs_ip, nfs_lif_ip, int(val))
+                            entry["routed"] = not entry["same_subnet"]
+                    elif line == "PING_OK":
+                        entry["ping_ok"] = True
+                    elif line == "NFS_OK":
+                        entry["nfs_port_ok"] = True
+            else:
+                # No NFS IP configured — fall back to unbound check so we at least
+                # know whether L3 connectivity exists at all.
+                cmd = (
+                    f"ping -c2 -W3 {ip_q} >/dev/null 2>&1 && echo PING_OK || echo PING_FAIL;"
+                    f"nc -zw3 {ip_q} 2049 >/dev/null 2>&1 && echo NFS_OK || echo NFS_FAIL"
+                )
+                out = ssh_run(pve.host, su, sp, cmd, capture=True,
+                              key_material=sk, timeout=25)
+                for line in out.splitlines():
+                    line = line.strip()
+                    if line == "PING_OK":
+                        entry["ping_ok"] = True
+                    elif line == "NFS_OK":
+                        entry["nfs_port_ok"] = True
+
         except Exception as exc:
             entry["error"] = str(exc)
             if jlog:
@@ -2952,22 +2998,15 @@ def _prov_check_nfs_lif():
 
 
 def _detect_nfs_client_ip(pve, nfs_lif_ip, jlog=None):
-    """Return the IP the PVE host uses to reach nfs_lif_ip via 'ip route get'.
-    Falls back to pve.nfs_ip (if manually set) or pve.host.
+    """Return the NFS VLAN IP of the PVE host for use in ONTAP export rules.
+
+    Priority: pve.nfs_ip (explicitly configured NFS network IP) → pve.host.
+    'ip route get' is intentionally NOT used here: on hosts where the default
+    gateway is on the management interface, it returns the management IP, not the
+    dedicated NFS VLAN IP that ONTAP must see as the client.
     """
     if pve.nfs_ip:
         return pve.nfs_ip
-    try:
-        out = ssh_run(pve.host, pve.ssh_user, pve.ssh_password,
-                      f"ip route get {shlex.quote(nfs_lif_ip)}"
-                      f" 2>/dev/null | grep -oP 'src \\K[0-9.]+'",
-                      capture=True, key_material=pve.ssh_key, timeout=10)
-        ip = out.strip().split()[0] if out.strip() else ""
-        if ip:
-            return ip
-    except Exception as exc:
-        if jlog:
-            jlog.log(f"  NOTE: ip-route auto-detect for {pve.host}: {exc} — using hostname")
     return pve.host
 
 
@@ -3003,11 +3042,16 @@ def _provision_nfs(ds_id, params, db, jlog):
     bad_hosts   = [r for r in reach if not r.get("ping_ok")]
     no_nfs_port = [r for r in ok_hosts if not r.get("nfs_port_ok")]
     for r in ok_hosts:
-        src = f" (src {r['client_ip']})" if r.get("client_ip") else ""
+        if r.get("client_ip"):
+            route = " · direct" if r.get("same_subnet") else " · routed via mgmt ⚠"
+            src = f" (NFS IP: {r['client_ip']}{route})"
+        else:
+            src = " (NFS IP not configured)"
         nfs = " · NFS port open" if r.get("nfs_port_ok") else " · NFS port CLOSED"
         jlog.log(f"  ✓ {r['host']}{src}{nfs}")
     for r in bad_hosts:
-        jlog.log(f"  ✗ {r['host']} — UNREACHABLE (wrong VLAN / LIF?)")
+        cfg = "" if r.get("nfs_ip_configured") else " — NFS IP not configured"
+        jlog.log(f"  ✗ {r['host']}{cfg} — UNREACHABLE (wrong VLAN / LIF?)")
     if no_nfs_port:
         hosts_str = ", ".join(r["host"] for r in no_nfs_port)
         jlog.log(f"  WARNING: NFS port 2049 not responding on {nfs_ip} from: {hosts_str}"
@@ -3034,16 +3078,38 @@ def _provision_nfs(ds_id, params, db, jlog):
             policy_name = "default"
             policy_id   = None
 
-        # Add rw export rules — auto-detect the PVE host IP that routes to NFS LIF
+        # Add rw export rules using the configured NFS VLAN IP of each PVE host.
+        # pve.nfs_ip must be set to the dedicated NFS network interface IP — using
+        # any other IP (management, iSCSI, NVMe) will cause ONTAP to deny the mount.
         if policy_id:
+            client_ips_for_root = []
             for hid in pve_host_ids:
                 try:
                     pve = build_pve_client(db, hid)
-                    client_ip = _detect_nfs_client_ip(pve, nfs_ip, jlog)
+                    if not pve.nfs_ip:
+                        raise RuntimeError(
+                            f"NFS IP not configured for host '{pve.host}'. "
+                            f"Set the NFS network IP in Hosts settings before provisioning NFS datastores."
+                        )
+                    client_ip = pve.nfs_ip
                     client.add_nfs_export_rule_rw(policy_id, client_ip)
                     jlog.log(f"Export rule added for {client_ip}")
+                    client_ips_for_root.append(client_ip)
                 except Exception as exc:
-                    jlog.log(f"  WARNING: export rule for {hid}: {exc}")
+                    jlog.log(f"  WARNING: export rule for host {hid}: {exc}")
+
+        # Ensure the SVM root volume ('/') allows RO traversal from all PVE host IPs.
+        # ONTAP requires namespace traversal access on the root volume; without it the
+        # mount fails with "access denied" even if the datastore volume's policy is correct.
+        if client_ips_for_root:
+            try:
+                added = client.ensure_svm_root_accessible(svm_name, client_ips_for_root)
+                if added:
+                    jlog.log(f"SVM root volume: added RO rules for {', '.join(added)}")
+                else:
+                    jlog.log("SVM root volume: RO access already configured.")
+            except Exception as exc:
+                jlog.log(f"  WARNING: could not check SVM root export policy: {exc}")
 
         volume_uuid = client.create_volume_nfs(svm_name, volume_name, size_bytes,
                                                junction_path,
@@ -3244,17 +3310,29 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
     if not nfs_ip:
         raise RuntimeError(f"No NFS LIF found for SVM '{svm_name}'")
 
-    # Add host IP to export policy
+    # Add host IP to export policy + ensure SVM root RO access.
+    # pve.nfs_ip must be the dedicated NFS network IP — any other IP will be rejected.
+    pve = build_pve_client(db, host_id)
+    if not pve.nfs_ip:
+        raise RuntimeError(
+            f"NFS IP not configured for host '{pve.host}'. "
+            f"Set the NFS network IP in Hosts settings before adding NFS hosts."
+        )
+    client_ip = pve.nfs_ip
     try:
         export_info = client.get_volume_export_info(volume_uuid)
         policy_id   = export_info.get("export_policy_id", 0)
-        pve         = build_pve_client(db, host_id)
-        client_ip   = _detect_nfs_client_ip(pve, nfs_ip, jlog)
         if policy_id:
             client.add_nfs_export_rule_rw(policy_id, client_ip)
             jlog.log(f"Export rule added for {client_ip}.")
     except Exception as exc:
         jlog.log(f"WARNING: export rule: {exc}")
+    try:
+        added = client.ensure_svm_root_accessible(svm_name, [client_ip])
+        if added:
+            jlog.log(f"SVM root volume: added RO rules for {', '.join(added)}")
+    except Exception as exc:
+        jlog.log(f"  WARNING: could not check SVM root export policy: {exc}")
 
     # Register PVE storage on host
     pve_content  = ds.get("pve_content", "images,rootdir") or "images,rootdir"

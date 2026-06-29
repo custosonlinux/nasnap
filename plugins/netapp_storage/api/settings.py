@@ -1249,17 +1249,34 @@ def _pve_health_check():
                 if vg:
                     rec["nasnap_vgs"].append(vg)
 
-            # Orphaned NBD devices: connected (non-zero size) but no qemu-nbd process
+            # Orphaned NBD devices: sysfs pid present but process is dead.
+            # qemu-nbd communicates via socket (not open fds on /dev/nbdX), so fuser is
+            # unreliable. The kernel exposes the server PID at /sys/block/nbdX/pid.
+            # After a clean disconnect the kernel clears the pid (even if size stays set),
+            # so pid-first detection avoids false positives on already-disconnected devices.
             out4 = ssh_run(host, user, pw,
                 "for d in /dev/nbd*; do "
-                "  [[ \"$d\" =~ p[0-9]+$ ]] && continue; "   # skip partition nodes
+                "  [[ \"$d\" =~ p[0-9]+$ ]] && continue; "
+                "  base=$(basename \"$d\"); "
+                "  pid=$(cat /sys/block/$base/pid 2>/dev/null | tr -d '[:space:]'); "
+                "  [ -z \"$pid\" ] || [ \"$pid\" = \"0\" ] && continue; "
                 "  sz=$(blockdev --getsize64 \"$d\" 2>/dev/null || echo 0); "
                 "  [ \"$sz\" -gt 0 ] 2>/dev/null || continue; "
-                "  pid=$(fuser \"$d\" 2>/dev/null | tr -s ' ' '\\n' | grep -v '^$' | head -1); "
-                "  [ -z \"$pid\" ] && echo \"$d\"; "
+                "  kill -0 \"$pid\" 2>/dev/null || echo \"$d\"; "
                 "done 2>/dev/null || true",
                 capture=True, timeout=15)
             rec["orphan_nbds"] = [l.strip() for l in out4.strip().splitlines() if l.strip()]
+
+            # Orphaned NVMe subsystems: registered in kernel but no active controllers.
+            # Use nvme show-topology (preferred) or fall back to nvme list-subsys.
+            # Both show subsystem headers; orphaned ones have no "+- " child lines.
+            out5 = ssh_run(host, user, pw,
+                "(nvme show-topology 2>/dev/null || nvme list-subsys 2>/dev/null) | "
+                "awk '/^nvme-subsys[0-9]+ - NQN=/{if(nqn&&!h)print nqn; n=$0; "
+                "sub(/^.*NQN=/,\"\",n); sub(/ .*/,\"\",n); nqn=n; h=0} "
+                "/^[[:space:]]*[+]-/{h=1} END{if(nqn&&!h)print nqn}' 2>/dev/null || true",
+                capture=True, timeout=15)
+            rec["orphan_nvme_subsys"] = [l.strip() for l in out5.strip().splitlines() if l.strip()]
 
         except Exception as e:
             rec["error"] = str(e)
@@ -1278,12 +1295,13 @@ def _pve_cleanup():
     import shlex
     from ..core._helpers import ssh_run, build_pve_client
 
-    data        = request.get_json() or {}
-    host_id     = str(data.get("host_id", "")).strip()
-    stale_nfs   = data.get("stale_nfs",   [])
-    sfr_dirs    = data.get("sfr_dirs",    [])
-    nasnap_vgs  = data.get("nasnap_vgs",  [])
-    orphan_nbds = data.get("orphan_nbds", [])
+    data               = request.get_json() or {}
+    host_id            = str(data.get("host_id", "")).strip()
+    stale_nfs          = data.get("stale_nfs",          [])
+    sfr_dirs           = data.get("sfr_dirs",           [])
+    nasnap_vgs         = data.get("nasnap_vgs",         [])
+    orphan_nbds        = data.get("orphan_nbds",        [])
+    orphan_nvme_subsys = data.get("orphan_nvme_subsys", [])
 
     if not host_id:
         return {"error": "host_id required"}, 400
@@ -1337,16 +1355,32 @@ def _pve_cleanup():
             ok, errmsg = False, str(e)
         items.append({"type": "nasnap_vg", "target": vg, "ok": ok, "error": errmsg})
 
-    # Orphaned NBD devices: disconnect
+    # Orphaned NBD devices: kill server process (via sysfs pid) then disconnect kernel driver
     for dev in orphan_nbds:
         ok, errmsg = True, ""
         try:
+            dev_q = shlex.quote(dev)
             ssh_run(host, user, pw,
-                f"qemu-nbd --disconnect {shlex.quote(dev)} 2>/dev/null || true",
-                timeout=15)
+                f"base=$(basename {dev_q}); "
+                f"pid=$(cat /sys/block/$base/pid 2>/dev/null); "
+                f"[ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; "
+                f"sleep 0.5; "
+                f"qemu-nbd --disconnect {dev_q} 2>/dev/null; true",
+                timeout=20)
         except Exception as e:
             ok, errmsg = False, str(e)
         items.append({"type": "orphan_nbd", "target": dev, "ok": ok, "error": errmsg})
+
+    # Orphaned NVMe subsystems: disconnect by NQN
+    for nqn in orphan_nvme_subsys:
+        ok, errmsg = True, ""
+        try:
+            ssh_run(host, user, pw,
+                f"timeout 10 nvme disconnect -n {shlex.quote(nqn)} 2>/dev/null || true",
+                timeout=20)
+        except Exception as e:
+            ok, errmsg = False, str(e)
+        items.append({"type": "orphan_nvme_subsys", "target": nqn, "ok": ok, "error": errmsg})
 
     return {"results": items}
 

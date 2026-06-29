@@ -8,6 +8,7 @@ Schedule API for automatic snapshots
   schedules/run-now   POST  – run schedule immediately
 """
 
+import os
 import re
 import uuid
 import json
@@ -15,6 +16,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import request
 from nasnap_core.core.db import get_db
@@ -43,7 +45,11 @@ def _cron_is_due(cron_expr, last_run_at):
     5-field cron (minute hour day month weekday).
     Checks only whether the current minute matches the cron expression.
     """
-    now = datetime.now()
+    try:
+        tz = ZoneInfo(os.environ.get("TZ", "UTC"))
+    except ZoneInfoNotFoundError:
+        tz = ZoneInfo("UTC")
+    now = datetime.now(tz)
 
     aliases = {
         "@hourly":  "0 * * * *",

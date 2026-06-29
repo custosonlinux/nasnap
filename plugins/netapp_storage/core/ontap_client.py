@@ -527,6 +527,46 @@ class OntapClient:
         }
         return self._post(f"protocols/nfs/export-policies/{export_policy_id}/rules", body=body)
 
+    def ensure_svm_root_accessible(self, svm_name, client_ips):
+        """Ensure the SVM root volume's export policy allows RO traversal from client_ips.
+
+        ONTAP NFS requires namespace traversal access on the root volume ('/'). If the
+        root volume's export policy doesn't include the client IPs, mounts fail with
+        'access denied' even if the datastore volume's own policy is correct.
+
+        Returns the list of IPs actually added (empty if all were already covered).
+        """
+        records = self._get_all_records(
+            "storage/volumes",
+            params={"svm.name": svm_name, "nas.path": "/",
+                    "fields": "uuid,name,nas.export_policy", "max_records": 5},
+        )
+        if not records:
+            return []
+        nas = records[0].get("nas") or {}
+        pol = nas.get("export_policy") or {}
+        policy_id = pol.get("id")
+        if not policy_id:
+            return []
+
+        existing = self.list_nfs_export_rules(policy_id)
+        existing_matches = {c.get("match", "")
+                            for rule in existing
+                            for c in rule.get("clients", [])}
+        if "0.0.0.0/0" in existing_matches:
+            return []  # wildcard already covers all hosts
+
+        added = []
+        for ip in client_ips:
+            if ip and ip not in existing_matches:
+                try:
+                    self.add_nfs_export_rule(policy_id, ip)
+                    added.append(ip)
+                    existing_matches.add(ip)
+                except Exception:
+                    pass
+        return added
+
     def list_nfs_lifs(self, svm_name):
         """Returns list of {name, ip} for all up NFS LIFs of the SVM."""
         records = self._get_all_records(
