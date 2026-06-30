@@ -317,6 +317,7 @@ def _prov_ontap_resources():
                 "uuid": v.get("uuid", ""),
                 "name": v.get("name", ""),
                 "svm":  (v.get("svm") or {}).get("name", ""),
+                "snapshot_locking_enabled": bool((v.get("snaplock") or {}).get("snapshot_locking_enabled", False)),
             })
     except Exception as exc:
         log.warning(f"[netapp_storage] prov ontap-resources volumes: {exc}")
@@ -1396,6 +1397,7 @@ def _provision_iscsi(ds_id, params, db, jlog):
     vol_size_bytes = int(size_bytes * _vol_multiplier)
 
     asa_mode = False
+    snap_locking_enabled = 0
     if not volume_uuid:
         ag_info = f" on aggregate '{aggregate_name}'" if aggregate_name else " (auto-placement)"
         jlog.log(f"Creating ONTAP volume '{volume_name}' ({vol_size_bytes} bytes, "
@@ -1408,6 +1410,13 @@ def _provision_iscsi(ds_id, params, db, jlog):
                 jlog.log("Inline compression enabled.")
             except Exception as _ce:
                 jlog.log(f"NOTE: inline compression not set ({_ce}) — AFF/ASA enable it by default.")
+            if params.get("enable_snapshot_locking"):
+                try:
+                    client.enable_snapshot_locking(volume_uuid)
+                    snap_locking_enabled = 1
+                    jlog.log("Snapshot locking enabled on volume (Tamperproof-ready).")
+                except Exception as _se:
+                    jlog.log(f"WARNING: could not enable snapshot locking: {_se}")
         except OntapError as exc:
             if exc.status_code == 405:
                 jlog.log("ASA platform detected — volume will be auto-provisioned with LUN.")
@@ -1417,7 +1426,9 @@ def _provision_iscsi(ds_id, params, db, jlog):
     else:
         vol_info    = client.get_volume(volume_uuid)
         volume_name = vol_info.get("name", volume_name)
-        jlog.log(f"Using existing volume: {volume_name}")
+        snap_locking_enabled = 1 if (vol_info.get("snaplock") or {}).get("snapshot_locking_enabled") else 0
+        jlog.log(f"Using existing volume: {volume_name}"
+                 + (" [snapshot locking enabled]" if snap_locking_enabled else ""))
 
     # ── ONTAP: LUN ───────────────────────────────────────────────────────────
     lun_uuid = params.get("lun_uuid", "")
@@ -1651,8 +1662,8 @@ def _provision_iscsi(ds_id, params, db, jlog):
                     storage_protocol, lun_uuid, lun_path,
                     lvm_vg_name, lvm_type, lvm_pool_name,
                     snapinfo_initialized, snapinfo_lv_name,
-                    created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    snapshot_locking_enabled, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET
                    endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name,
                    volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name,
@@ -1661,12 +1672,13 @@ def _provision_iscsi(ds_id, params, db, jlog):
                    lvm_pool_name=excluded.lvm_pool_name,
                    storage_protocol=excluded.storage_protocol,
                    snapinfo_initialized=excluded.snapinfo_initialized,
+                   snapshot_locking_enabled=excluded.snapshot_locking_enabled,
                    discovered_at=excluded.discovered_at""",
                 (mid, endpoint_id, hid, pve_storage_id, svm_name,
                  volume_uuid, volume_name, "", "", "", now,
                  "iscsi", lun_uuid, lun_path,
                  vg_name, lvm_type, lvm_pool_name,
-                 1, "netapp_snapmanifest", _now()),
+                 1, "netapp_snapmanifest", snap_locking_enabled, _now()),
             )
             jlog.log(f"Volume mapping registered for host {hid}.")
         except Exception as exc:
@@ -1942,6 +1954,10 @@ def _add_host_iscsi(ds_id, ds, host_id, db, jlog):
             jlog.log(f"[{sh}] WARNING: pvesm: {exc}")
 
     # 7. Register volume_mapping so this host appears in Snapshots/Volume Discovery
+    existing_map = db.query_one(
+        "SELECT snapshot_locking_enabled FROM netapp_volume_mapping WHERE volume_uuid=? LIMIT 1",
+        (volume_uuid,))
+    _snap_lock = (dict(existing_map) if existing_map else {}).get("snapshot_locking_enabled", 0)
     mid = str(_uuid.uuid4())
     try:
         db.execute(
@@ -1952,8 +1968,8 @@ def _add_host_iscsi(ds_id, ds, host_id, db, jlog):
                 storage_protocol, lun_uuid, lun_path,
                 lvm_vg_name, lvm_type, lvm_pool_name,
                 snapinfo_initialized, snapinfo_lv_name,
-                    created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                snapshot_locking_enabled, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET
                endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name,
                volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name,
@@ -1962,12 +1978,13 @@ def _add_host_iscsi(ds_id, ds, host_id, db, jlog):
                lvm_pool_name=excluded.lvm_pool_name,
                storage_protocol=excluded.storage_protocol,
                snapinfo_initialized=excluded.snapinfo_initialized,
+               snapshot_locking_enabled=excluded.snapshot_locking_enabled,
                discovered_at=excluded.discovered_at""",
             (mid, endpoint_id, host_id, pve_storage_id, svm_name,
              volume_uuid, volume_name, "", "", "", _now(),
              "iscsi", lun_uuid, lun_path,
              vg_name, lvm_type, lvm_pool_name,
-             1, "netapp_snapmanifest", _now()),
+             1, "netapp_snapmanifest", _snap_lock, _now()),
         )
         jlog.log(f"Volume mapping registered.")
     except Exception as exc:
@@ -2279,6 +2296,7 @@ def _provision_nvme(ds_id, params, db, jlog):
     vol_size_bytes = int(size_bytes * _vol_multiplier)
 
     asa_mode = False
+    snap_locking_enabled = 0
     if not volume_uuid:
         ag_info = f" on aggregate '{aggregate_name}'" if aggregate_name else " (auto-placement)"
         jlog.log(f"Creating ONTAP volume '{volume_name}' ({vol_size_bytes} bytes, "
@@ -2292,6 +2310,13 @@ def _provision_nvme(ds_id, params, db, jlog):
                 jlog.log("Inline compression enabled.")
             except Exception as _ce:
                 jlog.log(f"NOTE: inline compression not set ({_ce}) — AFF/ASA enable it by default.")
+            if params.get("enable_snapshot_locking"):
+                try:
+                    client.enable_snapshot_locking(volume_uuid)
+                    snap_locking_enabled = 1
+                    jlog.log("Snapshot locking enabled on volume (Tamperproof-ready).")
+                except Exception as _se:
+                    jlog.log(f"WARNING: could not enable snapshot locking: {_se}")
         except OntapError as exc:
             if exc.status_code == 405:
                 jlog.log("ASA platform detected — volume will be auto-provisioned with namespace.")
@@ -2301,7 +2326,9 @@ def _provision_nvme(ds_id, params, db, jlog):
     else:
         vol_info    = client.get_volume(volume_uuid)
         volume_name = vol_info.get("name", volume_name)
-        jlog.log(f"Using existing volume: {volume_name}")
+        snap_locking_enabled = 1 if (vol_info.get("snaplock") or {}).get("snapshot_locking_enabled") else 0
+        jlog.log(f"Using existing volume: {volume_name}"
+                 + (" [snapshot locking enabled]" if snap_locking_enabled else ""))
 
     # ── ONTAP: Namespace ──────────────────────────────────────────────────────
     ns_uuid  = params.get("ns_uuid", "")
@@ -2557,8 +2584,8 @@ def _provision_nvme(ds_id, params, db, jlog):
                     storage_protocol, lun_uuid, lun_path,
                     lvm_vg_name, lvm_type, lvm_pool_name,
                     snapinfo_initialized, snapinfo_lv_name,
-                    created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    snapshot_locking_enabled, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET
                    endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name,
                    volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name,
@@ -2567,12 +2594,13 @@ def _provision_nvme(ds_id, params, db, jlog):
                    lvm_pool_name=excluded.lvm_pool_name,
                    storage_protocol=excluded.storage_protocol,
                    snapinfo_initialized=excluded.snapinfo_initialized,
+                   snapshot_locking_enabled=excluded.snapshot_locking_enabled,
                    discovered_at=excluded.discovered_at""",
                 (mid, endpoint_id, hid, pve_storage_id, svm_name,
                  volume_uuid, volume_name, "", "", "", now,
                  "nvme", ns_uuid, f"/vol/{volume_name}/{ns_name}",
                  vg_name, lvm_type, lvm_pool_name,
-                 1, "netapp_snapmanifest", _now()),
+                 1, "netapp_snapmanifest", snap_locking_enabled, _now()),
             )
             jlog.log(f"Volume mapping registered for host {hid}.")
         except Exception as exc:
@@ -2792,6 +2820,10 @@ def _add_host_nvme(ds_id, ds, host_id, db, jlog):
                    ns_info.get("name", "").split("/")[-1])
     except Exception:
         pass
+    existing_map_nvme = db.query_one(
+        "SELECT snapshot_locking_enabled FROM netapp_volume_mapping WHERE volume_uuid=? LIMIT 1",
+        (volume_uuid,))
+    _snap_lock_nvme = (dict(existing_map_nvme) if existing_map_nvme else {}).get("snapshot_locking_enabled", 0)
     mid = str(_uuid.uuid4())
     try:
         db.execute(
@@ -2802,8 +2834,8 @@ def _add_host_nvme(ds_id, ds, host_id, db, jlog):
                 storage_protocol, lun_uuid, lun_path,
                 lvm_vg_name, lvm_type, lvm_pool_name,
                 snapinfo_initialized, snapinfo_lv_name,
-                    created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                snapshot_locking_enabled, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET
                endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name,
                volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name,
@@ -2812,12 +2844,13 @@ def _add_host_nvme(ds_id, ds, host_id, db, jlog):
                lvm_pool_name=excluded.lvm_pool_name,
                storage_protocol=excluded.storage_protocol,
                snapinfo_initialized=excluded.snapinfo_initialized,
+               snapshot_locking_enabled=excluded.snapshot_locking_enabled,
                discovered_at=excluded.discovered_at""",
             (mid, endpoint_id, host_id, pve_storage_id, svm_name,
              volume_uuid, volume_name, "", "", "", _now(),
              "nvme", ns_uuid, f"/vol/{volume_name}/{ns_name}",
              vg_name, lvm_type, lvm_pool_name,
-             1, "netapp_snapmanifest", _now()),
+             1, "netapp_snapmanifest", _snap_lock_nvme, _now()),
         )
         jlog.log("Volume mapping registered.")
     except Exception as exc:
@@ -3064,6 +3097,7 @@ def _provision_nfs(ds_id, params, db, jlog):
         )
 
     volume_uuid = params.get("volume_uuid", "")
+    snap_locking_enabled = 0
     if not volume_uuid:
         ag_info = f" on aggregate '{aggregate_name}'" if aggregate_name else " (auto-placement)"
         jlog.log(f"Creating NFS volume '{volume_name}' ({size_bytes} bytes)"
@@ -3121,13 +3155,22 @@ def _provision_nfs(ds_id, params, db, jlog):
             jlog.log("Inline compression enabled.")
         except Exception as _ce:
             jlog.log(f"NOTE: inline compression not set ({_ce}) — AFF/ASA enable it by default.")
+        if params.get("enable_snapshot_locking"):
+            try:
+                client.enable_snapshot_locking(volume_uuid)
+                snap_locking_enabled = 1
+                jlog.log("Snapshot locking enabled on volume (Tamperproof-ready).")
+            except Exception as _se:
+                jlog.log(f"WARNING: could not enable snapshot locking: {_se}")
     else:
         vol_info       = client.get_volume(volume_uuid)
         volume_name    = vol_info.get("name", volume_name)
+        snap_locking_enabled = 1 if (vol_info.get("snaplock") or {}).get("snapshot_locking_enabled") else 0
         export_info    = client.get_volume_export_info(volume_uuid)
         junction_path  = export_info.get("junction_path", junction_path)
         policy_name    = export_info.get("export_policy_name", "default")
-        jlog.log(f"Using existing NFS volume: {volume_name}  junction={junction_path}")
+        jlog.log(f"Using existing NFS volume: {volume_name}  junction={junction_path}"
+                 + (" [snapshot locking enabled]" if snap_locking_enabled else ""))
 
     # Persist ONTAP IDs
     db.execute(
@@ -3214,18 +3257,19 @@ def _provision_nfs(ds_id, params, db, jlog):
                     nfs_mount_path, discovered_at, storage_protocol,
                     lun_uuid, lun_path, lvm_vg_name, lvm_type, lvm_pool_name,
                     snapinfo_initialized, snapinfo_lv_name,
-                    created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    snapshot_locking_enabled, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET
                    endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name,
                    volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name,
                    junction_path=excluded.junction_path, nfs_export_ip=excluded.nfs_export_ip,
                    storage_protocol=excluded.storage_protocol,
+                   snapshot_locking_enabled=excluded.snapshot_locking_enabled,
                    discovered_at=excluded.discovered_at""",
                 (mid, endpoint_id, hid, pve_storage_id, svm_name,
                  volume_uuid, volume_name, junction_path, nfs_ip,
                  f"/mnt/pve/{pve_storage_id}", now, "nfs",
-                 "", "", "", "", "", 0, "", _now()),
+                 "", "", "", "", "", 0, "", snap_locking_enabled, _now()),
             )
             jlog.log(f"Volume mapping registered for host {hid}.")
         except Exception as exc:
@@ -3363,6 +3407,10 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
         jlog.log(f"WARNING: pvesm: {exc}")
 
     # Register volume_mapping
+    existing_map_nfs = db.query_one(
+        "SELECT snapshot_locking_enabled FROM netapp_volume_mapping WHERE volume_uuid=? LIMIT 1",
+        (volume_uuid,))
+    _snap_lock_nfs = (dict(existing_map_nfs) if existing_map_nfs else {}).get("snapshot_locking_enabled", 0)
     mid = str(_uuid.uuid4())
     try:
         db.execute(
@@ -3372,18 +3420,19 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
                 nfs_mount_path, discovered_at, storage_protocol,
                 lun_uuid, lun_path, lvm_vg_name, lvm_type, lvm_pool_name,
                 snapinfo_initialized, snapinfo_lv_name,
-                    created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                snapshot_locking_enabled, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET
                endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name,
                volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name,
                junction_path=excluded.junction_path, nfs_export_ip=excluded.nfs_export_ip,
                storage_protocol=excluded.storage_protocol,
+               snapshot_locking_enabled=excluded.snapshot_locking_enabled,
                discovered_at=excluded.discovered_at""",
             (mid, endpoint_id, host_id, pve_storage_id, svm_name,
              volume_uuid, volume_name, junction_path, nfs_ip,
              f"/mnt/pve/{pve_storage_id}", _now(), "nfs",
-             "", "", "", "", "", 0, "", _now()),
+             "", "", "", "", "", 0, "", _snap_lock_nfs, _now()),
         )
         jlog.log("Volume mapping registered.")
     except Exception as exc:

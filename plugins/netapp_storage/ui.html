@@ -3324,6 +3324,7 @@ function schedDsToggle(el) {
     schedWizUpdateSMPill();
   }
   _schedWizUpdateMultiDsMode();
+  _schedCheckSnapLockingSupport();
 }
 
 async function _schedCheckSmForAll(mappingIds) {
@@ -6103,6 +6104,8 @@ async function showAddScheduleForm() {
     document.getElementById('sched_tamperproof_opts').style.display = 'none';
     document.getElementById('sched_tamperproof_days').value = 7;
   }
+  var _snWarn = document.getElementById('sched_tamperproof_snaplock_warn');
+  if (_snWarn) _snWarn.style.display = 'none';
   document.getElementById('sched_freq').value = 'daily';
   document.getElementById('sched_time').value = '02:00';
   document.getElementById('schedWizSaveBtn').textContent = t('sched_save');
@@ -6292,9 +6295,38 @@ function schedTamperproofToggle() {
   if (chk.checked) {
     var max = _schedTamperproofMax();
     var daysEl = document.getElementById('sched_tamperproof_days');
-    // Default to max (= longest lock that still allows rotation)
     if (daysEl && max >= 1) daysEl.value = max;
     schedTamperproofUpdate();
+  }
+  _schedCheckSnapLockingSupport();
+}
+
+function _schedCheckSnapLockingSupport() {
+  var warn = document.getElementById('sched_tamperproof_snaplock_warn');
+  if (!warn) return;
+  var chk = document.getElementById('sched_tamperproof');
+  if (!chk || !chk.checked) { warn.style.display = 'none'; return; }
+  var ids = _schedGetMappingIds();
+  if (!ids.length) { warn.style.display = 'none'; return; }
+  var notSupported = ids.filter(function(mid) {
+    var m = (_mappingsCache || []).find(function(x){ return String(x.id) === String(mid); });
+    return m && !m.snapshot_locking_enabled;
+  });
+  var unknown = ids.filter(function(mid) {
+    var m = (_mappingsCache || []).find(function(x){ return String(x.id) === String(mid); });
+    return !m;
+  });
+  if (notSupported.length) {
+    var names = notSupported.map(function(mid) {
+      var m = (_mappingsCache || []).find(function(x){ return String(x.id) === String(mid); });
+      return m ? m.pve_storage_id : mid;
+    });
+    warn.style.display = '';
+    warn.innerHTML = '<strong>Snapshot locking not enabled</strong> on: <em>' + names.map(esc).join(', ') + '</em>. '
+      + 'ONTAP will ignore the expiry date and snapshots will not be tamperproof-locked. '
+      + 'Enable snapshot locking on the volume via the Provisioning wizard ("Enable Snapshot Locking" when creating a new volume) or directly on ONTAP, then re-run Discovery to update the status.';
+  } else {
+    warn.style.display = 'none';
   }
 }
 
@@ -8367,7 +8399,8 @@ function renderProvOntapRes() {
   var volSel=document.getElementById('provWizVolume');
   volSel.innerHTML='<option value="__new__">— create new volume —</option>'+
     (_provOntapRes.volumes||[]).map(function(v){
-      return '<option value="'+esc(v.uuid)+'">'+esc(v.name)+'</option>';
+      var lock=v.snapshot_locking_enabled?' 🔒':'';
+      return '<option value="'+esc(v.uuid)+'">'+esc(v.name)+lock+'</option>';
     }).join('');
   var agSel=document.getElementById('provWizAggregate');
   var aggs=_provOntapRes.aggregates||[];
@@ -8569,6 +8602,29 @@ function provWizVolumeChange() {
   var isNew=volId==='__new__';
   document.getElementById('provWizNewVolRow').style.display=isNew?'':'none';
   document.getElementById('provWizAggRow').style.display=isNew?'':'none';
+  // Snapshot locking: checkbox for new volumes, info note for existing
+  var snapLockRow=document.getElementById('provWizSnapLockRow');
+  var snapLockNote=document.getElementById('provWizVolSnapLockNote');
+  if(isNew) {
+    if(snapLockRow) snapLockRow.style.display='';
+    if(snapLockNote) snapLockNote.style.display='none';
+  } else {
+    if(snapLockRow) snapLockRow.style.display='none';
+    if(snapLockNote) {
+      var vol=(_provOntapRes.volumes||[]).find(function(v){ return v.uuid===volId; });
+      if(vol) {
+        if(vol.snapshot_locking_enabled) {
+          snapLockNote.style.cssText='display:block;margin-top:6px;padding:7px 10px;border-radius:6px;font-size:12px;background:rgba(46,160,67,.1);border:1px solid rgba(46,160,67,.35);color:#3fb950';
+          snapLockNote.innerHTML='🔒 Snapshot locking enabled — this volume supports Tamperproof Snapshots.';
+        } else {
+          snapLockNote.style.cssText='display:block;margin-top:6px;padding:7px 10px;border-radius:6px;font-size:12px;background:rgba(240,160,64,.08);border:1px solid rgba(240,160,64,.3);color:#f0a040';
+          snapLockNote.innerHTML='⚠ Snapshot locking not enabled on this volume. Tamperproof Snapshots will not work. To enable it, create a new volume with "Enable Snapshot Locking" checked, or enable it manually on ONTAP.';
+        }
+      } else {
+        snapLockNote.style.display='none';
+      }
+    }
+  }
   if(proto==='iscsi') {
     var lunSel=document.getElementById('provWizLun');
     lunSel.innerHTML='<option value="__new__">— create new LUN —</option>'+
@@ -8672,11 +8728,13 @@ async function submitProvWizard() {
   document.querySelectorAll('#provWizHostList input[type=checkbox]:checked').forEach(function(cb){ hostIds.push(cb.value); });
   if(!hostIds.length) return toast('Select at least one host','error');
   var UNITS={'GiB':1073741824,'TiB':1099511627776,'MiB':1048576};
+  var snapLockChk=document.getElementById('provWizSnapLock');
   var body={
     name:name, endpoint_id:epId, svm_name:svm, protocol:proto,
     volume_uuid:volId!=='__new__'?volId:'',
     volume_name:volId==='__new__'?document.getElementById('provWizVolName').value.trim():'',
     aggregate_name:volId==='__new__'?(document.getElementById('provWizAggregate').value||''):'',
+    enable_snapshot_locking:!!(volId==='__new__'&&snapLockChk&&snapLockChk.checked),
     pve_storage_id:storageId, pve_host_ids:hostIds
   };
   if(proto==='iscsi') {
@@ -11796,6 +11854,7 @@ actLogPoll();
             <select class="form-control" id="provWizVolume" onchange="provWizVolumeChange()">
               <option value="__new__">— create new volume —</option>
             </select>
+            <div id="provWizVolSnapLockNote" style="display:none;margin-top:6px;padding:7px 10px;border-radius:6px;font-size:12px"></div>
           </div>
           <div class="form-group" id="provWizNewVolRow" style="display:none">
             <label>New Volume Name</label>
@@ -11807,6 +11866,18 @@ actLogPoll();
               <option value="">— loading… —</option>
             </select>
           </div>
+        </div>
+        <!-- Snapshot Locking: only shown for new volumes -->
+        <div id="provWizSnapLockRow" style="display:none;padding:10px 12px;margin-bottom:10px;background:rgba(88,166,255,.06);border:1px solid rgba(88,166,255,.2);border-radius:6px">
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0">
+            <input type="checkbox" id="provWizSnapLock" style="margin-top:3px;flex-shrink:0">
+            <div>
+              <div style="font-weight:600;font-size:13px">Enable Snapshot Locking
+                <span style="font-size:10px;font-weight:600;background:rgba(139,148,158,.14);color:var(--fg);padding:2px 7px;border-radius:10px;margin-left:6px;vertical-align:middle">ONTAP 9.12.1+</span>
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">Required for Tamperproof Snapshots. Enables per-snapshot expiry locks on this volume. <strong>Irreversible once set.</strong></div>
+            </div>
+          </label>
         </div>
 
         <!-- iSCSI: LUN + iGroup -->
@@ -12433,6 +12504,7 @@ actLogPoll();
               <div id="sched_tamperproof_warn" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(240,160,64,.1);border:1px solid rgba(240,160,64,.35);border-radius:6px;font-size:12px;color:#f0a040"></div>
             </div>
           </div>
+          <div id="sched_tamperproof_snaplock_warn" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.3);border-radius:6px;font-size:12px;color:#f85149"></div>
 
           <!-- Next-run preview -->
           <div>

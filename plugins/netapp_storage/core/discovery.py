@@ -273,6 +273,7 @@ def run_discovery(endpoint_id=None):
             vol      = svm_vols[export]
             vol_uuid = vol.get("uuid", "")
             vol_name = vol.get("name", "")
+            snap_locking = 1 if (vol.get("snaplock") or {}).get("snapshot_locking_enabled") else 0
             mid      = str(_uuid.uuid4())
 
             try:
@@ -281,16 +282,17 @@ def run_discovery(endpoint_id=None):
                     "INSERT INTO netapp_volume_mapping "
                     "(id, endpoint_id, pve_cluster_id, pve_storage_id, svm_name, "
                     "volume_uuid, volume_name, junction_path, nfs_export_ip, "
-                    "nfs_mount_path, discovered_at, created_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "nfs_mount_path, discovered_at, created_at, snapshot_locking_enabled) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(pve_cluster_id, pve_storage_id) DO UPDATE SET "
                     "endpoint_id=excluded.endpoint_id, svm_name=excluded.svm_name, "
                     "volume_uuid=excluded.volume_uuid, volume_name=excluded.volume_name, "
                     "junction_path=excluded.junction_path, nfs_export_ip=excluded.nfs_export_ip, "
-                    "nfs_mount_path=excluded.nfs_mount_path, discovered_at=excluded.discovered_at",
+                    "nfs_mount_path=excluded.nfs_mount_path, discovered_at=excluded.discovered_at, "
+                    "snapshot_locking_enabled=excluded.snapshot_locking_enabled",
                     (mid, ep["id"], pve_host_id, stor["storage_id"],
                      matched_svm, vol_uuid, vol_name, export, server,
-                     stor["nfs_mount_path"], now, now),
+                     stor["nfs_mount_path"], now, now, snap_locking),
                 )
                 row = db.query_one(
                     "SELECT * FROM netapp_volume_mapping "

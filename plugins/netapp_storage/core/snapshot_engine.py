@@ -329,6 +329,21 @@ def _run_snapshot(job_id, params, username):
                 _expiry = datetime.now(timezone.utc) + timedelta(days=int(params["tamperproof_days"]))
                 expiry_time = _expiry.strftime('%Y-%m-%dT%H:%M:%SZ')
                 jlog.log(f"Tamperproof: source snapshot locked until {expiry_time}.")
+                # Ensure snapshot locking is enabled on the volume (required by ONTAP for expiry_time).
+                # Enable automatically if missing — user already opted in by enabling tamperproof.
+                if not mapping.get("snapshot_locking_enabled"):
+                    try:
+                        client.enable_snapshot_locking(mapping["volume_uuid"])
+                        db.execute(
+                            "UPDATE netapp_volume_mapping SET snapshot_locking_enabled=1 WHERE volume_uuid=?",
+                            (mapping["volume_uuid"],),
+                        )
+                        mapping["snapshot_locking_enabled"] = 1
+                        jlog.log("Snapshot locking enabled on volume (required for Tamperproof).")
+                    except Exception as _sle:
+                        jlog.log(f"WARNING: could not enable snapshot locking on volume: {_sle}. "
+                                 f"Tamperproof lock may not be applied by ONTAP.")
+                        expiry_time = ""
             sm_expiry_time = ""
             if params.get("sm_tamperproof_enabled") and int(params.get("sm_tamperproof_days") or 0) > 0:
                 _sm_expiry = datetime.now(timezone.utc) + timedelta(days=int(params["sm_tamperproof_days"]))

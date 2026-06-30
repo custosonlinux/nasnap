@@ -47,9 +47,10 @@ CREATE TABLE IF NOT EXISTS netapp_volume_mapping (
     lvm_vg_name          TEXT NOT NULL DEFAULT '',
     lvm_type             TEXT NOT NULL DEFAULT '',
     lvm_pool_name        TEXT NOT NULL DEFAULT '',
-    snapinfo_initialized INTEGER NOT NULL DEFAULT 0,
-    snapinfo_lv_name     TEXT NOT NULL DEFAULT 'netapp_snapmanifest',
-    created_at           TEXT NOT NULL DEFAULT '',
+    snapinfo_initialized        INTEGER NOT NULL DEFAULT 0,
+    snapinfo_lv_name            TEXT NOT NULL DEFAULT 'netapp_snapmanifest',
+    snapshot_locking_enabled    INTEGER NOT NULL DEFAULT 0,
+    created_at                  TEXT NOT NULL DEFAULT '',
     UNIQUE(pve_cluster_id, pve_storage_id)
 );
 

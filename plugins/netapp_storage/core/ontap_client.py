@@ -160,14 +160,14 @@ class OntapClient:
     # ── Volumes ─────────────────────────────────────────────────────────────
 
     def get_volumes(self, svm_name=None):
-        params = {"fields": "uuid,name,svm,nas.path,space.used,space.available", "max_records": 500}
+        params = {"fields": "uuid,name,svm,nas.path,space.used,space.available,snaplock.snapshot_locking_enabled", "max_records": 500}
         if svm_name:
             params["svm.name"] = svm_name
         return self._get_all_records("storage/volumes", params=params)
 
     def get_volume(self, volume_uuid):
         return self._get(f"storage/volumes/{volume_uuid}",
-                         params={"fields": "uuid,name,svm,nas.path,state,space"})
+                         params={"fields": "uuid,name,svm,nas.path,state,space,snaplock.snapshot_locking_enabled"})
 
     # ── Snapshots ───────────────────────────────────────────────────────────
 
@@ -1200,10 +1200,15 @@ class OntapClient:
 
     def get_volumes_san(self, svm_name=None):
         """All volumes of a SVM without NAS fields (for SAN SVMs like ASA)."""
-        params = {"fields": "uuid,name,svm.name", "max_records": 500}
+        params = {"fields": "uuid,name,svm.name,snaplock.snapshot_locking_enabled", "max_records": 500}
         if svm_name:
             params["svm.name"] = svm_name
         return self._get_all_records("storage/volumes", params=params)
+
+    def enable_snapshot_locking(self, volume_uuid):
+        """Enable snapshot locking on a volume (ONTAP 9.12.1+). Irreversible once set."""
+        self._patch(f"storage/volumes/{volume_uuid}",
+                    body={"snaplock": {"snapshot_locking_enabled": True}})
 
     def list_nvme_subsystems(self, svm_name=None):
         """All NVMe subsystems (analogous to iGroups for iSCSI)."""
