@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <!-- Background -->
+  <rect width="1280" height="640" fill="#0d1117"/>
+  <!-- Subtle grid lines -->
+  <line x1="0" y1="320" x2="1280" y2="320" stroke="#1c2733" stroke-width="1"/>
+  <line x1="640" y1="0" x2="640" y2="640" stroke="#1c2733" stroke-width="1"/>
+
+  <!-- Left side: large logo badge -->
+  <!-- Badge -->
+  <rect x="80" y="120" width="340" height="340" rx="72" fill="#141E30"/>
+
+  <!-- Circular snapshot arrow -->
+  <path d="M 186 295 A 78 78 0 1 1 328 271"
+        fill="none" stroke="white" stroke-width="20" stroke-linecap="round"/>
+  <polyline points="342,254 328,271 314,258"
+            fill="none" stroke="white" stroke-width="20"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Three server/volume bars -->
+  <rect x="94" y="345" width="312" height="34" rx="9" fill="white"/>
+  <rect x="94" y="385" width="312" height="34" rx="9" fill="white" opacity="0.6"/>
+  <rect x="94" y="425" width="312" height="34" rx="9" fill="white" opacity="0.32"/>
+
+  <!-- Proxmox orange accent badge -->
+  <circle cx="390" cy="160" r="38" fill="#E57000"/>
+  <polyline points="368,141 389,160 368,179"
+            fill="none" stroke="white" stroke-width="7"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="404,141 383,160 404,179"
+            fill="none" stroke="white" stroke-width="7"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- LED dots -->
+  <circle cx="375" cy="362" r="9" fill="#3B6CC7"/>
+  <circle cx="398" cy="362" r="9" fill="#3B6CC7"/>
+  <circle cx="375" cy="402" r="9" fill="#3B6CC7" opacity="0.7"/>
+  <circle cx="398" cy="402" r="9" fill="#3B6CC7" opacity="0.7"/>
+
+  <!-- Right side: text -->
+  <!-- Product name -->
+  <text x="510" y="255"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-weight="800" font-size="98" fill="#e2e8f0" letter-spacing="-2">NaSnap</text>
+
+  <!-- Divider line -->
+  <line x1="510" y1="282" x2="1200" y2="282" stroke="#3B6CC7" stroke-width="3" opacity="0.7"/>
+
+  <!-- Subtitle -->
+  <text x="510" y="336"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-weight="400" font-size="28" fill="#8b949e">NetApp® ONTAP® Snapshot Management</text>
+  <text x="510" y="376"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-weight="400" font-size="28" fill="#8b949e">for Proxmox VE</text>
+
+  <!-- Feature pills -->
+  <!-- Pill 1 -->
+  <rect x="510" y="420" width="175" height="38" rx="19" fill="#1c2733" stroke="#3B6CC7" stroke-width="1.5"/>
+  <text x="597" y="444"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="16" fill="#58a6ff" text-anchor="middle">NFS · iSCSI · NVMe</text>
+
+  <!-- Pill 2 -->
+  <rect x="700" y="420" width="145" height="38" rx="19" fill="#1c2733" stroke="#3B6CC7" stroke-width="1.5"/>
+  <text x="772" y="444"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="16" fill="#58a6ff" text-anchor="middle">SnapMirror®</text>
+
+  <!-- Pill 3 -->
+  <rect x="860" y="420" width="175" height="38" rx="19" fill="#1c2733" stroke="#3B6CC7" stroke-width="1.5"/>
+  <text x="947" y="444"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="16" fill="#58a6ff" text-anchor="middle">Tamperproof WORM</text>
+
+  <!-- Pill 4 -->
+  <rect x="1050" y="420" width="140" height="38" rx="19" fill="#1c2733" stroke="#3B6CC7" stroke-width="1.5"/>
+  <text x="1120" y="444"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="16" fill="#58a6ff" text-anchor="middle">Docker · SQLite</text>
+
+  <!-- Bottom tagline -->
+  <text x="510" y="530"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="20" fill="#4a5568">github.com/custosonlinux/nasnap</text>
+</svg>

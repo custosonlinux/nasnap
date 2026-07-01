@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="nasnap_logo.svg" alt="NaSnap" width="130">
+</p>
+
 # NaSnap — NetApp® ONTAP® Snapshot Manager for Proxmox VE
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI (light theme available).
