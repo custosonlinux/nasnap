@@ -27,6 +27,7 @@
   /* ── Light theme ─────────────────────────────────────────────── */
   /* Pre-applied on <html> by inline script to avoid dark flash on reload */
   html.light-theme-pre { background: #F0F4F8; }
+  html.glass-theme-pre { background: #0a1628; }
 
   body.light-theme {
     --bg:     #F0F4F8;
@@ -563,6 +564,224 @@
   #tabHelpBody code { background:var(--bg); border:1px solid var(--border); border-radius:3px; padding:1px 5px; font-size:12px; }
   .help-lang-btn { padding:3px 12px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12px; cursor:pointer; }
   .help-lang-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+
+  /* ── Glass Theme ──────────────────────────────────────────────────────────── */
+  body.glass-theme {
+    --card:   rgba(18,30,52,0.85);
+    --bg:     rgba(8,14,28,0.82);
+    --border: rgba(255,255,255,0.12);
+    --hover:  rgba(255,255,255,0.07);
+    --muted:  rgba(200,212,224,0.55);
+    background:
+      radial-gradient(ellipse 80% 60% at 15% 5%,  rgba(30,80,180,0.50) 0%, transparent 55%),
+      radial-gradient(ellipse 55% 45% at 85% 85%, rgba(0,40,110,0.40)  0%, transparent 50%),
+      #0a1628;
+  }
+  body.glass-theme::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(circle 450px at 72% 28%, rgba(229,112,0,0.07)  0%, transparent 70%),
+      radial-gradient(circle 320px at 28% 72%, rgba(48,209,88,0.05)  0%, transparent 70%);
+  }
+  body.glass-theme .layout { position: relative; z-index: 1; }
+
+  /* Cards & stat boxes */
+  body.glass-theme .card,
+  body.glass-theme .db-stat,
+  body.glass-theme .snap-timeline-card,
+  body.glass-theme .toast,
+  body.glass-theme #tabHelpBox {
+    background: rgba(22,36,56,0.58);
+    backdrop-filter: blur(20px) saturate(1.5);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.13);
+  }
+  body.glass-theme .card        { border-radius: 16px; }
+  body.glass-theme .db-stat     { border-radius: 16px; }
+  body.glass-theme .toast       { border-radius: 12px; }
+  body.glass-theme #tabHelpBox  { border-radius: 16px; }
+
+  /* Job tracker cards */
+  body.glass-theme .jtc {
+    background: rgba(14,24,42,0.75);
+    backdrop-filter: blur(20px) saturate(1.5);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12);
+    border-radius: 14px;
+  }
+
+  /* Subtabs bar */
+  body.glass-theme .subtabs {
+    background: rgba(8,16,32,0.70);
+    backdrop-filter: blur(32px) saturate(1.8);
+    -webkit-backdrop-filter: blur(32px) saturate(1.8);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09);
+  }
+  body.glass-theme .subtab { border-radius: 100px; }
+  body.glass-theme .subtab.active {
+    background: rgba(30,123,245,0.24) !important;
+    color: #e8f0ff !important;
+    border: 1px solid rgba(30,123,245,0.42);
+    box-shadow: 0 0 14px rgba(30,123,245,0.22), inset 0 1px 0 rgba(255,255,255,0.14);
+  }
+
+  /* Inputs / selects / textareas */
+  body.glass-theme input:not([type=checkbox]):not([type=radio]),
+  body.glass-theme select,
+  body.glass-theme textarea {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.12);
+    border-radius: 10px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.25);
+    color: #f2f4f7;
+  }
+  body.glass-theme input:not([type=checkbox]):not([type=radio]):focus,
+  body.glass-theme select:focus,
+  body.glass-theme textarea:focus {
+    border-color: rgba(30,123,245,0.55);
+    background: rgba(30,123,245,0.09);
+    box-shadow: 0 0 0 3px rgba(30,123,245,0.15), inset 0 1px 3px rgba(0,0,0,0.1);
+  }
+  /* Native dropdown options brauchen Solid-Farbe — transparente Werte werden ignoriert */
+  body.glass-theme select option {
+    background: #0f1f38;
+    color: #f2f4f7;
+  }
+
+  /* Log box / code areas */
+  body.glass-theme .log-box {
+    background: rgba(0,0,0,0.32);
+    border-color: rgba(255,255,255,0.08);
+    border-radius: 10px;
+  }
+
+  /* Primary buttons */
+  body.glass-theme .btn-primary {
+    background: linear-gradient(135deg, rgba(30,123,245,0.92) 0%, rgba(14,80,180,0.92) 100%);
+    border-color: rgba(30,123,245,0.55);
+    box-shadow: 0 4px 14px rgba(30,123,245,0.38), inset 0 1px 0 rgba(255,255,255,0.18);
+  }
+  body.glass-theme .btn-primary:hover { filter: brightness(1.12); }
+
+  /* Ghost / secondary buttons */
+  body.glass-theme .btn-ghost,
+  body.glass-theme .btn-secondary {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.14);
+  }
+  body.glass-theme .btn-ghost:hover,
+  body.glass-theme .btn-secondary:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.22);
+    color: #f2f4f7;
+  }
+
+  /* Wizard step pills */
+  body.glass-theme .setup-step-pill {
+    background: rgba(255,255,255,0.04);
+    border-right-color: rgba(255,255,255,0.08);
+  }
+  body.glass-theme .setup-step-pill:hover  { background: rgba(255,255,255,0.09); }
+  body.glass-theme .setup-step-pill.active { background: var(--primary); }
+  body.glass-theme .setup-step-pill.done   { background: rgba(39,174,96,0.16); }
+
+  /* Wizard & modal inner panels — alle nutzen > div als direktes Kind des Overlays */
+  body.glass-theme #setupWizardModal > div,
+  body.glass-theme #provWizModal > div,
+  body.glass-theme #bindWizModal > div,
+  body.glass-theme #vmImportModal > div,
+  body.glass-theme #createSnapshotForm > div,
+  body.glass-theme #addScheduleForm > div,
+  body.glass-theme #addEndpointForm > div,
+  body.glass-theme #editEndpointForm > div,
+  body.glass-theme #editPveHostForm > div,
+  body.glass-theme #restoreConfirmModal > div,
+  body.glass-theme #deleteConfirmModal > div,
+  body.glass-theme #rwModal > div,
+  body.glass-theme #cwModal > div,
+  body.glass-theme #dsScanIndexModal > div {
+    background: rgba(14,24,42,0.88) !important;
+    backdrop-filter: blur(32px) saturate(1.6);
+    -webkit-backdrop-filter: blur(32px) saturate(1.6);
+    border: 1px solid rgba(255,255,255,0.13) !important;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12) !important;
+    border-radius: 18px !important;
+  }
+
+  /* Log-Viewer Modal */
+  body.glass-theme #logViewModal > div {
+    background: rgba(14,24,42,0.88) !important;
+    backdrop-filter: blur(32px) saturate(1.6);
+    -webkit-backdrop-filter: blur(32px) saturate(1.6);
+    border: 1px solid rgba(255,255,255,0.13) !important;
+    border-radius: 18px !important;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12) !important;
+  }
+  body.glass-theme #lvm_log {
+    border-radius: 10px !important;
+    border-color: rgba(255,255,255,0.08) !important;
+  }
+
+  /* Dynamische Cluster-Popups (Timeline & Job-Chart click) */
+  body.glass-theme #tlClusterPopup,
+  body.glass-theme #jtClusterPopup {
+    background: rgba(12,22,42,0.92) !important;
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid rgba(255,255,255,0.13) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important;
+  }
+
+  /* Tooltip */
+  body.glass-theme #tlTooltip {
+    background: rgba(12,22,42,0.92) !important;
+    backdrop-filter: blur(16px) saturate(1.5);
+    -webkit-backdrop-filter: blur(16px) saturate(1.5);
+    border: 1px solid rgba(255,255,255,0.10) !important;
+    border-radius: 10px !important;
+  }
+
+  /* ── Radius-System (Apple-Prinzip: einheitliche Stufen überall) ── */
+  /* Stufen: panel=18px · card=16px · element=12px · input=10px · sm=8px · pill=100px */
+
+  /* Buttons — alle Varianten einheitlich */
+  body.glass-theme .btn                  { border-radius: 10px; }
+  body.glass-theme .btn-sm               { border-radius: 8px; }
+  body.glass-theme .btn-icon             { border-radius: 10px; }
+  body.glass-theme .btn-tab-help         { border-radius: 100px; }
+
+  /* Step-Tab-Streifen im Wizard (Container bekommt rounded corners) */
+  body.glass-theme .setup-step-pill:first-child { border-radius: 10px 0 0 10px; }
+  body.glass-theme .setup-step-pill:last-child  { border-radius: 0 10px 10px 0; }
+
+  /* Datastore-Auswahlliste in Wizard */
+  body.glass-theme .sched-ds-list { border-radius: 10px !important; }
+
+  /* Sub-Panels mit var(--bg) innerhalb von Cards/Wizards */
+  body.glass-theme .card-title + *,
+  body.glass-theme [style*="border-radius:8px"][style*="background:var(--bg)"],
+  body.glass-theme [style*="border-radius:8px"][style*="background:var(--card)"],
+  body.glass-theme [style*="border-radius:6px"][style*="background:var(--bg)"],
+  body.glass-theme [style*="border-radius:6px"][style*="background:var(--card)"] {
+    border-radius: 12px !important;
+  }
+
+  /* Wizard-internen Step-Container (die Flex-Zeile mit setup-step-pills) */
+  body.glass-theme [style*="border-radius:6px;overflow:hidden;border:1px solid var(--border)"] {
+    border-radius: 12px !important;
+  }
+
+  /* Progress bars — vollrund */
+  body.glass-theme .jtc-track,
+  body.glass-theme .jtc-bar      { border-radius: 100px; }
+
+  /* Scrollbar-Thumb */
+  body.glass-theme ::-webkit-scrollbar-thumb { border-radius: 100px; }
 </style>
 </head>
 <body>

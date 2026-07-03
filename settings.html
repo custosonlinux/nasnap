@@ -10,6 +10,8 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    html.glass-theme-pre { background: #0a1628; }
+
     :root {
       --bg:      #2C3E50;
       --card:    #34495E;
@@ -188,6 +190,68 @@
       border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;
     }
     @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* ── Glass Theme ── */
+    body.glass-theme {
+      --border: rgba(255,255,255,0.12);
+      --hover:  rgba(255,255,255,0.07);
+      --muted:  rgba(200,212,224,0.55);
+      background:
+        radial-gradient(ellipse 80% 60% at 15% 5%,  rgba(30,80,180,0.50) 0%, transparent 55%),
+        radial-gradient(ellipse 55% 45% at 85% 85%, rgba(0,40,110,0.40)  0%, transparent 50%),
+        #0a1628;
+    }
+    body.glass-theme .topbar {
+      background: rgba(8,16,32,0.70);
+      backdrop-filter: blur(32px) saturate(1.8);
+      -webkit-backdrop-filter: blur(32px) saturate(1.8);
+      border-bottom-color: rgba(255,255,255,0.08);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09);
+    }
+    body.glass-theme .card {
+      background: rgba(22,36,56,0.58);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12);
+      border-radius: 16px;
+    }
+    body.glass-theme .form-control {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.12);
+      border-radius: 10px;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.25);
+      color: #f2f4f7;
+    }
+    body.glass-theme .form-control:focus {
+      border-color: rgba(30,123,245,0.55);
+      background: rgba(30,123,245,0.09);
+      box-shadow: 0 0 0 3px rgba(30,123,245,0.15), inset 0 1px 3px rgba(0,0,0,0.1);
+    }
+    body.glass-theme select.form-control option {
+      background: #0f1f38;
+      color: #f2f4f7;
+    }
+    body.glass-theme .btn-primary {
+      background: linear-gradient(135deg, rgba(30,123,245,0.92) 0%, rgba(14,80,180,0.92) 100%);
+      border-color: rgba(30,123,245,0.55);
+      box-shadow: 0 4px 14px rgba(30,123,245,0.38), inset 0 1px 0 rgba(255,255,255,0.18);
+    }
+    body.glass-theme .btn-ghost {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.14);
+    }
+    body.glass-theme .btn-ghost:hover { background: rgba(255,255,255,0.12); }
+    body.glass-theme .btn      { border-radius: 10px; }
+    body.glass-theme .btn-sm   { border-radius: 8px; }
+    body.glass-theme .btn-icon { border-radius: 10px; }
+    body.glass-theme #toast {
+      background: rgba(22,36,56,0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+    }
   </style>
 </head>
 <body>
