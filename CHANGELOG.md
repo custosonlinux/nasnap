@@ -6,9 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [1.6.0] — 2026-07-03
 
 ### Added
+
+- **Liquid Glass theme** — a third UI theme alongside dark and light, inspired by Apple's Liquid Glass design language. The theme toggle in the topbar now cycles dark → light → glass → dark (icon: ☀ / ☽ / ★). Glass mode features an animated deep-blue gradient background with colour orbs, `backdrop-filter` blur on all surfaces (cards, stat boxes, tab bar, toasts, job trackers, modals, wizards), a consistent Apple-style radius scale (panel 18 px, card 16 px, element 12 px, input 10 px, button 10 px, pill 100 px), glass inputs with focus glow, and gradient primary buttons with glow. All wizard overlays (Protection Plan, Restore, Clone, Deploy, Log viewer, …) receive the same glass treatment. The theme is stored in `localStorage` and flash-free on reload. Reverting to dark is a single click — no code change required.
 
 - **SFR — Multi-file and directory restore** — the snapshot panel now supports multi-select: clicking any file or directory toggles it in/out of the selection (checkmark prefix, light-blue highlight). A counter badge ("N selected") appears in the panel header with a ✕ clear button. F5 Copy → VM sends all selected items as a single `tar` stream from the PVE host into the VM via QGA (`tar -czf - | chunks → base64 -d | tar xzf -C dest_dir` pattern). Works for single file, multiple files, and entire directories. The copy button label updates dynamically ("F5 Copy 3 → VM", "F5 Copy dir → VM"). ↓ Download and ↓ tar.gz continue to operate on the most recently clicked single item.
 

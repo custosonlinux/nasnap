@@ -4,9 +4,9 @@
 
 # NaSnap — NetApp® ONTAP® Snapshot Manager for Proxmox VE
 
-A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean Enterprise Blue UI (light theme available).
+A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.5.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.6.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -67,7 +67,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Active Directory / LDAP Authentication (group→role mapping) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
 | AES-256-GCM Credential Encryption at Rest | ✅ | ✅ | ✅ |
 | DB Export / Import (full config + user backup) | ✅ | ✅ | ✅ |
-| Light / Dark Theme | ✅ | ✅ | ✅ |
+| Dark / Light / Liquid Glass Theme | ✅ | ✅ | ✅ |
 
 Legend: ✅ Stable · 🟡 Beta · 🟠 Alpha · 🔵 In Development · 🔄 Planned · ❌ N/A
 
@@ -998,7 +998,16 @@ DEBUG=1 .venv/bin/python app.py
 - **Active Directory / LDAP Authentication** (🟡 Beta) — connect NaSnap to an AD domain. Users authenticate with domain credentials; group membership maps to Admin or Viewer role. Local accounts (including the built-in `admin`) always remain active as a fallback — they are never blocked by LDAP configuration.
 - **PVE Host Maintenance** — Settings panel to scan all configured Proxmox nodes for stale NFS mounts, leftover SFR temp directories, and orphaned LVM VGs, with one-click cleanup per host.
 
-### v1.6 — Planned
+### v1.6 — Released
+
+- **Liquid Glass theme** — a third UI theme alongside dark and light, inspired by Apple's Liquid Glass design language. The theme toggle in the topbar cycles dark → light → glass → dark. Glass mode features a deep-blue animated gradient background, `backdrop-filter` blur on all surfaces (cards, modals, wizards, tab bar, toasts), a consistent radius scale (panel 18 px, card 16 px, input 10 px, button 10 px, pill 100 px), glass inputs with focus glow, and gradient primary buttons. Theme is persisted per browser and flash-free on reload.
+- **SFR — Multi-file and directory restore** — multi-select in the snapshot file browser with `tar` streaming into the VM via QGA. Works for any combination of files and directories in a single operation.
+- **SFR — Windows single-file copy** — F5 Copy→VM now works for Windows VMs via base64-chunked QGA file-write + PowerShell assembly.
+- **SFR — Batch OS-type detection** — all VMs in the Restore & Clone view are probed concurrently (up to 12 threads), reducing wait from ~2 s × N to ~2–3 s for any number of VMs.
+- **SFR — UX improvements** — Finish button (clean session close), NaSnap-styled New Folder dialog (replaces native `prompt()`), copy destination auto-tracking, disk size shown in disk selector.
+- **Active Directory / LDAP Authentication** (🟡 Beta) — connect NaSnap to an AD domain. Users authenticate with domain credentials; group membership maps to Admin or Viewer role. Local accounts always remain active as a fallback.
+
+### v1.7 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
