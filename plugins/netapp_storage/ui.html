@@ -373,6 +373,18 @@
   .badge-stat-muted   { background:rgba(139,148,158,.1); color:var(--muted); }
   .badge-stat-blue    { background:rgba(88,166,255,.15); color:#79c0ff; }
 
+  /* ── Host connectivity pill + tooltip ─────────────────────────── */
+  .host-count-wrap { position:relative; display:inline-block; cursor:default; }
+  .host-tip {
+    display:none; position:absolute; z-index:100;
+    bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+    background:var(--card-bg,#1e293b); border:1px solid var(--border,#334155);
+    border-radius:6px; padding:6px 10px; font-size:11px; line-height:1.9;
+    white-space:nowrap; box-shadow:0 4px 16px rgba(0,0,0,.35);
+    min-width:140px; text-align:left; pointer-events:none;
+  }
+  .host-count-wrap:hover .host-tip { display:block; }
+
   /* ── Job Tracker ───────────────────────────────────────────────── */
   #jobTrackersContainer { position:fixed;bottom:20px;right:20px;z-index:8500;display:flex;flex-direction:column;gap:8px;max-width:340px;pointer-events:none; }
   .jtc { background:var(--card);border:1px solid var(--border);border-radius:8px;padding:11px 14px 9px;box-shadow:0 4px 24px rgba(0,0,0,.45);pointer-events:all;min-width:280px;animation:jtcIn .2s ease; }
@@ -2043,10 +2055,10 @@ function applyI18n() {
       <div class="card table-scroll">
         <div class="card-title"><svg class="tab-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>All Datastores</div>
         <div id="storageEmpty" class="empty" style="display:none">No datastores found. Click "Detect &amp; Scan" to discover existing datastores and SnapMirror relationships, or "+ Provision New" to create one.</div>
-        <table style="min-width:1040px">
+        <table style="min-width:960px">
           <thead><tr>
             <th>Datastore / SVM / System</th><th>Protocol</th><th>Volume</th><th>VG / Mount</th>
-            <th>Hosts</th><th>Size</th><th>SnapMirror®</th><th>Status</th><th>Actions</th>
+            <th>Size</th><th>SnapMirror®</th><th>Status</th><th>Actions</th>
           </tr></thead>
           <tbody id="storageTbody"></tbody>
         </table>
@@ -2593,7 +2605,7 @@ function applyI18n() {
       <div class="card" id="pveHealthCard" style="display:none">
         <div id="pveHealthBody">
           <div id="pveHealthEmpty" style="display:none;color:var(--success,#16a34a);font-size:13px;padding:4px 0">
-            ✓ All PVE hosts are clean — no stale mounts or SFR leftovers found.
+            ✓ All PVE hosts are clean — no stale mounts, SFR leftovers, or missing packages found.
           </div>
           <div id="pveHealthList"></div>
         </div>
@@ -3299,6 +3311,7 @@ async function importSelectedPveNodes() {
     if (failCount === 0) {
       setTimeout(function(){ hideForm('addPveHostForm'); }, 1800);
     }
+    setTimeout(_pveHealthCheckAndScroll, 2200);
   }
 }
 
@@ -3316,7 +3329,14 @@ async function addPveHost() {
     toast(t('msg_pve_saved'),'success');
     hideForm('addPveHostForm');
     loadPveHosts();
+    _pveHealthCheckAndScroll();
   } catch(e) { toast(e.message,'error'); }
+}
+
+function _pveHealthCheckAndScroll() {
+  document.getElementById('pveHealthCard').style.display = '';
+  document.querySelector('[onclick="pveHealthCheck()"]').scrollIntoView({behavior:'smooth', block:'nearest'});
+  pveHealthCheck();
 }
 
 function showEditPveHostForm(id) {
@@ -7910,10 +7930,27 @@ function _renderStorageItems(items) {
       } else {
         smCell = '<span style="color:var(--muted)">—</span>';
       }
-      // Hosts
-      var hosts = (ds.pve_host_ids||[]).length;
-      var hostsCell = hosts > 0 ? hosts+' host'+(hosts===1?'':'s')
-                                : '<span style="color:var(--muted)">—</span>';
+      // Hosts — connectivity pill with hover tooltip
+      var _hd       = ds.pve_host_details || {};
+      var _hConn    = _hd.connected || [];
+      var _hMiss    = _hd.missing   || [];
+      var _hTotal   = _hConn.length + _hMiss.length;
+      var hostsCell;
+      if (_hTotal === 0) {
+        hostsCell = '<span style="color:var(--muted)">—</span>';
+      } else {
+        var _hClr = (_hMiss.length === 0) ? 'green'
+                  : (_hConn.length === 0) ? 'gray' : 'orange';
+        var _tipHtml = _hConn.map(function(h){
+          return '<div><span style="color:#56d364">✓</span> '+esc(h.name)+'</div>';
+        }).concat(_hMiss.map(function(h){
+          return '<div><span style="color:var(--muted)">—</span> '+esc(h.name)+'</div>';
+        })).join('');
+        hostsCell = '<span class="host-count-wrap">'
+          + '<span class="badge badge-'+_hClr+'">'+_hConn.length+' / '+_hTotal+'</span>'
+          + (_tipHtml ? '<div class="host-tip">'+_tipHtml+'</div>' : '')
+          + '</span>';
+      }
       // Actions per source type
       var actions;
       if (ds.source === 'provisioned') {
@@ -7922,7 +7959,7 @@ function _renderStorageItems(items) {
           : '';
         actions = _provIdxBtn
           + _icoBtn('success', '+ Host', 'showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
-            + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+')', 'addHost')
+            + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+',\''+esc(ds.protocol||'')+'\')' , 'addHost')
           + _icoBtn('success', 'Resize', 'showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\',' + (ds.size_bytes||0) + ',\''+esc(ds.protocol||'')+'\')' , 'resize')
           + _icoBtn('danger', 'Remove', 'confirmRemoveDatastore(\''+ds.id+'\',\''+esc(ds.name)+'\')', 'trash');
       } else {
@@ -7950,12 +7987,12 @@ function _renderStorageItems(items) {
         + '<td>'+_protoBadge+'</td>'
         + '<td style="font-family:var(--mono);font-size:11px">'+esc(ds.volume_name||'–')+'</td>'
         + '<td style="font-family:var(--mono);font-size:11px">'+esc(ds.vg_name||ds.nfs_junction_path||'–')+'</td>'
-        + '<td>'+hostsCell+'</td>'
         + '<td>'+(ds.size_bytes?fmtBytes(ds.size_bytes):'—')+'</td>'
         + '<td>'+smCell+'</td>'
         + '<td><span class="badge '+sc+'">'+esc(ds.status)+'</span>'
             + (ds.error_message?'<br><span style="color:var(--error);font-size:10px">'
-               +esc(ds.error_message.slice(0,60))+'</span>':'')+'</td>'
+               +esc(ds.error_message.slice(0,60))+'</span>':'')
+            + (_hTotal > 0 ? '<br>'+hostsCell : '')+'</td>'
         + '<td><div class="row-actions">'+actions+'</div></td>'
         + '</tr>';
     }).join('');
@@ -9145,37 +9182,60 @@ function showResizeDialog(dsId, dsName, currentBytes, protocol) {
 }
 
 
-async function showAddHostDialog(dsId, dsName, existingHostIds) {
+async function showAddHostDialog(dsId, dsName, existingHostIds, proto) {
   var allHosts;
   try { allHosts = (await apiFetch('provisioning/pve-hosts')).hosts || []; }
   catch(e) { toast(e.message,'error'); return; }
   var available = allHosts.filter(function(h){ return existingHostIds.indexOf(h.id) === -1; });
-  if(!available.length) { await uiAlert('All registered PVE hosts are already connected to "'+dsName+'".'); return; }
+  var connected = allHosts.filter(function(h){ return existingHostIds.indexOf(h.id) !== -1; });
 
-  // Build inline modal
+  if (!available.length && !connected.length) {
+    await uiAlert('No PVE hosts registered.'); return;
+  }
+
+  var repairHint = {
+    nfs:   'Re-sync ONTAP export rules',
+    iscsi: 'Re-connect iSCSI + activate VG',
+    nvme:  'Re-connect NVMe + activate VG',
+  }[(proto||'').toLowerCase()] || 'Re-run host setup';
+
   var overlay = document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center';
   var box = document.createElement('div');
-  box.style.cssText='background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;min-width:320px;max-width:420px';
+  box.style.cssText='background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;min-width:320px;max-width:440px';
+
   var selOpts = available.map(function(h){
-    return '<option value="'+esc(h.id)+'">'+esc(h.name)+' ('+esc(h.host)+')</option>';
+    return '<option value="'+esc(h.id)+'" data-repair="0">'+esc(h.name)+' ('+esc(h.host)+')</option>';
   }).join('');
-  box.innerHTML = '<div style="font-weight:600;margin-bottom:12px">Add Host to "'+esc(dsName)+'"</div>'+
-    '<select id="_addHostSel" class="form-control" style="margin-bottom:16px">'+selOpts+'</select>'+
-    '<div style="display:flex;gap:8px">'+
-    '<button id="_addHostOk" class="btn btn-primary">Add Host</button>'+
-    '<button id="_addHostCancel" class="btn btn-ghost">Cancel</button></div>';
+  if (connected.length) {
+    selOpts += '<optgroup label="─── Repair / re-sync ───">'
+      + connected.map(function(h){
+          return '<option value="'+esc(h.id)+'" data-repair="1">'+esc(h.name)+' ('+esc(h.host)+') — repair</option>';
+        }).join('')
+      + '</optgroup>';
+  }
+
+  box.innerHTML = '<div style="font-weight:600;margin-bottom:12px">Add Host to "'+esc(dsName)+'"</div>'
+    + (!available.length && connected.length
+        ? '<div style="font-size:12px;color:var(--warning,#f59e0b);margin-bottom:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 10px">All hosts already connected — select a host below to repair/re-sync it: '+esc(repairHint)+'.</div>'
+        : '')
+    + '<select id="_addHostSel" class="form-control" style="margin-bottom:16px">'+selOpts+'</select>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button id="_addHostOk" class="btn btn-primary">Add Host</button>'
+    + '<button id="_addHostCancel" class="btn btn-ghost">Cancel</button></div>';
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 
   function cleanup(){ document.body.removeChild(overlay); }
   box.querySelector('#_addHostCancel').onclick = cleanup;
   box.querySelector('#_addHostOk').onclick = async function() {
-    var hid = box.querySelector('#_addHostSel').value;
+    var sel    = box.querySelector('#_addHostSel');
+    var hid    = sel.value;
+    var repair = sel.options[sel.selectedIndex].dataset.repair === '1';
     cleanup();
     try {
-      var rAh=await apiPost('provisioning/datastores/add-host', {id: dsId, pve_host_id: hid});
-      toast('Add-host job started','success');
+      var rAh = await apiPost('provisioning/datastores/add-host', {id: dsId, pve_host_id: hid});
+      toast((repair ? 'Repair job started' : 'Add-host job started'), 'success');
       if (rAh && rAh.job_id) trackJob(rAh.job_id, 'Add host: ' + dsName);
       actLogStart();
       loadProvDatastores();
@@ -11673,11 +11733,83 @@ async function pveHealthCheck() {
   } finally { btn.disabled = false; spin.style.display = 'none'; }
 }
 
+function _pveStackIssues(stack) {
+  if (!stack) return [];
+  var issues = [];
+  if (!stack.nfs.ok)      issues.push('nfs');
+  if (!stack.iscsi.ok)    issues.push('iscsi');
+  if (!stack.nvme.ok)     issues.push('nvme');
+  if (!stack.lvm2.ok)     issues.push('lvm2');
+  if (!stack.qemu_nbd.ok) issues.push('qemu_nbd');
+  return issues;
+}
+
+function _renderStackChecks(h, idx) {
+  var stack = h.stack;
+  if (!stack) return '';
+  var labels = {nfs:'NFS Client',iscsi:'iSCSI',nvme:'NVMe-oF',lvm2:'LVM2',qemu_nbd:'QEMU Utils'};
+  var rows = '';
+  Object.keys(labels).forEach(function(key) {
+    var s = stack[key];
+    var label = labels[key];
+    if (s.ok) {
+      rows += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0">'
+        + '<svg width="13" height="13" fill="none" stroke="#56d364" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>'
+        + '<span style="font-size:12px">' + esc(label) + '</span></div>';
+      return;
+    }
+    rows += '<div style="padding:3px 0">';
+    rows += '<div style="display:flex;align-items:center;gap:6px">'
+      + '<svg width="13" height="13" fill="none" stroke="#f08080" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>'
+      + '<span style="font-size:12px;font-weight:600;color:var(--danger,#f08080)">' + esc(label) + '</span></div>';
+    if (key === 'iscsi') {
+      var fixes = [];
+      if (!s.bin_ok) {
+        rows += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:19px;margin-top:2px">'
+          + 'Package missing → <span style="color:var(--fg)">' + esc(s.fix_pkg) + '</span></div>';
+      } else {
+        if (!s.svc_ok) {
+          fixes.push('iscsid_enable');
+          rows += '<div style="font-size:11px;color:var(--muted);padding-left:19px;margin-top:1px">Service iscsid not running'
+            + ' <button class="btn btn-warning btn-sm" style="padding:1px 8px;font-size:10px;margin-left:6px" onclick="pveStackFix(\''+esc(h.host_id)+'\','+idx+',\'iscsid_enable\',this)">Enable iscsid</button></div>';
+        }
+        if (!s.ini_ok) {
+          rows += '<div style="font-size:11px;color:var(--muted);padding-left:19px;margin-top:1px">No initiator name — re-install: <span style="font-family:monospace">' + esc(s.fix_pkg) + '</span></div>';
+        }
+      }
+    } else if (key === 'nvme') {
+      if (!s.bin_ok) {
+        rows += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:19px;margin-top:2px">'
+          + 'Package missing → <span style="color:var(--fg)">' + esc(s.fix_pkg) + '</span></div>';
+      } else {
+        if (!s.mod_loaded) {
+          rows += '<div style="font-size:11px;color:var(--muted);padding-left:19px;margin-top:1px">nvme_tcp module not loaded'
+            + ' <button class="btn btn-warning btn-sm" style="padding:1px 8px;font-size:10px;margin-left:6px" onclick="pveStackFix(\''+esc(h.host_id)+'\','+idx+',\'nvme_tcp_load\',this)">Load + persist</button></div>';
+        } else if (!s.mod_persist) {
+          rows += '<div style="font-size:11px;color:var(--muted);padding-left:19px;margin-top:1px">nvme_tcp not persistent across reboots'
+            + ' <button class="btn btn-warning btn-sm" style="padding:1px 8px;font-size:10px;margin-left:6px" onclick="pveStackFix(\''+esc(h.host_id)+'\','+idx+',\'nvme_tcp_load\',this)">Make persistent</button></div>';
+        }
+      }
+    } else {
+      rows += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:19px;margin-top:2px">'
+        + 'Package missing → <span style="color:var(--fg)">' + esc(s.fix_pkg) + '</span></div>';
+    }
+    rows += '</div>';
+  });
+  return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">'
+    + '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:5px">Package Requirements</div>'
+    + rows + '</div>';
+}
+
 function _renderPveHealth() {
   var hosts = _pveHealthData;
-  var hasIssues = hosts.some(function(h) {
+  var hasCleanup = hosts.some(function(h) {
     return h.stale_nfs.length || h.sfr_dirs.length || h.nasnap_vgs.length || (h.orphan_nbds||[]).length || (h.orphan_nvme_subsys||[]).length;
   });
+  var hasStackIssues = hosts.some(function(h) {
+    return _pveStackIssues(h.stack).length > 0;
+  });
+  var hasIssues = hasCleanup || hasStackIssues || hosts.some(function(h) { return h.error; });
   document.getElementById('pveHealthEmpty').style.display = hasIssues ? 'none' : '';
   if (!hasIssues) { document.getElementById('pveHealthList').innerHTML = ''; return; }
 
@@ -11685,8 +11817,9 @@ function _renderPveHealth() {
   hosts.forEach(function(h, idx) {
     h.orphan_nbds = h.orphan_nbds || [];
     h.orphan_nvme_subsys = h.orphan_nvme_subsys || [];
-    var total = h.stale_nfs.length + h.sfr_dirs.length + h.nasnap_vgs.length + h.orphan_nbds.length + h.orphan_nvme_subsys.length;
-    if (!total && !h.error) return;
+    var cleanupTotal = h.stale_nfs.length + h.sfr_dirs.length + h.nasnap_vgs.length + h.orphan_nbds.length + h.orphan_nvme_subsys.length;
+    var stackIssues = _pveStackIssues(h.stack);
+    if (!cleanupTotal && !stackIssues.length && !h.error) return;
     html += '<div style="border-top:1px solid var(--border);padding:12px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px" id="pveHealthHost' + idx + '">';
     html += '<div style="flex:1;min-width:0">';
     html += '<div style="font-weight:600;margin-bottom:6px">' + esc(h.host_name) +
@@ -11733,13 +11866,35 @@ function _renderPveHealth() {
       });
       html += '</div>';
     }
+    html += _renderStackChecks(h, idx);
     html += '</div>';
-    if (!h.error && total > 0) {
+    if (!h.error && cleanupTotal > 0) {
       html += '<button class="btn btn-warning btn-sm" style="flex-shrink:0;white-space:nowrap" onclick="pveCleanupHost(' + idx + ',this)">Clean up</button>';
     }
     html += '</div>';
   });
   document.getElementById('pveHealthList').innerHTML = html;
+}
+
+async function pveStackFix(hostId, hostIdx, fix, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Fixing…';
+  try {
+    var r = await apiPost('settings/pve-stack-fix', {host_id: hostId, fixes: [fix]});
+    var res = (r.results || [])[0] || {};
+    if (res.ok) {
+      toast('✓ Fix applied — re-checking…', 'success');
+      pveHealthCheck();
+    } else {
+      toast('Fix failed: ' + esc(res.error || 'unknown'), 'error');
+      btn.disabled = false;
+      btn.textContent = fix === 'iscsid_enable' ? 'Enable iscsid' : 'Load + persist';
+    }
+  } catch(e) {
+    toast('Fix failed: ' + esc(e.message || String(e)), 'error');
+    btn.disabled = false;
+    btn.textContent = fix === 'iscsid_enable' ? 'Enable iscsid' : 'Load + persist';
+  }
 }
 
 async function pveCleanupHost(idx, btn) {
@@ -11802,8 +11957,8 @@ async function _pollJob(jobId) {
       setTimeout(function() { delete _activeJobs[jobId]; _renderJobTrackers(); }, 6000);
     } else if (d.status === 'failed') {
       if (_isStorageJob(entry.label)) loadStorageUnified();
+      setTimeout(function() { if (_activeJobs[jobId]) { delete _activeJobs[jobId]; _renderJobTrackers(); } }, 30000);
     }
-    // 'failed': stays until dismissed
   } catch(e) {
     entry = _activeJobs[jobId];
     if (entry && (entry.status === 'running' || entry.status === 'cancelling')) {
@@ -11835,7 +11990,7 @@ function _renderJobTrackers() {
       + '<div class="jtc-title">'
       + '<span class="jtc-icon" style="color:' + clr + '">' + ico + '</span>'
       + '<span class="jtc-label" title="' + esc(e.label) + '">' + esc(e.label) + '</span>'
-      + '<button class="jtc-x" onclick="_dismissJobTracker(' + JSON.stringify(jid) + ')">✕</button>'
+      + '<button class="jtc-x" onclick="_dismissJobTracker(\'' + jid + '\')">✕</button>'
       + '</div>'
       + '<div class="jtc-track"><div class="jtc-bar" style="width:' + pct + '%;background:' + clr + '"></div></div>'
       + '<div class="jtc-log">' + esc(log) + '</div>'

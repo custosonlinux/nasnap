@@ -1278,12 +1278,99 @@ def _pve_health_check():
                 capture=True, timeout=15)
             rec["orphan_nvme_subsys"] = [l.strip() for l in out5.strip().splitlines() if l.strip()]
 
+            # Package / service stack check
+            stack_script = (
+                "which mount.nfs >/dev/null 2>&1 && echo nfs_bin=ok || echo nfs_bin=missing;"
+                "which iscsiadm >/dev/null 2>&1 && echo iscsi_bin=ok || echo iscsi_bin=missing;"
+                "printf 'iscsid_active=%s\\n' \"$(systemctl is-active iscsid 2>/dev/null || echo inactive)\";"
+                "{ [ -f /etc/iscsi/initiatorname.iscsi ] && grep -qE '^InitiatorName=.+' /etc/iscsi/initiatorname.iscsi 2>/dev/null; } && echo initiator=ok || echo initiator=missing;"
+                "which nvme >/dev/null 2>&1 && echo nvme_bin=ok || echo nvme_bin=missing;"
+                "lsmod 2>/dev/null | grep -qw nvme_tcp && echo nvme_tcp_loaded=yes || echo nvme_tcp_loaded=no;"
+                "grep -rqw nvme_tcp /etc/modules /etc/modules-load.d/ 2>/dev/null && echo nvme_tcp_persist=yes || echo nvme_tcp_persist=no;"
+                "which vgscan >/dev/null 2>&1 && echo lvm2=ok || echo lvm2=missing;"
+                "which qemu-nbd >/dev/null 2>&1 && echo qemu_nbd=ok || echo qemu_nbd=missing;"
+            )
+            out6 = ssh_run(host, user, pw, stack_script, capture=True, timeout=20)
+            kv = {}
+            for line in out6.strip().splitlines():
+                if '=' in line:
+                    k, v = line.split('=', 1)
+                    kv[k.strip()] = v.strip()
+            iscsid_active = kv.get("iscsid_active", "inactive") in ("active", "activating")
+            rec["stack"] = {
+                "nfs":      {"ok": kv.get("nfs_bin") == "ok",
+                             "fix_pkg": "apt-get install -y nfs-common"},
+                "iscsi":    {"ok": kv.get("iscsi_bin") == "ok" and iscsid_active and kv.get("initiator") == "ok",
+                             "bin_ok": kv.get("iscsi_bin") == "ok",
+                             "svc_ok": iscsid_active,
+                             "ini_ok": kv.get("initiator") == "ok",
+                             "fix_pkg": "apt-get install -y open-iscsi",
+                             "fix_svc": "iscsid_enable"},
+                "nvme":     {"ok": kv.get("nvme_bin") == "ok" and kv.get("nvme_tcp_loaded") == "yes",
+                             "bin_ok": kv.get("nvme_bin") == "ok",
+                             "mod_loaded": kv.get("nvme_tcp_loaded") == "yes",
+                             "mod_persist": kv.get("nvme_tcp_persist") == "yes",
+                             "fix_pkg": "apt-get install -y nvme-cli",
+                             "fix_mod": "nvme_tcp_load"},
+                "lvm2":     {"ok": kv.get("lvm2") == "ok",
+                             "fix_pkg": "apt-get install -y lvm2"},
+                "qemu_nbd": {"ok": kv.get("qemu_nbd") == "ok",
+                             "fix_pkg": "apt-get install -y qemu-utils"},
+            }
+
         except Exception as e:
             rec["error"] = str(e)
 
         results.append(rec)
 
     return {"hosts": results}
+
+
+def _pve_stack_fix():
+    """Apply auto-fixable stack issues on a PVE host (enable iscsid, load nvme_tcp)."""
+    err = _require_admin()
+    if err:
+        return err
+
+    from ..core._helpers import ssh_run, build_pve_client
+
+    data    = request.get_json() or {}
+    host_id = str(data.get("host_id", "")).strip()
+    fixes   = data.get("fixes", [])
+
+    if not host_id:
+        return {"error": "host_id required"}, 400
+
+    db = get_db()
+    if not db.query_one("SELECT id FROM netapp_pve_hosts WHERE id=?", (host_id,)):
+        return {"error": "PVE host not found"}, 404
+
+    pve  = build_pve_client(db, host_id)
+    host = pve.host
+    user = pve.ssh_user
+    pw   = pve.ssh_password
+
+    fix_cmds = {
+        "iscsid_enable": "systemctl enable --now open-iscsi iscsid 2>&1; echo exit=$?",
+        "nvme_tcp_load":  (
+            "modprobe nvme_tcp 2>&1 && "
+            "printf 'nvme_tcp\\n' > /etc/modules-load.d/nasnap-nvme.conf && "
+            "echo ok || echo failed"
+        ),
+    }
+
+    results = []
+    for fix in fixes:
+        cmd = fix_cmds.get(fix)
+        if not cmd:
+            continue
+        try:
+            out = ssh_run(host, user, pw, cmd, capture=True, timeout=30)
+            results.append({"fix": fix, "ok": True, "output": out.strip()})
+        except Exception as e:
+            results.append({"fix": fix, "ok": False, "error": str(e)})
+
+    return {"results": results}
 
 
 def _pve_cleanup():
@@ -1572,6 +1659,7 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, 'settings/db-backup-restore-remote', _backup_restore_from_remote)
     register_plugin_route(PLUGIN_ID, 'settings/pve-health',        _pve_health_check)
     register_plugin_route(PLUGIN_ID, 'settings/pve-cleanup',       _pve_cleanup)
+    register_plugin_route(PLUGIN_ID, 'settings/pve-stack-fix',     _pve_stack_fix)
     register_plugin_route(PLUGIN_ID, 'settings/ldap',              _ldap_get)
     register_plugin_route(PLUGIN_ID, 'settings/ldap/save',         _ldap_save)
     register_plugin_route(PLUGIN_ID, 'settings/ldap/test',         _ldap_test)

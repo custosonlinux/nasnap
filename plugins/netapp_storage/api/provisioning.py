@@ -262,9 +262,15 @@ def _prov_add_host():
     if not row:
         return {"error": "Datastore not found"}, 404
 
+    protocol = (row["protocol"] or "").lower()
     host_ids = json.loads(row["pve_host_ids"] or "[]")
     if host_id in host_ids:
-        return {"error": "Host already connected"}, 409
+        # All protocols are idempotent on re-run:
+        #  NFS   — pre-checked export rules, ON CONFLICT UPDATE mapping
+        #  iSCSI — IQN pre-checked, login uses || true, pvscan idempotent
+        #  NVMe  — NQN pre-checked, connect uses 2>/dev/null;true, discovery idempotent
+        # Allow re-run so admins can repair (missing export rule, re-connect, re-activate VG).
+        pass
 
     username = request.session.get("user", "unknown")
     job_id   = _start_job(db, "provision_add_host", ds_id, username)
@@ -630,12 +636,22 @@ def _storage_unified():
     _valid_host_ids: set = {
         row["id"] for row in (db.query("SELECT id FROM netapp_pve_hosts") or [])
     }
+    # All configured hosts, ordered by name — used to compute connected/missing per DS
+    _all_pve_hosts = [
+        {"id": row["id"], "name": row["name"] or row["host"], "host": row["host"]}
+        for row in (db.query("SELECT id, name, host FROM netapp_pve_hosts ORDER BY name") or [])
+    ]
 
     for r in (prov_rows or []):
         d = _ds_to_dict(r)
         d["source"] = "provisioned"
         # Filter out deleted PVE hosts so the host count stays accurate
         d["pve_host_ids"] = [h for h in (d.get("pve_host_ids") or []) if h in _valid_host_ids]
+        _cids = set(d["pve_host_ids"])
+        d["pve_host_details"] = {
+            "connected": [h for h in _all_pve_hosts if h["id"] in _cids],
+            "missing":   [h for h in _all_pve_hosts if h["id"] not in _cids],
+        }
         # Backfill fields from volume_mapping (provisioned table doesn't have them)
         if d.get("protocol") in ("iscsi", "nvme"):
             vm_row = db.query_one(
@@ -745,6 +761,10 @@ def _storage_unified():
             "status":           "active",
             "pve_host_ids":     pve_host_ids,
             "snapinfo_initialized": bool(m.get("snapinfo_initialized", 0)),
+            "pve_host_details": {
+                "connected": [h for h in _all_pve_hosts if h["id"] in set(pve_host_ids)],
+                "missing":   [],
+            },
         }
         if m.get("sm_id"):
             item["snapmirror"] = {
@@ -2000,6 +2020,25 @@ def _add_host_iscsi(ds_id, ds, host_id, db, jlog):
         )
         jlog.log(f"Host {host_id} added to datastore record.")
 
+    # ── Access test ───────────────────────────────────────────────────────────────
+    jlog.log(f"[{sh}] Running iSCSI access test …")
+    _at_cmds = [
+        f"iscsiadm -m session 2>/dev/null | grep -q {shlex.quote(target_iqn)}"
+        f" || {{ echo 'iSCSI session not found'; exit 1; }}",
+    ]
+    if vg_name:
+        _at_cmds.append(
+            f"vgs --noheadings {shlex.quote(vg_name)} >/dev/null 2>&1"
+            f" || {{ echo 'VG not active'; exit 1; }}"
+        )
+    _at_cmds.append("echo OK")
+    _at_out = ssh_run(sh, su, sp, "; ".join(_at_cmds), capture=True, key_material=sk, timeout=20)
+    if "OK" not in _at_out:
+        raise RuntimeError(
+            f"iSCSI access test failed on {sh} — session or VG not active: {_at_out.strip()}"
+        )
+    jlog.log(f"[{sh}] iSCSI access test passed.")
+
 
 def _run_remove_host(job_id, ds_id, host_id, username):
     db = get_db()
@@ -2866,6 +2905,28 @@ def _add_host_nvme(ds_id, ds, host_id, db, jlog):
         )
         jlog.log(f"Host {host_id} added to datastore record.")
 
+    # ── Access test ───────────────────────────────────────────────────────────────
+    jlog.log(f"[{sh}] Running NVMe access test …")
+    _at_cmds = []
+    if subsystem_nqn:
+        _at_cmds.append(
+            f"(nvme list-subsys 2>/dev/null || nvme show-topology 2>/dev/null)"
+            f" | grep -q {shlex.quote(subsystem_nqn[:64])}"
+            f" || {{ echo 'NVMe subsystem not connected'; exit 1; }}"
+        )
+    if vg_name:
+        _at_cmds.append(
+            f"vgs --noheadings {shlex.quote(vg_name)} >/dev/null 2>&1"
+            f" || {{ echo 'VG not active'; exit 1; }}"
+        )
+    _at_cmds.append("echo OK")
+    _at_out = ssh_run(sh, su, sp, "; ".join(_at_cmds), capture=True, key_material=sk, timeout=20)
+    if "OK" not in _at_out:
+        raise RuntimeError(
+            f"NVMe access test failed on {sh} — subsystem or VG not active: {_at_out.strip()}"
+        )
+    jlog.log(f"[{sh}] NVMe access test passed.")
+
 
 # ── NVMe: remove single host ──────────────────────────────────────────────────
 
@@ -3367,8 +3428,18 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
         export_info = client.get_volume_export_info(volume_uuid)
         policy_id   = export_info.get("export_policy_id", 0)
         if policy_id:
-            client.add_nfs_export_rule_rw(policy_id, client_ip)
-            jlog.log(f"Export rule added for {client_ip}.")
+            # Pre-check existing rules — do not rely on 409 as proof the IP is covered.
+            # ONTAP returns 409 when ANY rule in the policy has the same non-client fields
+            # (ro_rule/rw_rule/superuser), which doesn't mean client_ip is actually allowed.
+            existing_rules = client.list_nfs_export_rules(policy_id)
+            covered = {c.get("match", "")
+                       for r in existing_rules
+                       for c in r.get("clients", [])}
+            if client_ip not in covered:
+                client.add_nfs_export_rule_rw(policy_id, client_ip)
+                jlog.log(f"Export rule added for {client_ip}.")
+            else:
+                jlog.log(f"Export rule for {client_ip} already in policy.")
     except Exception as exc:
         jlog.log(f"WARNING: export rule: {exc}")
     try:
@@ -3378,7 +3449,10 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
     except Exception as exc:
         jlog.log(f"  WARNING: could not check SVM root export policy: {exc}")
 
-    # Register PVE storage on host
+    # Register PVE storage on host.
+    # In a PVE cluster, storage.cfg is shared via pmxcfs — pvesm add on any node writes
+    # to the global config. On a new node, pvesm status <id> may return non-zero even when
+    # the storage IS in storage.cfg (not yet mounted/active), so we check storage.cfg directly.
     pve_content  = ds.get("pve_content", "images,rootdir") or "images,rootdir"
     nfs_nconnect = int(ds.get("nfs_nconnect", 0) or 0)
     nfs_options  = "vers=3"
@@ -3394,13 +3468,21 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
         pve = build_pve_client(db, host_id)
         su, sp, sk = get_ssh_creds(pve)
         sh = pve.host
+        # grep storage.cfg instead of pvesm status — status exits non-zero when storage
+        # is defined but not yet mounted on a newly-joined cluster node.
         check = ssh_run(sh, su, sp,
-                        f"pvesm status {shlex.quote(pve_storage_id)} 2>/dev/null"
+                        f"grep -qw {sid_q} /etc/pve/storage.cfg 2>/dev/null"
                         f" && echo EXISTS || echo MISSING",
                         capture=True, key_material=sk)
         if "EXISTS" not in check:
-            ssh_run(sh, su, sp, pvesm_cmd, key_material=sk, timeout=120)
-            jlog.log(f"[{sh}] PVE storage registered.")
+            try:
+                ssh_run(sh, su, sp, pvesm_cmd, key_material=sk, timeout=120)
+                jlog.log(f"[{sh}] PVE storage registered.")
+            except Exception as exc:
+                if "already defined" in str(exc).lower():
+                    jlog.log(f"[{sh}] PVE storage already in cluster config (idempotent).")
+                else:
+                    jlog.log(f"WARNING: pvesm: {exc}")
         else:
             jlog.log(f"[{sh}] PVE storage already in cluster config.")
     except Exception as exc:
@@ -3446,6 +3528,38 @@ def _add_host_nfs(ds_id, ds, host_id, db, jlog):
             (json.dumps(current_ids), _now(), ds_id),
         )
         jlog.log(f"Host {host_id} added to datastore record.")
+
+    # ── Access test ───────────────────────────────────────────────────────────────
+    try:
+        _pve_at = build_pve_client(db, host_id)
+        _su_at, _sp_at, _sk_at = get_ssh_creds(_pve_at)
+        _sh_at = _pve_at.host
+    except Exception as exc:
+        raise RuntimeError(f"NFS access test: cannot reach host — {exc}")
+    jlog.log(f"[{_sh_at}] Running NFS access test …")
+    _tmp = f"/tmp/.nasnap_nfstest_{int(time.time())}"
+    _tmp_q = shlex.quote(_tmp)
+    _cleanup = f"umount {_tmp_q} 2>/dev/null; rmdir {_tmp_q} 2>/dev/null; true"
+    _mount_cmd = (
+        f"mkdir -p {_tmp_q} && "
+        f"timeout 20 mount -t nfs -o vers=3,ro {shlex.quote(nfs_ip)}:{shlex.quote(junction_path)} {_tmp_q} && "
+        f"echo MOUNTED"
+    )
+    try:
+        _at_out = ssh_run(_sh_at, _su_at, _sp_at, _mount_cmd, capture=True,
+                          key_material=_sk_at, timeout=35)
+        ssh_run(_sh_at, _su_at, _sp_at, _cleanup, key_material=_sk_at, timeout=10)
+        if "MOUNTED" not in _at_out:
+            raise RuntimeError(_at_out.strip() or "mount produced no output")
+        jlog.log(f"[{_sh_at}] NFS access test passed.")
+    except Exception as exc:
+        try:
+            ssh_run(_sh_at, _su_at, _sp_at, _cleanup, key_material=_sk_at, timeout=10)
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"NFS access test failed on {_sh_at} — check export policy and network: {exc}"
+        )
 
 
 def _remove_host_nfs(ds_id, ds, host_id, db, jlog):

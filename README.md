@@ -6,7 +6,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.6.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.6.1** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -58,7 +58,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Import VMs from Datastore (adopt existing volumes with VMs) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Datastore Index (self-describing index per snapshot) | ✅ NFS | ✅ snapmanifest LV | ✅ snapmanifest LV |
 | Startup auto-scan (reconcile index into DB on start) | ✅ | ✅ | ✅ |
-| PVE Host Maintenance (check/clean stale NFS mounts, SFR temp dirs, leftover LVM VGs on all PVE nodes) | ✅ | ✅ | ✅ |
+| PVE Host Maintenance (check/clean stale mounts, SFR dirs, LVM VGs; verify storage stack packages & services) | ✅ | ✅ | ✅ |
 | Dashboard (7-day stats, timeline, protection overview, alerts) | ✅ | ✅ | ✅ |
 | Full DR Failover (planned & emergency) | 🔵 In Development | 🔵 In Development | 🔵 In Development |
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |

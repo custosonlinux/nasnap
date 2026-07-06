@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.6.1] — 2026-07-06
+
+### Added
+
+- **PVE Host — package & service stack check** — the "Check All Hosts" health check in Settings → PVE Host Maintenance now also verifies the storage stack on each node: `nfs-common` (binary), `open-iscsi` (binary, `iscsid` service active, initiator name configured), `nvme-cli` (binary, `nvme_tcp` kernel module loaded and persistent across reboots), `lvm2`, and `qemu-utils`. Auto-triggered when a new PVE host is added or imported. For auto-fixable issues a Fix button is shown directly in the UI — enabling `iscsid` and loading/persisting `nvme_tcp` are applied with one click. Missing packages display the required `apt-get install` command.
+
+- **Add-host access test** — each add-host job (NFS, iSCSI, NVMe) now ends with a live access test after all configuration steps complete. NFS: a temporary read-only mount with `timeout 20 mount -t nfs -o vers=3,ro` (temp mountpoint auto-cleaned). iSCSI: verifies an active `iscsiadm` session exists for the target IQN and the LVM VG is accessible. NVMe: verifies the subsystem NQN appears in `nvme list-subsys` and the LVM VG is accessible. The job fails if the access test fails, making misconfigured datastores immediately visible. The host stays registered in the DB so the repair button is available for retry without re-entering parameters.
+
+- **Repair / re-run for existing host connections** — the Add Host dialog now also lists already-connected hosts as repair targets. Re-running add-host for a connected host re-syncs all configuration (ONTAP export rules, iSCSI/NVMe reconnect, LVM VG activation) and runs the access test. Protocol-specific hint shown: NFS → "Re-sync ONTAP export rules", iSCSI → "Re-connect iSCSI + activate VG", NVMe → "Re-connect NVMe + activate VG".
+
+- **Datastore host connectivity in Status column** — the Status column now shows a colored host-count pill: **green** `N/N` = all PVE hosts connected, **orange** `N/M` = some missing, **gray** `0/M` = none. Hovering shows a tooltip listing each host with ✓ (connected) or — (missing). The separate Hosts column has been removed.
+
+### Fixed
+
+- **NFS add-host: export rule false-positive 409** — ONTAP returns HTTP 409 "Entry already exists" when any rule in the policy shares the same `ro-rule`/`rw-rule`/`superuser` values, regardless of whether the client IP is actually in that rule. The previous code treated 409 as proof the client IP was covered, silently skipping the addition and leaving the host with "access denied by server" despite a seemingly successful job. Fixed by pre-checking existing rules via `list_nfs_export_rules()` and only skipping if the client IP is an exact match in a rule's `clients` array.
+
+- **NFS add-host: pvesm status false-negative on new cluster nodes** — on a newly-joined PVE cluster node, `pvesm status <id>` exits non-zero even when the storage is defined in the cluster-wide `storage.cfg` (NFS not yet mounted on that node). This caused NaSnap to re-run `pvesm add`, which then failed with "already defined". Fixed by checking `grep -qw <id> /etc/pve/storage.cfg` directly, which reads the pmxcfs-shared config and is correct on all nodes regardless of mount state.
+
+- **Job tracker ✕ dismiss button non-functional** — `JSON.stringify(jobId)` produces a double-quoted string (`"uuid"`) that conflicts with the surrounding `onclick="…"` HTML attribute quotes, causing the browser to mis-parse the attribute and never register the click handler. Fixed by using single-quote delimiters: `onclick="_dismissJobTracker('uuid')"`.
+
+- **Job tracker: failed jobs never dismissed** — failed jobs remained in the bottom-right panel permanently (dismiss button broken, no auto-dismiss). Failed jobs now auto-dismiss after 30 seconds.
+
+---
+
 ## [1.6.0] — 2026-07-03
 
 ### Added
