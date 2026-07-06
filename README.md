@@ -63,13 +63,20 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Full DR Failover (planned & emergency) | 🔵 In Development | 🔵 In Development | 🔵 In Development |
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | DR Failback | 🔄 Planned | 🔄 Planned | 🔄 Planned |
-| Built-in Auth (admin / viewer, Argon2id) | ✅ | ✅ | ✅ |
-| Active Directory / LDAP Authentication (group→role mapping) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
-| AES-256-GCM Credential Encryption at Rest | ✅ | ✅ | ✅ |
-| DB Export / Import (full config + user backup) | ✅ | ✅ | ✅ |
-| Dark / Light / Liquid Glass Theme | ✅ | ✅ | ✅ |
 
 Legend: ✅ Stable · 🟡 Beta · 🟠 Alpha · 🔵 In Development · 🔄 Planned · ❌ N/A
+
+### Platform Features
+
+These features are application-level and independent of the storage protocol.
+
+| Feature | Status |
+|---|:---:|
+| Built-in Auth (admin / viewer roles, Argon2id password hashing) | ✅ |
+| Active Directory / LDAP Authentication (group→role mapping) | 🟡 Beta |
+| AES-256-GCM Credential Encryption at Rest | ✅ |
+| DB Export / Import (full config + user backup) | ✅ |
+| Dark / Light / Liquid Glass Theme | ✅ |
 
 ¹ NVMe Single VM Restore and Clone on ASA use a full volume clone via the ONTAP CLI bridge (`private/cli/volume/clone`). Direct namespace clone APIs are not available on ASA, but the volume clone approach achieves identical results.
 
