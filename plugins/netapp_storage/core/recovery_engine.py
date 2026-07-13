@@ -457,6 +457,56 @@ def restore_vm_configs(manifest, pve_host_ids, vmid_offset,
     return restored
 
 
+def start_vms(pve_host_id, vm_list, db, jlog, max_parallel=1, delay_between_batches_sec=0):
+    """Starts VMs on a PVE host, batched by max_parallel with a delay between batches.
+
+    vm_list: [{"vmid": int, "vm_name": str, "vm_type": "qemu"|"lxc"}, ...].
+    Skips VMs not registered on the target (qm/pct status MISSING) rather than
+    failing the whole batch. A single representative pve_host_id is enough —
+    qm/pct start work cluster-wide via the shared pmxcfs config.
+
+    Shared by DR Plan failover and the ad-hoc Recover-VMs wizard — the only
+    "start" primitive in the codebase (previously inlined only in DR failover).
+    Returns (started_count, skipped_count).
+    """
+    import time as _time
+
+    pve = build_pve_client(db, pve_host_id)
+    su, sp, sk = get_ssh_creds(pve)
+    sh = pve.host
+
+    started = 0
+    skipped = 0
+    max_parallel = max(1, int(max_parallel))
+    for batch_start in range(0, len(vm_list), max_parallel):
+        batch = vm_list[batch_start:batch_start + max_parallel]
+        for vm in batch:
+            vmid = vm["vmid"]
+            vm_name = vm.get("vm_name") or str(vmid)
+            vm_type = vm.get("vm_type", "qemu")
+            status_cmd = "pct" if vm_type == "lxc" else "qm"
+            try:
+                check = ssh_run(sh, su, sp,
+                                 f"{status_cmd} status {vmid} 2>/dev/null && echo EXISTS || echo MISSING",
+                                 capture=True, key_material=sk)
+                if "MISSING" in check:
+                    jlog.log(f"  VM {vmid} ({vm_name}): not registered — skipping")
+                    skipped += 1
+                    continue
+                ssh_run(sh, su, sp, f"{status_cmd} start {vmid}", key_material=sk, timeout=120)
+                jlog.log(f"  VM {vmid} ({vm_name}): started ✓")
+                started += 1
+            except Exception as exc:
+                jlog.log(f"  VM {vmid} ({vm_name}): start failed: {exc}")
+                skipped += 1
+
+        if delay_between_batches_sec > 0 and batch_start + max_parallel < len(vm_list):
+            jlog.log(f"  Waiting {delay_between_batches_sec}s before next batch…")
+            _time.sleep(delay_between_batches_sec)
+
+    return started, skipped
+
+
 # ── Bind job dispatcher ────────────────────────────────────────────────────────
 
 def run_bind(job_id, ds_id, params, username, db):

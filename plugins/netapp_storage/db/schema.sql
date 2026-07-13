@@ -15,6 +15,14 @@ CREATE TABLE IF NOT EXISTS netapp_endpoints (
 
 -- PVE hosts: direct PVE credentials for auto-discovery.
 -- Independent of PVE cluster configuration.
+-- A real PVE cluster (multiple nodes sharing one API/auth realm), detected via
+-- /cluster/status. Hosts with cluster_group_id='' are standalone (ungrouped).
+CREATE TABLE IF NOT EXISTS netapp_pve_clusters (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS netapp_pve_hosts (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -24,6 +32,7 @@ CREATE TABLE IF NOT EXISTS netapp_pve_hosts (
     password_encrypted TEXT NOT NULL,
     ssl_verify      INTEGER NOT NULL DEFAULT 0,
     nfs_ip          TEXT NOT NULL DEFAULT '',
+    cluster_group_id TEXT NOT NULL DEFAULT '',  -- FK to netapp_pve_clusters.id, '' = standalone
     created_at      TEXT NOT NULL
 );
 
@@ -167,11 +176,13 @@ CREATE TABLE IF NOT EXISTS netapp_provisioned_datastores (
 
 -- ── Disaster Recovery ─────────────────────────────────────────────────────
 
--- Plugin-wide config: role (PRIMARY/SECONDARY/STANDALONE)
+-- Plugin-wide config. role/role_forced are legacy (two-instance peer model,
+-- removed) — kept only so existing installs don't need a destructive
+-- column-drop migration, no longer read or written by any code.
 CREATE TABLE IF NOT EXISTS netapp_plugin_config (
     id                       TEXT PRIMARY KEY DEFAULT 'default',
-    role                     TEXT NOT NULL DEFAULT 'PRIMARY',     -- PRIMARY | SECONDARY | STANDALONE
-    role_forced              INTEGER NOT NULL DEFAULT 0,
+    role                     TEXT NOT NULL DEFAULT 'PRIMARY',     -- legacy, unused
+    role_forced              INTEGER NOT NULL DEFAULT 0,          -- legacy, unused
     config_volume_id         TEXT NOT NULL DEFAULT '',            -- legacy, unused in v3
     config_storage_id        TEXT NOT NULL DEFAULT '',            -- legacy, unused in v3
     config_pve_host_ids      TEXT NOT NULL DEFAULT '[]',          -- legacy, unused in v3
@@ -180,26 +191,9 @@ CREATE TABLE IF NOT EXISTS netapp_plugin_config (
     auto_scan_on_startup     INTEGER NOT NULL DEFAULT 0
 );
 
--- Direct peer-to-peer pairing (one row, id='default')
-CREATE TABLE IF NOT EXISTS netapp_dr_peer (
-    id                  TEXT PRIMARY KEY DEFAULT 'default',
-    name                TEXT NOT NULL DEFAULT 'DR Site',
-    url                 TEXT NOT NULL DEFAULT '',            -- https://<peer-host>
-    username            TEXT NOT NULL DEFAULT '',
-    password_encrypted  TEXT NOT NULL DEFAULT '',
-    ssl_verify          INTEGER NOT NULL DEFAULT 0,
-    sync_token          TEXT NOT NULL DEFAULT '',            -- shared secret for X-DR-Sync-Token
-    peer_role           TEXT NOT NULL DEFAULT '',            -- last known role of peer
-    last_seen           TEXT NOT NULL DEFAULT '',
-    last_sync_sent      TEXT NOT NULL DEFAULT '',
-    last_sync_received  TEXT NOT NULL DEFAULT '',
-    sync_status         TEXT NOT NULL DEFAULT 'unconfigured',-- unconfigured | online | offline | error
-    sync_error          TEXT NOT NULL DEFAULT '',
-    paired_at           TEXT NOT NULL DEFAULT '',
-    updated_at          TEXT NOT NULL DEFAULT ''
-);
-
--- Legacy table kept for schema compatibility (no longer used by code)
+-- Legacy table kept for schema compatibility (no longer used by code —
+-- netapp_dr_peer / two-instance peer-to-peer sync was removed, a single
+-- NaSnap instance now manages both the primary and DR side itself)
 CREATE TABLE IF NOT EXISTS netapp_dr_sites (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -353,4 +347,19 @@ CREATE TABLE IF NOT EXISTS netapp_sfr_sessions (
     job_id       TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT '',
     last_active  TEXT NOT NULL DEFAULT ''
+);
+
+-- ── VM OS info cache (last known guest OS per VM, persists across restarts) ──
+-- Written whenever a live QGA probe succeeds, read as a fallback when a VM is
+-- stopped/unreachable so the UI keeps showing the last known OS instead of
+-- blanking it out.
+
+CREATE TABLE IF NOT EXISTS netapp_vm_os_cache (
+    vmid         INTEGER NOT NULL,
+    mapping_id   TEXT NOT NULL,
+    guest_os     TEXT NOT NULL DEFAULT '',
+    os_name      TEXT NOT NULL DEFAULT '',
+    os_id        TEXT NOT NULL DEFAULT '',
+    updated_at   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (vmid, mapping_id)
 );

@@ -39,7 +39,7 @@
   }
   body.light-theme .jtc        { box-shadow: 0 4px 24px rgba(0,0,0,.12); }
   body.light-theme .toast      { box-shadow: 0 4px 16px rgba(0,0,0,.15); }
-  body.light-theme .subtab.active { color: #fff; }
+  body.light-theme .nav-tabs .subtab.active { color: #fff; }
   body.light-theme input, body.light-theme select, body.light-theme textarea {
     color: var(--text);
   }
@@ -56,20 +56,109 @@
   }
 
   /* ── Layout ─────────────────────────────────────────────────── */
-  .layout { display: flex; flex-direction: column; height: 100vh; position: relative; }
+  .layout { display: flex; flex-direction: row; height: 100vh; position: relative; }
 
-  /* ── Sub-tabs (matching PegaProx rounded-tab style) ─────────── */
-  .subtabs {
+  /* ── Sidebar ────────────────────────────────────────────────── */
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
     display: flex;
-    gap: 2px;
-    padding: 10px 16px 0;
+    flex-direction: column;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 16px 18px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    flex-shrink: 0;
+    letter-spacing: .2px;
+  }
+  .sidebar-brand svg { flex-shrink: 0; color: var(--primary); }
+
+  /* ── Main column (topbar + scrollable content) ─────────────── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    padding: 8px 20px;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
     flex-shrink: 0;
-    position: relative;
-    z-index: 10;
+    min-height: 44px;
   }
-  .subtab {
+
+  /* ── Sidebar nav items (matching PegaProx rounded-tab style, vertical) ── */
+  .subtabs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 8px 12px;
+    flex-shrink: 0;
+  }
+  .subtabs .subtab {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 6px;
+    border-left: 2px solid transparent;
+    transition: color .15s, background .15s;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .subtabs .subtab:hover { color: var(--text); background: var(--hover); }
+  .subtabs .subtab.active { color: var(--text); background: var(--hover); border-left-color: var(--primary); }
+  body.light-theme .subtabs .subtab.active { color: var(--primary); }
+
+  .sidebar-group-hd {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 6px;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .sidebar-group-hd:hover { color: var(--text); background: var(--hover); }
+  .sidebar-group.open .sidebar-group-hd { color: var(--text); }
+  .sidebar-chevron { margin-left: auto; flex-shrink: 0; transition: transform .15s; }
+  .sidebar-group.open .sidebar-chevron { transform: rotate(180deg); }
+  .sidebar-group-body {
+    overflow: hidden;
+    max-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: max-height .18s ease;
+  }
+  .sidebar-group.open .sidebar-group-body { max-height: 120px; padding-top: 4px; }
+  .sidebar-group-body .subtab { padding-left: 30px; }
+
+  /* ── DR's internal horizontal sub-tab bar (.nav-tabs), unchanged look ── */
+  .nav-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
+  .nav-tabs .subtab {
     padding: 7px 14px;
     font-size: 12px;
     font-weight: 500;
@@ -80,8 +169,8 @@
     user-select: none;
     white-space: nowrap;
   }
-  .subtab:hover { color: var(--text); background: var(--hover); }
-  .subtab.active { color: #fff; background: var(--primary); }
+  .nav-tabs .subtab:hover { color: var(--text); background: var(--hover); }
+  .nav-tabs .subtab.active { color: #fff; background: var(--primary); }
 
   /* ── Scrollable content ─────────────────────────────────────── */
   .content { flex: 1; overflow-y: auto; padding: 16px 20px; position: relative; z-index: 0; }
@@ -397,6 +486,23 @@
   .jtc-bar   { height:3px;border-radius:2px;transition:width .5s ease; }
   .jtc-log   { font-size:11px;color:var(--muted);font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:14px;margin-bottom:5px; }
   .jtc-foot  { display:flex;justify-content:flex-end; }
+
+  /* ── Bulk Migrate floating panel ──────────────────────────────── */
+  #bulkMigratePanel { position:fixed;bottom:20px;left:20px;z-index:8600;width:360px;max-width:calc(100vw - 40px);
+    background:var(--card);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 4px 24px rgba(0,0,0,.45);overflow:hidden; }
+  .bm-panel-header { display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;
+    font-size:12px;font-weight:600;border-bottom:1px solid var(--border); user-select:none; }
+  .bm-panel-header:hover { background: rgba(255,255,255,.03); }
+  .bm-panel-pulse { width:8px;height:8px;border-radius:50%;background:var(--primary);flex-shrink:0;animation:actPulse 1.4s ease-in-out infinite; }
+  .bm-panel-title { flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .bm-panel-x { background:none;border:none;color:var(--muted);cursor:pointer;padding:0 2px;font-size:14px;flex-shrink:0;line-height:1; }
+  .bm-panel-chevron { color:var(--muted);font-size:11px;flex-shrink:0; }
+  .bm-panel-body { max-height:280px;overflow-y:auto; }
+  .bulk-migrate-min .bm-panel-body { display:none; }
+  .bm-panel-row { display:flex;align-items:center;gap:8px;padding:6px 14px;font-size:12px;
+    border-bottom:1px solid rgba(139,148,158,.08); }
+  .bm-panel-foot { padding:9px 14px; }
   .badge-vm-4   { background: rgba(99,102,241,.15);  color: #a5b4fc; }
   .badge-vm-5   { background: rgba(16,185,129,.15);  color: #6ee7b7; }
   .vm-bubble-box {
@@ -625,16 +731,41 @@
     border-radius: 14px;
   }
 
-  /* Subtabs bar */
-  body.glass-theme .subtabs {
+  /* Bulk Migrate floating panel */
+  body.glass-theme #bulkMigratePanel {
+    background: rgba(14,24,42,0.75);
+    backdrop-filter: blur(20px) saturate(1.5);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12);
+    border-radius: 14px;
+  }
+
+  /* Sidebar */
+  body.glass-theme .sidebar {
+    background: rgba(8,16,32,0.70);
+    backdrop-filter: blur(32px) saturate(1.8);
+    -webkit-backdrop-filter: blur(32px) saturate(1.8);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.35), inset -1px 0 0 rgba(255,255,255,0.09);
+  }
+  body.glass-theme .topbar {
     background: rgba(8,16,32,0.70);
     backdrop-filter: blur(32px) saturate(1.8);
     -webkit-backdrop-filter: blur(32px) saturate(1.8);
     border-bottom: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09);
   }
-  body.glass-theme .subtab { border-radius: 100px; }
-  body.glass-theme .subtab.active {
+  body.glass-theme .subtabs .subtab { border-radius: 8px; }
+  body.glass-theme .subtabs .subtab.active,
+  body.glass-theme .sidebar-group.open .sidebar-group-hd {
+    background: rgba(30,123,245,0.14) !important;
+    color: #e8f0ff !important;
+    border-left-color: rgba(30,123,245,0.9);
+    box-shadow: none;
+  }
+  /* DR's internal horizontal sub-tab bar keeps the pill look */
+  body.glass-theme .nav-tabs .subtab { border-radius: 100px; }
+  body.glass-theme .nav-tabs .subtab.active {
     background: rgba(30,123,245,0.24) !important;
     color: #e8f0ff !important;
     border: 1px solid rgba(30,123,245,0.42);
@@ -715,6 +846,8 @@
   body.glass-theme #deleteConfirmModal > div,
   body.glass-theme #rwModal > div,
   body.glass-theme #cwModal > div,
+  body.glass-theme #vmInfoModal > div,
+  body.glass-theme #bulkMigrateModal > div,
   body.glass-theme #dsScanIndexModal > div {
     background: rgba(14,24,42,0.88) !important;
     backdrop-filter: blur(32px) saturate(1.6);
@@ -740,7 +873,10 @@
 
   /* Dynamische Cluster-Popups (Timeline & Job-Chart click) */
   body.glass-theme #tlClusterPopup,
-  body.glass-theme #jtClusterPopup {
+  body.glass-theme #jtClusterPopup,
+  body.glass-theme #rcActionsMenu,
+  body.glass-theme #dsActionsMenu,
+  body.glass-theme #spClusterPopup {
     background: rgba(12,22,42,0.92) !important;
     backdrop-filter: blur(24px) saturate(1.6);
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
@@ -857,7 +993,7 @@ var _LANG = (function(){
 
 var _I18N = {
 de:{
-  tab_snapshots:'Snapshots',tab_schedules:'Protection',tab_jobs:'Jobs & Logs',tab_settings:'Einstellungen',
+  tab_snapshots:'Snapshots',tab_schedules:'Protection Plans',tab_jobs:'Jobs & Logs',tab_settings:'Einstellungen',
   btn_create_snapshot:'+ Snapshot erstellen',btn_refresh:'Aktualisieren',btn_start_snapshot:'Snapshot starten',
   btn_cancel:'Abbrechen',btn_save:'Speichern',btn_add_schedule:'+ Schutzplan anlegen',
   btn_start_restore:'VM-Restore starten',btn_start_clone:'Klonen starten',btn_suggest:'Vorschlagen',
@@ -978,7 +1114,7 @@ de:{
   provision_title:'Storage Provisioning',provision_desc:'Volumes (NFS, iSCSI, NVMe-oF) anlegen und automatisch an Proxmox anbinden – inkl. Vergrößern/Verkleinern. Demnächst verfügbar.',
 },
 en:{
-  tab_snapshots:'Snapshots',tab_schedules:'Protection',tab_jobs:'Jobs & Logs',tab_settings:'Settings',
+  tab_snapshots:'Snapshots',tab_schedules:'Protection Plans',tab_jobs:'Jobs & Logs',tab_settings:'Settings',
   btn_create_snapshot:'+ Create Snapshot',btn_refresh:'Refresh',btn_start_snapshot:'Start Snapshot',
   btn_cancel:'Cancel',btn_save:'Save',btn_add_schedule:'+ Add Protection Plan',
   btn_start_restore:'Start VM Restore',btn_start_clone:'Start Clone',btn_suggest:'Suggest',
@@ -1202,7 +1338,7 @@ fr:{
   sm_no_dest_ep:'Aucun endpoint secondaire configuré — scanner d\'abord',
   ct_dr_clone:'DR Clone depuis le secondaire',btn_start_dr_clone:'Démarrer DR Clone',
   sm_source_vol:'Volume Source',sm_dest_vol:'Volume Destination',sm_state:'État',sm_lag:'Décalage',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
+  tab_restore:'VMs',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notifications e-mail (SMTP)',
   lbl_smtp_host:'Serveur SMTP',lbl_smtp_port:'Port',lbl_smtp_user:"Nom d'utilisateur",
   lbl_smtp_pass:'Mot de passe',lbl_smtp_from:'Expéditeur (De)',lbl_smtp_encryption:'Chiffrement',
@@ -1317,7 +1453,7 @@ es:{
   sm_no_dest_ep:'Sin endpoint secundario configurado — escanear primero',
   ct_dr_clone:'DR Clone desde Secundario',btn_start_dr_clone:'Iniciar DR Clone',
   sm_source_vol:'Volumen Origen',sm_dest_vol:'Volumen Destino',sm_state:'Estado',sm_lag:'Retraso',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
+  tab_restore:'VMs',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notificaciones por correo (SMTP)',
   lbl_smtp_host:'Servidor SMTP',lbl_smtp_port:'Puerto',lbl_smtp_user:'Usuario',
   lbl_smtp_pass:'Contraseña',lbl_smtp_from:'Remitente (De)',lbl_smtp_encryption:'Cifrado',
@@ -1432,7 +1568,7 @@ pt:{
   sm_no_dest_ep:'Sem endpoint secundário configurado — escanear primeiro',
   ct_dr_clone:'DR Clone do Secundário',btn_start_dr_clone:'Iniciar DR Clone',
   sm_source_vol:'Volume Origem',sm_dest_vol:'Volume Destino',sm_state:'Estado',sm_lag:'Atraso',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
+  tab_restore:'VMs',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notificações por e-mail (SMTP)',
   lbl_smtp_host:'Servidor SMTP',lbl_smtp_port:'Porta',lbl_smtp_user:'Usuário',
   lbl_smtp_pass:'Senha',lbl_smtp_from:'Remetente (De)',lbl_smtp_encryption:'Criptografia',
@@ -1547,7 +1683,7 @@ ko:{
   sm_no_dest_ep:'보조 엔드포인트 미구성 — 먼저 스캔하세요',
   ct_dr_clone:'보조에서 DR 클론',btn_start_dr_clone:'DR 클론 시작',
   sm_source_vol:'소스 볼륨',sm_dest_vol:'대상 볼륨',sm_state:'상태',sm_lag:'지연',
-  tab_restore:'복원',tab_clone:'클론',tab_provision:'프로비전',tab_storage:'스토리지',
+  tab_restore:'VM',tab_clone:'클론',tab_provision:'프로비전',tab_storage:'스토리지',
   sect_smtp:'이메일 알림 (SMTP)',
   lbl_smtp_host:'SMTP 서버',lbl_smtp_port:'포트',lbl_smtp_user:'사용자 이름',
   lbl_smtp_pass:'비밀번호',lbl_smtp_from:'보낸 사람 (From)',lbl_smtp_encryption:'암호화',
@@ -1662,7 +1798,7 @@ it:{
   sm_no_dest_ep:'Nessun endpoint secondario configurato — scansionare prima',
   ct_dr_clone:'DR Clone dal Secondario',btn_start_dr_clone:'Avvia DR Clone',
   sm_source_vol:'Volume Sorgente',sm_dest_vol:'Volume Destinazione',sm_state:'Stato',sm_lag:'Ritardo',
-  tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
+  tab_restore:'VMs',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
   sect_smtp:'Notifiche e-mail (SMTP)',
   lbl_smtp_host:'Server SMTP',lbl_smtp_port:'Porta',lbl_smtp_user:'Nome utente',
   lbl_smtp_pass:'Password',lbl_smtp_from:'Mittente (Da)',lbl_smtp_encryption:'Cifratura',
@@ -1702,20 +1838,47 @@ function applyI18n() {
 
 <div class="layout">
 
-  <!-- Sub-tabs -->
-  <div class="subtabs">
-    <div class="subtab active" data-tab="dashboard"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg><span data-i18n="tab_dashboard">Dashboard</span></div>
-    <div class="subtab" data-tab="snapshots"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_snapshots">Snapshots</span></div>
-    <div class="subtab" data-tab="schedules"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span data-i18n="tab_schedules">Protection</span></div>
-    <div class="subtab" data-tab="restore"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span data-i18n="tab_restore">VM Restore &amp; Clone</span></div>
-    <div class="subtab" data-tab="storage"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg><span data-i18n="tab_storage">Storage</span></div>
-    <div class="subtab" data-tab="jobs"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><span data-i18n="tab_jobs">Jobs &amp; Logs</span></div>
-    <div class="subtab" data-tab="dr"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg><span>Disaster Recovery</span></div>
-    <div class="subtab" data-tab="settings"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_settings">Settings</span></div>
-  </div>
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0118.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+        <g stroke-width="1">
+          <ellipse cx="12" cy="12" rx="3" ry="0.9"/>
+          <path d="M9 12v4a3 0.9 0 0 1 6 0v-4"/>
+          <path d="M9 14a3 0.9 0 0 1 6 0"/>
+        </g>
+      </svg>
+      <span>NaSnap</span>
+    </div>
+    <div class="subtabs">
+      <div class="subtab active" data-tab="dashboard"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg><span data-i18n="tab_dashboard">Dashboard</span></div>
+      <div class="subtab" data-tab="snapshots"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_snapshots">Snapshots</span></div>
 
-  <!-- Scrollable content -->
-  <div class="content">
+      <div class="sidebar-group" id="sidebarGroupProtection">
+        <div class="sidebar-group-hd" onclick="sidebarToggleGroup()">
+          <svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Protection</span>
+          <svg class="sidebar-chevron" width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="sidebar-group-body" id="sidebarGroupBodyProtection">
+          <div class="subtab" data-tab="schedules"><span data-i18n="tab_schedules">Protection Plans</span></div>
+          <div class="subtab" data-tab="dr"><span>Disaster Recovery</span></div>
+        </div>
+      </div>
+
+      <div class="subtab" data-tab="restore"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span data-i18n="tab_restore">VMs</span></div>
+      <div class="subtab" data-tab="storage"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg><span data-i18n="tab_storage">Datastores</span></div>
+      <div class="subtab" data-tab="jobs"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><span data-i18n="tab_jobs">Jobs &amp; Logs</span></div>
+      <div class="subtab" data-tab="settings"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_settings">Settings</span></div>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar"></div>
+
+    <!-- Scrollable content -->
+    <div class="content">
 
     <!-- ════════════════════════ DASHBOARD ═══════════════════════ -->
     <div id="tab-dashboard" class="tab-panel">
@@ -2042,9 +2205,6 @@ function applyI18n() {
       <div class="section-actions">
         <button class="btn btn-primary" onclick="showProvWizard()">+ Provision New</button>
         <button class="btn btn-secondary" onclick="showBindWizard()">⇢ Mount existing</button>
-        <button class="btn btn-ghost" onclick="showVmImportModal()">
-          <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Import VMs
-        </button>
         <button class="btn btn-ghost" onclick="runDetectAndScan()">
           <span id="discoverSpinner" style="display:none" class="spinner"></span>
           <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>Detect &amp; Scan
@@ -2101,29 +2261,9 @@ function applyI18n() {
     <!-- ════════════════════════ DISASTER RECOVERY ════════════════════════ -->
     <div id="tab-dr" class="tab-panel" style="display:none">
 
-      <!-- Role Banner -->
-      <div id="drRoleBanner" style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-radius:8px;margin-bottom:1.25rem;border:2px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:.75rem">
-          <span id="drRoleIcon" style="font-size:1.8rem;line-height:1">🟢</span>
-          <div>
-            <div style="font-weight:700;font-size:1rem" id="drRoleLabel">PRIMARY</div>
-            <div style="font-size:.78rem;color:var(--muted)" id="drRoleSubtitle">Loading…</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:.5rem;align-items:center">
-          <button class="btn btn-ghost btn-sm" onclick="drShowRoleModal()">⚙ Role</button>
-        </div>
-      </div>
-
-      <!-- Peer Status Section -->
       <div class="sub-header">
-        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>DR Peer</span>
-        <button class="btn btn-primary btn-sm" onclick="drShowPeerConfigModal()">⚙ Configure Peer</button>
-      </div>
-      <div id="drPeerStatusSection" style="margin-bottom:1.5rem"><div class="muted-hint">Loading…</div></div>
-
-      <div class="sub-header" style="margin-top:1.5rem">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>DR Plans</span>
+        <button class="btn btn-secondary btn-sm" onclick="showVmImportModal()">⛑ Recover VMs</button>
         <button class="btn btn-primary btn-sm" onclick="drShowAddPlanModal()">+ Create DR Plan</button>
       </div>
       <div id="drPlansList" class="card-list"><div class="muted-hint">Loading…</div></div>
@@ -2701,6 +2841,24 @@ function applyI18n() {
 
   <div id="jobTrackersContainer"></div>
 
+  <div id="bulkMigratePanel" style="display:none">
+    <div class="bm-panel-header" onclick="bmPanelToggleMin()">
+      <span class="bm-panel-pulse"></span>
+      <span id="bmPanelTitle" class="bm-panel-title">Bulk Migrate</span>
+      <span id="bmPanelCount" class="act-log-count">0/0</span>
+      <button id="bmPanelCloseBtn" class="bm-panel-x" style="display:none" onclick="event.stopPropagation();bmClosePanel()">✕</button>
+      <span id="bmPanelChevron" class="bm-panel-chevron">▲</span>
+    </div>
+    <div class="bm-panel-body" id="bmPanelBody"></div>
+    <div class="bm-panel-foot">
+      <div class="jtc-track"><div class="jtc-bar" id="bmPanelBar" style="width:0%;background:var(--primary)"></div></div>
+      <div id="bmPanelDoneRow" style="display:none;align-items:center;justify-content:space-between;gap:10px;margin-top:8px">
+        <span id="bmPanelDoneMsg" style="font-size:12px;color:var(--text)"></span>
+        <button class="btn btn-primary btn-sm" onclick="bmClosePanel()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ════════════════ ACTIVITY LOG ════════════════ -->
   <div id="activityLog" class="act-log" style="display:none" aria-live="polite">
     <div class="act-log-header" onclick="actLogToggle()">
@@ -2735,6 +2893,7 @@ function applyI18n() {
       This is an independent open-source project and is not affiliated with, endorsed by, or sponsored by NetApp, Inc.
     </div>
   </footer>
+  </div><!-- /.main -->
 </div><!-- /.layout -->
 
 <div id="toast" class="toast" style="display:none" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -2828,9 +2987,10 @@ window.addEventListener('pageshow', function(evt) {
     'createSnapshotForm','addScheduleForm','addEndpointForm','editEndpointForm',
     'editPveHostForm','addPveHostForm','setupWizardModal','provWizModal',
     'bindWizModal','vmImportModal','drAddPlanModal','drAddEntryModal',
-    'drAddGroupModal','drAddVmModal','drRoleModal','drPeerConfigModal',
+    'drAddGroupModal','drAddVmModal',
     'drFailoverModal','drEditEntryModal','restoreConfirmModal',
-    'deleteConfirmModal','logViewModal','rwModal','cwModal','ncModal'
+    'deleteConfirmModal','logViewModal','rwModal','cwModal','ncModal',
+    'vmInfoModal','bulkMigrateModal'
   ];
   forms.forEach(function(id) {
     var el = document.getElementById(id);
@@ -2931,6 +3091,8 @@ document.addEventListener('keydown', function(ev) {
     { id: 'deleteConfirmModal', fn: function(){ var b=document.querySelector('#deleteConfirmModal ._cancel-btn'); if(b) b.click(); } },
     { id: 'rwModal', fn: function(){ closeRestoreWizard(); } },
     { id: 'cwModal',  fn: function(){ closeCloneWizard(); } },
+    { id: 'vmInfoModal', fn: function(){ closeVmInfoModal(); } },
+    { id: 'bulkMigrateModal', fn: function(){ closeBulkMigrateWizard(); } },
     { id: 'ncModal',  fn: function(){ closeNativeCloneModal(); } },
     { id: 'addScheduleForm', fn: function(){ hideForm('addScheduleForm'); } }
   ];
@@ -2957,6 +3119,10 @@ document.querySelectorAll('.subtab').forEach(function(t) {
     var _ncm = document.getElementById('ncModal');
     if (_ncm && _ncm.style.display !== 'none') closeNativeCloneModal();
     t.classList.add('active');
+    if (t.dataset.tab === 'schedules' || t.dataset.tab === 'dr') {
+      var _pg = document.getElementById('sidebarGroupProtection');
+      if (_pg) _pg.classList.add('open');
+    }
     document.getElementById('tab-'+t.dataset.tab).style.display = 'block';
     var loaders = {
       dashboard: loadDashboard,
@@ -2971,6 +3137,11 @@ document.querySelectorAll('.subtab').forEach(function(t) {
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
   });
 });
+
+function sidebarToggleGroup() {
+  var grp = document.getElementById('sidebarGroupProtection');
+  if (grp) grp.classList.toggle('open');
+}
 
 function hideForm(id) {
   document.getElementById(id).style.display = 'none';
@@ -3154,6 +3325,8 @@ function showAddPveHostForm() {
 }
 
 var _pveHostCache = {};
+var _pveDiscoverClusterGroupId = '';
+var _pveDiscoverClusterName = '';
 
 async function loadPveHosts() {
   try {
@@ -3165,9 +3338,9 @@ async function loadPveHosts() {
       tbody.innerHTML = '<tr><td colspan="6" class="empty">'+t('empty_pve')+'</td></tr>';
       return;
     }
-    tbody.innerHTML = rows.map(function(h) {
+    function _pveHostRow(h) {
       return '<tr>' +
-        '<td><strong>'+esc(h.name)+'</strong></td>' +
+        '<td>'+(h.cluster_group_id?'<span style="padding-left:18px">':'')+'<strong>'+esc(h.name)+'</strong>'+(h.cluster_group_id?'</span>':'')+'</td>' +
         '<td>'+esc(h.host)+'</td>' +
         '<td>'+esc(h.port)+'</td>' +
         '<td>'+esc(h.username)+'</td>' +
@@ -3175,11 +3348,44 @@ async function loadPveHosts() {
         '<td>'+(h.ssl_verify ? '<span class="badge badge-green">'+t('opt_ssl_yes_s')+'</span>' : '<span class="badge badge-orange">'+t('opt_ssl_no')+'</span>')+'</td>' +
         '<td><div class="row-actions">' +
           _icoBtn('ghost',  t('btn_test'),   'testPveHost(\''+h.id+'\',\''+esc(h.name)+'\')', 'check') +
+          (h.cluster_group_id ? '' : _icoBtn('ghost', 'Detect cluster', 'detectPveHostCluster(\''+h.id+'\',\''+esc(h.name)+'\')', 'search')) +
           _icoBtn('ghost',  t('act_edit'),   'showEditPveHostForm(\''+h.id+'\')', 'edit') +
           _icoBtn('danger', t('act_delete'), 'deletePveHost(\''+h.id+'\',\''+esc(h.name)+'\')', 'trash') +
         '</div></td></tr>';
-    }).join('');
+    }
+    // Group rows by cluster_group_id — grouped hosts get a header row, standalone hosts stay flat.
+    var grouped = {}, ungrouped = [];
+    rows.forEach(function(h) {
+      if (h.cluster_group_id) {
+        (grouped[h.cluster_group_id] = grouped[h.cluster_group_id] || {name: h.cluster_name || 'Cluster', hosts: []}).hosts.push(h);
+      } else {
+        ungrouped.push(h);
+      }
+    });
+    var html = '';
+    Object.keys(grouped).forEach(function(gid) {
+      var g = grouped[gid];
+      html += '<tr style="background:var(--bg)"><td colspan="7" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 10px">'
+        + '🖧 ' + esc(g.name) + ' <span style="font-weight:400;text-transform:none">('+g.hosts.length+' node'+(g.hosts.length!==1?'s':'')+')</span></td></tr>';
+      html += g.hosts.map(_pveHostRow).join('');
+    });
+    if (ungrouped.length) {
+      if (Object.keys(grouped).length) {
+        html += '<tr style="background:var(--bg)"><td colspan="7" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 10px">Standalone</td></tr>';
+      }
+      html += ungrouped.map(_pveHostRow).join('');
+    }
+    tbody.innerHTML = html;
   } catch(e) { toast(e.message,'error'); }
+}
+
+async function detectPveHostCluster(hostId, hostName) {
+  try {
+    var r = await apiPost('pve-hosts/detect-cluster', {host_id: hostId});
+    if (!r.grouped) { toast(r.message || (hostName+' is not part of a multi-node cluster'), 'error'); return; }
+    toast('Grouped under cluster "'+r.cluster_name+'" ('+r.matched_host_ids.length+' host(s))', 'success');
+    loadPveHosts();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 function _extractDomain(host) {
@@ -3211,6 +3417,8 @@ async function discoverPveCluster() {
 
     var nodes = d.nodes;
     if (!nodes.length) { toast('No nodes found in cluster.', 'error'); return; }
+    _pveDiscoverClusterGroupId = d.cluster_group_id || '';
+    _pveDiscoverClusterName = d.cluster_name || '';
 
     var rows = nodes.map(function(n, i) {
       var hostVal = n.has_ip ? n.host : (n.name + domain);
@@ -3235,7 +3443,9 @@ async function discoverPveCluster() {
 
     box.innerHTML =
       '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">'
-      + 'Found '+nodes.length+' node'+(nodes.length!==1?'s':'')+' — edit host/NFS as needed, then import</div>'
+      + 'Found '+nodes.length+' node'+(nodes.length!==1?'s':'')
+      + (_pveDiscoverClusterName ? ' in cluster "'+esc(_pveDiscoverClusterName)+'"' : ' (standalone host)')
+      + ' — edit host/NFS as needed, then import</div>'
       + '<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">'+header+rows+'</div>'
       + '<button class="btn btn-primary btn-sm" onclick="importSelectedPveNodes()">Import Selected <span id="pveImportSpinner" class="spinner" style="display:none;margin-left:4px"></span></button>'
       + ' <span style="font-size:11px;color:var(--muted);margin-left:6px">NFS IP can also be set later via Edit.</span>'
@@ -3280,7 +3490,7 @@ async function importSelectedPveNodes() {
     // 1. Add host to DB
     var hostId;
     try {
-      var r = await apiPost('pve-hosts/add', {name, host, port, username, password, ssl_verify, nfs_ip});
+      var r = await apiPost('pve-hosts/add', {name, host, port, username, password, ssl_verify, nfs_ip, cluster_group_id: _pveDiscoverClusterGroupId});
       hostId = r.id;
       importedCount++;
     } catch(e) {
@@ -4233,6 +4443,8 @@ var _I = {
   addHost: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
   link:    'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
   play:    'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  info:    'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  migrate: 'M21 8H8m0 0l4-4M8 8l4 4M3 16h13m0 0l-4-4m4 4l-4 4',
 };
 function _ico(key, sz) {
   sz = sz || 18;
@@ -4242,6 +4454,11 @@ function _ico(key, sz) {
 function _icoBtn(variant, tip, onclick, key) {
   return '<button class="btn btn-icon btn-'+variant+'" data-tip="'+tip+'" title="'+tip+'" onclick="'+onclick+'">'
     + _ico(key) + '</button>';
+}
+function _icoKebab(sz) {
+  sz = sz || 16;
+  return '<svg width="'+sz+'" height="'+sz+'" viewBox="0 0 24 24" fill="currentColor">'
+    + '<circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>';
 }
 
 // ── Activity Log ─────────────────────────────────────────────────────────────
@@ -4259,6 +4476,7 @@ var _actJobLabels  = {
   'restore_lv':            'Restore (LV Copy)',
   'restore_dr':            'DR Restore',
   'clone':                 'Clone',
+  'clone_live':            'Clone (Live VM)',
   'clone_dr':              'DR Clone',
   'provision':             'Provision Datastore',
   'provision_remove':      'Remove Datastore',
@@ -4269,6 +4487,7 @@ var _actJobLabels  = {
   'dr_planned_failover':   'DR Planned Failover',
   'dr_emergency_failover': 'DR Emergency Failover',
   'scan_index':            'Scan Index',
+  'migrate_vm':            'Migrate VM',
 };
 
 function actLogToggle() {
@@ -4445,6 +4664,7 @@ async function loadRcVmList() {
   try {
     var snaps = await apiFetch('snapshots');
     _allSnapshots = snaps;
+    _rcLiveStatusCache = {};
     renderRcVmList();
   } catch(e) {
     toast(e.message, 'error');
@@ -4536,32 +4756,31 @@ function _renderRcRows() {
     var cnt = v.snapCount===1 ? '1 snapshot' : v.snapCount+' snapshots';
     var drBadge = v.isDR ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(88,166,255,.15);color:#58A6FF;border:1px solid rgba(88,166,255,.3);margin-right:4px">DR</span>' : '';
     var importBadge = v.hasImported ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border);margin-right:4px" title="At least one snapshot was imported from datastore index">Imported</span>' : '';
+    var liveBadgeId = 'livebadge_' + v.vmid + '_' + v.mappingId;
+    var liveBadge = '<span id="'+liveBadgeId+'">'+(v.liveStatus==='gone' ? _rcSnapOnlyBadgeHtml() : '')+'</span>';
     var protoBg = _rcProtoBg[v.protocol] || '#888';
     var protoBadge = '<span class="badge" style="background:'+protoBg+';color:#fff;font-size:10px">'+esc(v.protocol)+'</span>';
     var osKey = v.vmid + '_' + v.mappingId;
     var osCell = '<span id="osicon_'+osKey+'" title="" style="cursor:default;opacity:.3;display:inline-flex;align-items:center;gap:4px" aria-label="checking">'
         +_sfrSvgLinux+'<span id="oslabel_'+osKey+'" style="font-size:11px"></span></span>';
-    var sfrBtn = '<button id="sfrbtn_'+osKey+'" class="btn btn-ghost btn-icon" title="Single File Restore" '
-      +'onclick="openSfrModal('+v.vmid+',\''+esc(v.name)+'\',\''+esc(v.mappingId)+'\')" disabled style="opacity:.4;cursor:not-allowed">'
-      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
-      +'</button>';
+    var kebabBtn = '<button class="btn btn-ghost btn-icon" title="Actions" '
+      +'onclick="rcOpenActionsMenu(event,'+v.vmid+',\''+esc(v.name)+'\',\''+esc(v.dsName)+'\',\''+esc(v.mappingId)+'\')">'
+      + _icoKebab() + '</button>';
     return '<tr>'+
       '<td><code style="font-size:12px">'+v.vmid+'</code></td>'+
-      '<td>'+drBadge+importBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
+      '<td>'+drBadge+importBadge+liveBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
       '<td><code style="font-size:11px">'+esc(v.dsName)+'</code></td>'+
       '<td>'+protoBadge+'</td>'+
       '<td style="color:var(--muted)">'+cnt+'</td>'+
       '<td style="color:var(--muted)">'+fmtDateRel(v.lastSnap)+'</td>'+
       '<td>'+osCell+'</td>'+
-      '<td><div class="row-actions" style="gap:2px">'+
-        _icoBtn('secondary', t('act_restore'), 'openRestoreWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')', 'restore')+
-        _icoBtn('ghost',     t('act_clone'),   'openCloneWizard('+v.vmid+',null,\''+esc(v.dsName)+'\')',   'clone')+
-        sfrBtn+
-      '</div></td>'+
+      '<td><div class="row-actions" style="gap:2px">'+kebabBtn+'</div></td>'+
     '</tr>';
   }).join('');
   // Load QGA / OS info for all VMs in one batched request (server probes in parallel)
   _sfrLoadVmOsInfoBatch(rows);
+  // Patch in "Snapshot only" badges once live-VM status resolves (non-blocking)
+  _rcLoadLiveStatus(rows);
   ['vmid','name','dsName','proto','count','lastSnap'].forEach(function(c){
     var span = document.getElementById('rcs_'+c);
     var th   = span && span.parentElement;
@@ -4574,6 +4793,188 @@ function _renderRcRows() {
       if (th) th.classList.remove('sort-active');
     }
   });
+}
+
+function _rcSnapOnlyBadgeHtml() {
+  return '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;'
+    + 'background:rgba(240,173,78,.12);color:#f0ad4e;border:1px solid rgba(240,173,78,.3);margin-right:4px" '
+    + 'title="VM not found in the PVE cluster — only snapshot history remains">Snapshot only</span>';
+}
+
+// mappingId -> Set of live vmids (status !== 'unknown' per snapshots/vms-for-mapping), or null on fetch failure
+var _rcLiveStatusCache = {};
+
+async function _rcLoadLiveStatus(rows) {
+  // Single non-blocking batch request — never fires N parallel PVE-backed
+  // requests against the single Gunicorn worker (see snapshots/vms-for-mapping-batch).
+  var mappingIds = Array.from(new Set(rows.filter(function(v){ return !v.isDR; })
+    .map(function(v){ return v.mappingId; }).filter(Boolean)));
+  var uncached = mappingIds.filter(function(id){ return !(id in _rcLiveStatusCache); });
+  if (uncached.length) {
+    try {
+      var r = await apiPost('snapshots/vms-for-mapping-batch', {mapping_ids: uncached});
+      var results = r.results || {};
+      uncached.forEach(function(id) {
+        if (!(id in results)) return; // still cold — background fetch kicked off, try again next load
+        var live = {};
+        (results[id]||[]).forEach(function(vm){ if (vm.status !== 'unknown') live[String(vm.vmid)] = true; });
+        _rcLiveStatusCache[id] = live;
+      });
+    } catch(e) { /* non-critical — badges just stay blank this round */ }
+  }
+  rows.forEach(function(v) {
+    if (v.isDR) return; // DR/secondary rows already carry liveStatus from vmData.status directly
+    var live = _rcLiveStatusCache[v.mappingId];
+    if (!live) return;
+    var isGone = !live[String(v.vmid)];
+    v.liveStatus = isGone ? 'gone' : 'live';
+    var el = document.getElementById('livebadge_' + v.vmid + '_' + v.mappingId);
+    if (el) el.innerHTML = isGone ? _rcSnapOnlyBadgeHtml() : '';
+  });
+}
+
+// ── Row actions kebab menu ──────────────────────────────────────────────────
+var _rcMenuEl = null;
+
+function rcOpenActionsMenu(evt, vmid, name, dsName, mappingId) {
+  evt.stopPropagation();
+  rcCloseActionsMenu();
+  var osKey  = vmid + '_' + mappingId;
+  var sfrInfo = _sfrOsCache[osKey] || {qga_ok:false};
+  var menu = document.createElement('div');
+  menu.id = 'rcActionsMenu';
+  menu.style.cssText = 'position:fixed;z-index:9200;background:var(--card);color:var(--text);'
+    + 'border:1px solid var(--border);border-radius:8px;padding:4px;min-width:180px;'
+    + 'box-shadow:0 8px 24px rgba(0,0,0,.35);left:-9999px;top:-9999px';
+  menu.innerHTML =
+      _rcMenuItem('Info', _ico('info',14), 'rcCloseActionsMenu();openVmInfoModal('+vmid+',\''+esc(dsName)+'\',\''+esc(mappingId)+'\')')
+    + _rcMenuItem(t('act_restore'), _ico('restore',14), 'rcCloseActionsMenu();openRestoreWizard('+vmid+',null,\''+esc(dsName)+'\')')
+    + _rcMenuItem(t('act_clone'),   _ico('clone',14),   'rcCloseActionsMenu();openCloneWizard('+vmid+',null,\''+esc(dsName)+'\')')
+    + _rcMenuItem('Single File Restore', _ico('files',14),
+        'rcCloseActionsMenu();openSfrModal('+vmid+',\''+esc(name)+'\',\''+esc(mappingId)+'\')',
+        !sfrInfo.qga_ok, sfrInfo.qga_ok ? '' : 'Guest Agent not running — Single File Restore unavailable');
+  document.body.appendChild(menu);
+  _rcMenuEl = menu;
+  var r = evt.currentTarget.getBoundingClientRect();
+  var top  = r.bottom + 4;
+  var left = r.right - menu.offsetWidth;
+  if (left < 8) left = 8;
+  if (top + menu.offsetHeight > window.innerHeight - 8) top = r.top - menu.offsetHeight - 4;
+  menu.style.top  = top + 'px';
+  menu.style.left = left + 'px';
+  setTimeout(function(){ document.addEventListener('click', rcCloseActionsMenu, {once:true, capture:true}); }, 0);
+  document.addEventListener('keydown', _rcMenuEsc);
+}
+function _rcMenuItem(label, icon, onclick, disabled, tip) {
+  return '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;'
+    +'cursor:'+(disabled?'not-allowed':'pointer')+';opacity:'+(disabled?'.4':'1')+';border-radius:5px" '
+    +(tip?'title="'+esc(tip)+'"':'')
+    +(disabled?'':' onclick="'+onclick+'" onmouseenter="this.style.background=\'var(--hover)\'" onmouseleave="this.style.background=\'\'"')
+    +'>'+icon+'<span>'+esc(label)+'</span></div>';
+}
+function rcCloseActionsMenu() {
+  if (_rcMenuEl) { _rcMenuEl.remove(); _rcMenuEl = null; }
+  document.removeEventListener('keydown', _rcMenuEsc);
+}
+function _rcMenuEsc(e) { if (e.key === 'Escape') rcCloseActionsMenu(); }
+
+// ── VM Info modal ────────────────────────────────────────────────────────
+async function openVmInfoModal(vmid, dsName, mappingId) {
+  var modal = document.getElementById('vmInfoModal');
+  document.getElementById('vmInfo_hdr').textContent = 'VM ' + vmid;
+  document.getElementById('vmInfo_overview').innerHTML = '<span class="spinner"></span>';
+  document.getElementById('vmInfo_disks').innerHTML = '<span class="spinner"></span>';
+  document.getElementById('vmInfo_datastores').innerHTML = '—';
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  setTimeout(function(){ trapFocus(modal); }, 80);
+
+  _renderVmInfoSnapHistory(vmid, dsName);
+
+  var infoP = apiFetch('snapshots/vm-info?vmid='+vmid+'&mapping_id='+encodeURIComponent(mappingId)).catch(function(e){ return {error: e.message||String(e)}; });
+  var qgaP  = apiFetch('file-restore/sessions/vm-qga-info?vmid='+vmid+'&mapping_id='+encodeURIComponent(mappingId)).catch(function(){ return {qga_ok:false}; });
+  var results = await Promise.all([infoP, qgaP]);
+  var info = results[0], qga = results[1];
+  if (info.error) {
+    document.getElementById('vmInfo_overview').innerHTML = '<div class="hint" style="color:var(--error)">'+esc(info.error)+'</div>';
+    document.getElementById('vmInfo_disks').innerHTML = '—';
+    return;
+  }
+  _renderVmInfoOverview(info, qga);
+  _renderVmInfoDisks(info.disks||[]);
+  _renderVmInfoDatastores(info.datastores||[]);
+}
+
+function closeVmInfoModal() {
+  document.getElementById('vmInfoModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function _renderVmInfoOverview(info, qga) {
+  var rows = [
+    ['VMID', info.vmid],
+    ['Type', (info.vm_type||'qemu').toUpperCase()],
+    ['Status', info.found_in_pve
+      ? '<span style="color:#56d364">&#9679; Live on '+esc(info.node)+'</span>'
+      : '<span style="color:#f0a040">&#9679; Not found in PVE cluster</span>'],
+  ];
+  if (qga && qga.qga_ok) rows.push(['Guest OS', esc(qga.os_name||qga.guest_os||'')]);
+  document.getElementById('vmInfo_overview').innerHTML =
+    '<table style="width:100%;font-size:12px"><tbody>' +
+    rows.map(function(r){ return '<tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">'+r[0]+'</td><td style="padding:4px 0">'+r[1]+'</td></tr>'; }).join('') +
+    '</tbody></table>';
+}
+
+function _renderVmInfoDisks(disks) {
+  var el = document.getElementById('vmInfo_disks');
+  if (!disks.length) { el.innerHTML = 'No disks found.'; return; }
+  el.innerHTML = '<table style="width:100%;font-size:12px"><thead><tr>'
+    + '<th style="text-align:left;padding:4px 8px 4px 0;color:var(--muted)">Disk</th>'
+    + '<th style="text-align:left;padding:4px 8px 4px 0;color:var(--muted)">File</th>'
+    + '<th style="text-align:left;padding:4px 8px 4px 0;color:var(--muted)">Size</th>'
+    + '<th style="text-align:left;padding:4px 0;color:var(--muted)">Datastore</th>'
+    + '</tr></thead><tbody>'
+    + disks.map(function(d){
+        return '<tr>'
+          + '<td style="padding:4px 8px 4px 0"><code>'+esc(d.key)+'</code></td>'
+          + '<td style="padding:4px 8px 4px 0;color:var(--muted);word-break:break-all">'+esc(d.file)+'</td>'
+          + '<td style="padding:4px 8px 4px 0">'+(d.size_bytes!=null ? fmtBytes(d.size_bytes) : '—')+'</td>'
+          + '<td style="padding:4px 0"><code>'+esc(d.storage)+'</code></td>'
+        + '</tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+function _renderVmInfoDatastores(datastores) {
+  var el = document.getElementById('vmInfo_datastores');
+  el.innerHTML = datastores.length
+    ? datastores.map(function(d){ return '<span class="badge" style="margin-right:6px">'+esc(d)+'</span>'; }).join('')
+    : '—';
+}
+
+function _renderVmInfoSnapHistory(vmid, dsName) {
+  var vidStr = String(vmid);
+  var matches = (_allSnapshots||[]).filter(function(s){
+    if (s.status !== 'done') return false;
+    var vmids = (s.vmids||[]).map(String);
+    if (vmids.indexOf(vidStr) < 0) return false;
+    if (dsName && (s.pve_storage_id||s.volume_name||s.mapping_id) !== dsName) return false;
+    return true;
+  });
+  var el = document.getElementById('vmInfo_snaphistory');
+  if (!matches.length) { el.innerHTML = 'No snapshots found.'; return; }
+  var sorted = matches.slice().sort(function(a,b){ return (a.created_at||'').localeCompare(b.created_at||''); });
+  var first = sorted[0], last = sorted[sorted.length-1];
+  var lockedCount = matches.filter(function(s){ return s.lock_expires; }).length;
+  var rows = [
+    ['Total snapshots', matches.length],
+    ['First', fmtDateRel(first.created_at)],
+    ['Last', fmtDateRel(last.created_at)],
+  ];
+  if (lockedCount) rows.push(['Tamperproof', lockedCount + ' snapshot(s) locked']);
+  el.innerHTML = '<table style="width:100%;font-size:12px"><tbody>' +
+    rows.map(function(r){ return '<tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">'+r[0]+'</td><td style="padding:4px 0">'+r[1]+'</td></tr>'; }).join('') +
+    '</tbody></table>';
 }
 
 function rcFilterChanged() {
@@ -4625,10 +5026,212 @@ async function rcDrRelChanged() {
       return { vmid:v.vmid, name:v.name||'', relId:relId, isDR:true,
                mappingId:_rcDrMappingId, pveClusterId:mapping?mapping.pve_cluster_id:'',
                dsName:rel?(rel.source_volume||''):'', protocol:'NFS',
-               isSan:false, sanOpt:false, snapCount:snapCount, lastSnap:lastSnap, lastSnapId:null };
+               isSan:false, sanOpt:false, snapCount:snapCount, lastSnap:lastSnap, lastSnapId:null,
+               liveStatus: (v.status && v.status !== 'unknown') ? 'live' : 'gone' };
     });
     _renderRcRows();
   } catch(e) { toast(e.message,'error'); }
+}
+
+// ── Snapshot Picker Timeline (Restore / Clone wizards) ─────────────────────
+// Self-contained widget: auto-fits the full range of the given (pre-filtered)
+// snapshot list, no zoom controls. Reuses the shared #tlTooltip / _tlPositionTooltip
+// for hover; opens its own #spClusterPopup (teleported to body) for multi-item buckets.
+var _spState = {};
+
+function renderSnapPickerTimeline(containerId, snaps, onPick, selectedId) {
+  var container = document.getElementById(containerId);
+  if (!container) return;
+  var W = container.getBoundingClientRect().width;
+  if (W < 80) { requestAnimationFrame(function(){ renderSnapPickerTimeline(containerId, snaps, onPick, selectedId); }); return; }
+
+  var withDates = snaps.filter(function(s){ return s.created_at; });
+  var state = { bucketMap: {}, onPick: onPick, snaps: snaps, selectedId: selectedId||null };
+  _spState[containerId] = state;
+
+  var padL = 10, padR = 10, padT = 8, axisY = 52, H = 72;
+  var plotW = W - padL - padR;
+
+  var selectedSnap = selectedId!=null ? snaps.find(function(s){ return String(s.id)===String(selectedId); }) : null;
+  var selLabel = '<div style="margin-top:4px;font-size:11px;color:'+(selectedSnap?'var(--text)':'var(--muted)')+'">'
+    + (selectedSnap
+        ? ('Selected: <strong style="font-family:monospace">'+esc(selectedSnap.snap_name)+'</strong> · '+fmtDateRel(selectedSnap.created_at))
+        : 'No snapshot selected yet — click a point on the timeline or pick from the list below.')
+    + '</div>';
+
+  if (!withDates.length) {
+    container.innerHTML = '<svg width="'+W+'" height="'+H+'" style="display:block">'
+      + '<text x="'+(padL+plotW/2).toFixed(1)+'" y="'+(axisY-14)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="sans-serif">No snapshots available</text>'
+      + '</svg>';
+    return;
+  }
+
+  var times  = withDates.map(function(s){ return Date.parse(s.created_at); });
+  var oldest = Math.min.apply(null, times), newest = Math.max.apply(null, times);
+  var pad    = Math.max((newest - oldest) * 0.08, 3600e3);
+  var tStart = oldest - pad, tEnd = newest + pad;
+  var rangeMs = tEnd - tStart;
+
+  function toX(ts) { return padL + (ts - tStart) / rangeMs * plotW; }
+
+  var svgParts = [];
+  svgParts.push('<line x1="'+padL+'" y1="'+axisY+'" x2="'+(padL+plotW)+'" y2="'+axisY+'" stroke="var(--border)" stroke-width="1"/>');
+
+  var tickCount = 4;
+  for (var i = 0; i <= tickCount; i++) {
+    var tk = tStart + (rangeMs * i / tickCount);
+    var tx = toX(tk).toFixed(1);
+    var lbl = new Date(tk).toLocaleDateString([], {month:'short', day:'numeric'});
+    svgParts.push('<line x1="'+tx+'" y1="'+axisY+'" x2="'+tx+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
+    svgParts.push('<text x="'+tx+'" y="'+(axisY+14)+'" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="sans-serif">'+esc(lbl)+'</text>');
+  }
+
+  var bucketMs = rangeMs <= 2*3600e3  ? 5*60e3
+               : rangeMs <= 2*864e5   ? 3600e3
+               : rangeMs <= 14*864e5  ? 6*3600e3
+               : rangeMs <= 60*864e5  ? 864e5
+               : 7*864e5;
+
+  withDates.forEach(function(s) {
+    var ts = Date.parse(s.created_at);
+    var bk = Math.floor(ts / bucketMs);
+    if (!state.bucketMap[bk]) state.bucketMap[bk] = { snaps: [], _bucketMs: bucketMs };
+    state.bucketMap[bk].snaps.push(s);
+  });
+
+  var dotsHtml = [];
+  Object.keys(state.bucketMap).forEach(function(bk) {
+    var bucket   = state.bucketMap[bk];
+    var count    = bucket.snaps.length;
+    var centerTs = parseInt(bk) * bucketMs + bucketMs / 2;
+    var x  = toX(Math.min(centerTs, newest + pad));
+    var isSelected = selectedId!=null && bucket.snaps.some(function(s){ return String(s.id)===String(selectedId); });
+    var r  = (count === 1 ? 5.5 : count < 10 ? 8 : 10) + (isSelected ? 2 : 0);
+    var cx = x.toFixed(1), cy = (axisY - r - 6).toFixed(1);
+    if (isSelected) {
+      dotsHtml.push('<circle cx="'+cx+'" cy="'+cy+'" r="'+(r+4)+'" fill="none" stroke="var(--primary)" stroke-width="1.5" stroke-dasharray="2,2" opacity="0.6"/>');
+    }
+    dotsHtml.push(
+      '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'"'
+      + ' fill="'+(isSelected ? 'var(--primary)' : 'rgba(0,94,184,.18)')+'" stroke="var(--primary)" stroke-width="'+(isSelected?2.5:1.5)+'"'
+      + ' onmouseenter="_spHoverBucket(\''+containerId+'\',\''+bk+'\',event)"'
+      + ' onmouseleave="tlUnhover()"'
+      + ' onclick="_spClickBucket(\''+containerId+'\',\''+bk+'\',event)"'
+      + ' style="cursor:pointer"/>'
+    );
+    if (count > 1) {
+      var fs = count < 10 ? 7 : 6;
+      dotsHtml.push(
+        '<text x="'+cx+'" y="'+(parseFloat(cy)+fs*0.38).toFixed(1)+'"'
+        + ' text-anchor="middle" dominant-baseline="middle"'
+        + ' font-size="'+fs+'" font-weight="700" fill="'+(isSelected?'#fff':'var(--primary)')+'" font-family="sans-serif"'
+        + ' style="pointer-events:none">'+count+'</text>'
+      );
+    }
+  });
+  svgParts.push(dotsHtml.join(''));
+  container.innerHTML = '<svg width="'+W+'" height="'+H+'" style="display:block;overflow:visible">' + svgParts.join('') + '</svg>' + selLabel;
+}
+
+function _spSetSelected(containerId, snapId) {
+  var state = _spState[containerId];
+  if (!state) return;
+  renderSnapPickerTimeline(containerId, state.snaps, state.onPick, snapId);
+}
+
+function _spHoverBucket(containerId, bk, evt) {
+  var state = _spState[containerId];
+  var bucket = state && state.bucketMap[bk];
+  if (!bucket) return;
+  var tt = document.getElementById('tlTooltip');
+  if (!tt) return;
+  if (bucket.snaps.length === 1) {
+    var s = bucket.snaps[0];
+    var vmHtml = (s.vmids && s.vmids.length)
+      ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">VMs: '+s.vmids.map(String).join(', ')+'</div>' : '';
+    tt.innerHTML = '<div style="font-weight:600;font-family:monospace;font-size:11px;word-break:break-all">'+esc(s.snap_name)+'</div>'
+      + '<div style="margin-top:2px">'+fmtDateRel(s.created_at)+'</div>'
+      + vmHtml
+      + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to select</div>';
+  } else {
+    var bkMs = bucket._bucketMs;
+    var centerTs = parseInt(bk) * bkMs;
+    var t1 = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'});
+    var t2 = new Date(centerTs + bkMs).toLocaleTimeString([],{hour:'2-digit'});
+    tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+bucket.snaps.length+' Snapshots</div>'
+      + '<div style="color:#64748b;font-size:10px;margin-top:1px">'+esc(t1+'–'+t2)+'</div>'
+      + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to see list</div>';
+  }
+  _tlPositionTooltip(evt);
+}
+
+function _spClickBucket(containerId, bk, evt) {
+  evt.stopPropagation();
+  _spClosePopup();
+  var state = _spState[containerId];
+  var bucket = state && state.bucketMap[bk];
+  if (!bucket) return;
+  tlUnhover();
+  if (bucket.snaps.length === 1) { state.onPick(bucket.snaps[0]); return; }
+  _spOpenPopup(bucket, evt, state.onPick);
+}
+
+var _spPopupSorted = null, _spPopupOnPick = null;
+
+function _spOpenPopup(bucket, evt, onPick) {
+  var popup = document.createElement('div');
+  popup.id = 'spClusterPopup';
+  popup.style.cssText = 'position:fixed;z-index:9200;background:var(--card);color:var(--text);'
+    + 'border:1px solid var(--border);border-radius:8px;padding:6px 0;'
+    + 'font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);'
+    + 'max-height:300px;overflow-y:auto;min-width:240px;left:-9999px;top:-9999px';
+
+  var sorted = bucket.snaps.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
+  _spPopupSorted = sorted;
+  _spPopupOnPick = onPick;
+  var rows = sorted.map(function(s, idx) {
+    return '<div onclick="_spPopupPick('+idx+')"'
+      + ' style="padding:5px 14px;cursor:pointer;border-bottom:1px solid var(--border)"'
+      + ' onmouseenter="this.style.background=\'var(--bg)\'"'
+      + ' onmouseleave="this.style.background=\'\'">'
+      + '<div style="display:flex;align-items:center;gap:7px">'
+      + '<span style="width:7px;height:7px;border-radius:50%;background:var(--primary);flex-shrink:0"></span>'
+      + '<span style="font-weight:600;flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.snap_name)+'</span>'
+      + '<span style="color:var(--muted);font-size:10px;white-space:nowrap">'+fmtDateRel(s.created_at)+'</span>'
+      + '</div></div>';
+  }).join('');
+
+  popup.innerHTML = '<div style="padding:5px 14px 5px;font-size:10px;color:var(--muted);'
+    + 'border-bottom:1px solid var(--border);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">'
+    + '<span>'+bucket.snaps.length+' snapshots in this window</span>'
+    + '<span onclick="_spClosePopup()" style="cursor:pointer;font-size:13px;color:var(--muted);padding:0 2px">✕</span></div>'
+    + rows;
+
+  document.body.appendChild(popup);
+
+  requestAnimationFrame(function() {
+    var pw = popup.offsetWidth || 240, ph = popup.offsetHeight || 200;
+    var x = evt.clientX + 12, y = evt.clientY - ph / 2;
+    if (x + pw > window.innerWidth  - 8) x = evt.clientX - pw - 12;
+    if (y + ph > window.innerHeight - 8) y = window.innerHeight - ph - 8;
+    if (y < 8) y = 8;
+    popup.style.left = x + 'px';
+    popup.style.top  = y + 'px';
+  });
+
+  document.addEventListener('click', _spClosePopup, {capture:true, once:true});
+  document.addEventListener('keydown', _spPopupEsc);
+}
+function _spPopupPick(idx) {
+  var s = _spPopupSorted && _spPopupSorted[idx];
+  _spClosePopup();
+  if (s && _spPopupOnPick) _spPopupOnPick(s);
+}
+function _spPopupEsc(e) { if (e.key === 'Escape') _spClosePopup(); }
+function _spClosePopup() {
+  var p = document.getElementById('spClusterPopup');
+  if (p) p.parentNode.removeChild(p);
+  document.removeEventListener('keydown', _spPopupEsc);
 }
 
 // ── Restore Wizard ────────────────────────────────────────────────────────
@@ -4657,9 +5260,12 @@ function closeRestoreWizard() {
 }
 
 async function rwPopulateSnaps(preSnapId) {
-  var sel = document.getElementById('rw_snap');
+  var sel    = document.getElementById('rw_snap');
+  var picker = document.getElementById('rw_snap_picker');
   sel.innerHTML = '<option value="">Loading…</option>';
   if (_rwState.isDR) {
+    sel.style.display = '';
+    picker.style.display = 'none';
     try {
       var data = await apiFetch('snapmirror/secondary-snapshots?relationship_id='+encodeURIComponent(_rwState.relId));
       var snaps = data.snapshots||[];
@@ -4672,6 +5278,8 @@ async function rwPopulateSnaps(preSnapId) {
     rwRebuildMethod();
     return;
   }
+  sel.style.display = '';
+  picker.style.display = '';
   // Include snapshots where this VM is listed, OR snapshots with no vmids recorded
   // (= "all VMs" scheduled snapshots that snap the whole volume).
   // Match by pve_storage_id so snapshots imported under any of the multiple
@@ -4698,6 +5306,10 @@ async function rwPopulateSnaps(preSnapId) {
       }).join('')
     : '<option value="">— no snapshots —</option>';
   if (preSnapId) sel.value = String(preSnapId);
+  renderSnapPickerTimeline('rw_snap_picker', all, function(snap) {
+    sel.value = String(snap.id);
+    rwSnapChanged();
+  });
   rwSnapChanged();
 }
 
@@ -4705,6 +5317,7 @@ function rwSnapChanged() {
   if (_rwState.isDR) { _rwState.snapName = document.getElementById('rw_snap').value; return; }
   var sid = document.getElementById('rw_snap').value;
   _rwState.snap = _allSnapshots.find(function(s){ return String(s.id)===sid; })||null;
+  _spSetSelected('rw_snap_picker', _rwState.snap ? _rwState.snap.id : null);
   var info = document.getElementById('rw_snap_info');
   if (!_rwState.snap) { info.textContent=''; rwRebuildMethod(); return; }
   info.textContent = (_rwState.snap.vmids||[]).length+' VM(s) in snapshot — '+(_rwState.snap.volume_name||'');
@@ -4864,8 +5477,11 @@ function openCloneWizard(vmid, preSnapId, dsName) {
   if (!vm) vm = _rcVms.find(function(v){ return v.vmid===vmid; }); // fallback: any ds
   if (!vm) { toast('VM not found in snapshot history','error'); return; }
   _cwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, dsName:vm.dsName||'', relId:vm.relId||'', isDR:!!vm.isDR,
-               isSan:vm.isSan, pveClusterId:vm.pveClusterId, snap:null, snapName:'', step:1 };
+               isSan:vm.isSan, pveClusterId:vm.pveClusterId, snap:null, snapName:'', step:1, source:'snapshot' };
   document.getElementById('cw_vm_hdr').textContent = (vm.name||'VM')+' (ID: '+vmid+(vm.isDR?' · DR Secondary':'')+')';
+  var srcRow = document.getElementById('cw_src_row');
+  if (srcRow) srcRow.style.display = vm.isDR ? 'none' : '';
+  cwSetSource('snapshot');
   cwPopulateSnaps(preSnapId);
   cwUpdateStep(1);
   var modal = document.getElementById('cwModal');
@@ -4880,9 +5496,12 @@ function closeCloneWizard() {
 }
 
 async function cwPopulateSnaps(preSnapId) {
-  var sel = document.getElementById('cw_snap');
+  var sel    = document.getElementById('cw_snap');
+  var picker = document.getElementById('cw_snap_picker');
   sel.innerHTML = '<option value="">Loading…</option>';
   if (_cwState.isDR) {
+    sel.style.display = '';
+    picker.style.display = 'none';
     try {
       var data = await apiFetch('snapmirror/secondary-snapshots?relationship_id='+encodeURIComponent(_cwState.relId));
       var snaps = data.snapshots||[];
@@ -4894,6 +5513,8 @@ async function cwPopulateSnaps(preSnapId) {
     document.getElementById('cw_snap_info').textContent = 'SnapMirror® secondary snapshot · DR Clone';
     return;
   }
+  sel.style.display = '';
+  picker.style.display = '';
   var done = _allSnapshots.filter(function(s){
     if (s.status !== 'done') return false;
     var sameDs = _cwState.dsName
@@ -4913,6 +5534,10 @@ async function cwPopulateSnaps(preSnapId) {
       }).join('')
     : '<option value="">— no snapshots —</option>';
   if (preSnapId) sel.value = String(preSnapId);
+  renderSnapPickerTimeline('cw_snap_picker', all, function(snap) {
+    sel.value = String(snap.id);
+    cwSnapChanged();
+  });
   cwSnapChanged();
 }
 
@@ -4920,11 +5545,29 @@ function cwSnapChanged() {
   if (_cwState.isDR) { _cwState.snapName = document.getElementById('cw_snap').value; return; }
   var sid = document.getElementById('cw_snap').value;
   _cwState.snap = _allSnapshots.find(function(s){ return String(s.id)===sid; })||null;
+  _spSetSelected('cw_snap_picker', _cwState.snap ? _cwState.snap.id : null);
   var info = document.getElementById('cw_snap_info');
   if (!_cwState.snap) { info.textContent=''; return; }
   var proto = (_cwState.snap.storage_protocol||'nfs').toLowerCase();
   var label = {nvme:'NVMe — LV-copy',iscsi:'iSCSI — LV-copy',nfs:'NFS — file clone (CoW)'}[proto]||'';
   info.textContent = label+' · '+(_cwState.snap.vmids||[]).length+' VM(s) in snapshot';
+}
+
+function cwSetSource(mode) {
+  _cwState.source = mode;
+  var cb = document.getElementById('cw_src_live_cb');
+  if (cb) cb.checked = mode==='live';
+  var wrap = document.getElementById('cw_snap_picker_wrap');
+  var note = document.getElementById('cw_live_note');
+  if (wrap) wrap.style.display = mode==='snapshot' ? '' : 'none';
+  if (note) {
+    note.style.display = mode==='live' ? '' : 'none';
+    if (mode==='live') {
+      note.textContent = _cwState.isSan
+        ? 'A temporary snapshot will be created, used to clone the VM, and removed automatically afterward.'
+        : 'Storage-efficient clone created directly from the live filesystem — no temporary snapshot needed.';
+    }
+  }
 }
 
 function cwUpdateStep(n) {
@@ -4965,7 +5608,8 @@ async function cwSuggestId() {
 }
 
 function cwBuildSummary() {
-  var snapDisplay = _cwState.isDR ? _cwState.snapName : (_cwState.snap ? _cwState.snap.snap_name : '—');
+  var snapDisplay = _cwState.isDR ? _cwState.snapName
+    : (_cwState.source==='live' ? 'Live VM (current state)' : (_cwState.snap ? _cwState.snap.snap_name : '—'));
   var newName = document.getElementById('cw_new_name').value.trim();
   var newVmid = document.getElementById('cw_new_vmid').value;
   var node    = _cwState.isDR ? 'auto (DR)' : (document.getElementById('cw_target_node').value||'auto');
@@ -4984,7 +5628,7 @@ function cwBuildSummary() {
 function cwNext() {
   if (_cwState.step===1) {
     if (_cwState.isDR && !_cwState.snapName) { toast('Please select a snapshot','error'); return; }
-    if (!_cwState.isDR && !_cwState.snap)    { toast('Please select a snapshot','error'); return; }
+    if (!_cwState.isDR && _cwState.source==='snapshot' && !_cwState.snap) { toast('Please select a snapshot','error'); return; }
   }
   if (_cwState.step===2 && !document.getElementById('cw_new_vmid').value) { toast('Please enter a new VM ID','error'); return; }
   if (_cwState.step<3) cwUpdateStep(_cwState.step+1);
@@ -5015,6 +5659,21 @@ async function doClone() {
     return;
   }
 
+  if (_cwState.source==='live') {
+    var liveNode = document.getElementById('cw_target_node').value;
+    try {
+      var rl = await apiPost('clone/start-live', {
+        mapping_id:_cwState.mappingId, src_vmid:srcVmid, new_vmid:newVmid,
+        target_node:liveNode, new_name:newName, start_after:startA, network_isolated:netIso,
+      });
+      toast('Clone started','success');
+      if (rl.job_id) trackJob(rl.job_id, 'Clone (live): VM ' + (newVmid || ''));
+      actLogStart();
+      closeCloneWizard();
+    } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Clone'; }
+    return;
+  }
+
   var snap = _cwState.snap;
   var node = document.getElementById('cw_target_node').value;
   if (!snap) return;
@@ -5031,6 +5690,274 @@ async function doClone() {
     actLogStart();
     closeCloneWizard();
   } catch(e) { toast(e.message,'error',e.detail); btn.disabled=false; btn.textContent='Start Clone'; }
+}
+
+// ── Bulk Migrate Wizard ──────────────────────────────────────────────────
+var _bmState = { sourceMappingId:'', sourceName:'', vms:[], selectedVmids:{}, targetMappingId:'', targetName:'', targetProtocol:'', step:1 };
+
+function openBulkMigrateWizard(sourceMappingId, sourceName) {
+  _bmState = { sourceMappingId:sourceMappingId, sourceName:sourceName, vms:[], selectedVmids:{}, targetMappingId:'', targetName:'', targetProtocol:'', step:1 };
+  document.getElementById('bm_vm_hdr').textContent = sourceName;
+  bmUpdateStep(1);
+  bmLoadVms();
+  var modal = document.getElementById('bulkMigrateModal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  setTimeout(function(){ trapFocus(modal); }, 80);
+}
+
+function closeBulkMigrateWizard() {
+  document.getElementById('bulkMigrateModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function bmLoadVms() {
+  var body = document.getElementById('bm_vm_list');
+  body.innerHTML = '<div class="hint"><span class="spinner"></span> Loading VMs…</div>';
+  try {
+    var r = await apiFetch('snapshots/vms-for-mapping?mapping_id='+encodeURIComponent(_bmState.sourceMappingId));
+    _bmState.vms = r.vms || [];
+  } catch(e) {
+    body.innerHTML = '<div class="hint" style="color:var(--error)">'+esc(e.message||String(e))+'</div>';
+    return;
+  }
+  bmRenderVmList();
+}
+
+function bmRenderVmList() {
+  var body = document.getElementById('bm_vm_list');
+  if (!_bmState.vms.length) {
+    body.innerHTML = '<div class="hint">No VMs found on this datastore.</div>';
+    var nb = document.getElementById('bmNextBtn'); if (nb) nb.disabled = true;
+    return;
+  }
+  body.innerHTML = _bmState.vms.map(function(v) {
+    var clr = v.status==='running' ? '#56d364' : v.status==='stopped' ? 'var(--muted)' : '#f0a040';
+    var checked = _bmState.selectedVmids[v.vmid] ? 'checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer">'
+      + '<input type="checkbox" '+checked+' onchange="bmToggleVm('+v.vmid+',this.checked)">'
+      + '<span style="width:7px;height:7px;border-radius:50%;background:'+clr+';flex-shrink:0" title="'+esc(v.status||'')+'"></span>'
+      + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(v.name)+'</span>'
+      + '<code style="font-size:11px;color:var(--muted)">#'+v.vmid+'</code>'
+      + '<span style="font-size:10px;color:var(--muted);width:70px;text-align:right">'+esc(v.node||'')+'</span>'
+      + '</label>';
+  }).join('');
+  bmUpdateSelCount();
+}
+
+function bmToggleVm(vmid, checked) {
+  if (checked) _bmState.selectedVmids[vmid] = true;
+  else delete _bmState.selectedVmids[vmid];
+  bmUpdateSelCount();
+}
+
+function bmSelectAll() {
+  _bmState.vms.forEach(function(v){ _bmState.selectedVmids[v.vmid] = true; });
+  bmRenderVmList();
+}
+function bmSelectNone() {
+  _bmState.selectedVmids = {};
+  bmRenderVmList();
+}
+
+function bmUpdateSelCount() {
+  var n = Object.keys(_bmState.selectedVmids).length;
+  var el = document.getElementById('bm_sel_count');
+  if (el) el.textContent = n + ' VM' + (n===1?'':'s') + ' selected';
+  if (_bmState.step===1) {
+    var nb = document.getElementById('bmNextBtn');
+    if (nb) nb.disabled = n===0;
+  }
+}
+
+function bmBuildTargetOptions() {
+  var wrap = document.getElementById('bm_target_list');
+  var raw = null;
+  try { raw = JSON.parse(localStorage.getItem(_STORAGE_UNIFIED_CACHE_KEY) || 'null'); } catch(e) {}
+  var items = (raw && raw.items) || [];
+  var candidates = items.filter(function(ds){ return ds.mapping_id && ds.mapping_id !== _bmState.sourceMappingId; });
+  if (!candidates.length) {
+    wrap.innerHTML = '<div class="hint">No other datastores available as a migration target.</div>';
+    return;
+  }
+  var _protoBg = {nfs:'#0ea5e9', iscsi:'#f97316', nvme:'#a855f7'};
+  wrap.innerHTML = candidates.map(function(ds) {
+    var checked = _bmState.targetMappingId === ds.mapping_id ? 'checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer">'
+      + '<input type="radio" name="bm_target" '+checked+' onchange="bmSetTarget(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\',\''+esc(ds.protocol||'')+'\')">'
+      + '<span class="badge" style="background:'+(_protoBg[ds.protocol]||'#888')+';color:#fff;font-size:10px">'+esc((ds.protocol||'').toUpperCase())+'</span>'
+      + '<span style="flex:1">'+esc(ds.name)+'</span>'
+      + '</label>';
+  }).join('');
+}
+
+function bmSetTarget(mappingId, name, protocol) {
+  _bmState.targetMappingId = mappingId;
+  _bmState.targetName = name;
+  _bmState.targetProtocol = protocol;
+  if (_bmState.step===2) {
+    var nb = document.getElementById('bmNextBtn');
+    if (nb) nb.disabled = false;
+  }
+}
+
+function bmUpdateStep(n) {
+  _bmState.step = n;
+  [1,2,3].forEach(function(i){
+    document.getElementById('bmStep'+i).style.display = (i===n)?'':'none';
+    var pill = document.getElementById('bmPill'+i);
+    pill.classList.toggle('active', i===n);
+    pill.classList.toggle('done', i<n);
+  });
+  document.getElementById('bmBackBtn').style.display   = n>1 ? '' : 'none';
+  document.getElementById('bmNextBtn').style.display   = n<3 ? '' : 'none';
+  document.getElementById('bmSubmitBtn').style.display = n===3 ? '' : 'none';
+  if (n===1) { var nb1=document.getElementById('bmNextBtn'); if (nb1) nb1.disabled = Object.keys(_bmState.selectedVmids).length===0; }
+  if (n===2) { bmBuildTargetOptions(); var nb2=document.getElementById('bmNextBtn'); if (nb2) nb2.disabled = !_bmState.targetMappingId; }
+  if (n===3) bmBuildSummary();
+}
+
+function bmNext() {
+  if (_bmState.step===1 && Object.keys(_bmState.selectedVmids).length===0) { toast('Please select at least one VM','error'); return; }
+  if (_bmState.step===2 && !_bmState.targetMappingId) { toast('Please select a target datastore','error'); return; }
+  if (_bmState.step<3) bmUpdateStep(_bmState.step+1);
+}
+function bmBack() { if (_bmState.step>1) bmUpdateStep(_bmState.step-1); }
+
+function _bmSelectedVmidsSorted() {
+  return Object.keys(_bmState.selectedVmids).map(Number).sort(function(a,b){ return a-b; });
+}
+
+function bmBuildSummary() {
+  var vmids = _bmSelectedVmidsSorted();
+  var vmById = {};
+  _bmState.vms.forEach(function(v){ vmById[v.vmid] = v; });
+  var vmList = vmids.map(function(vid){ return vmById[vid] || {vmid:vid, name:'VM '+vid, status:'unknown'}; });
+  document.getElementById('bm_sum_count').textContent = vmList.length + ' VM(s)';
+  document.getElementById('bm_sum_source').textContent = _bmState.sourceName;
+  document.getElementById('bm_sum_target').textContent = _bmState.targetName;
+  document.getElementById('bm_sum_vmlist').innerHTML = vmList.map(function(v){
+    return '<div style="padding:2px 0">'+esc(v.name)+' <code style="font-size:11px;color:var(--muted)">#'+v.vmid+'</code></div>';
+  }).join('');
+  var anyRunning = vmList.some(function(v){ return v.status==='running'; });
+  var runNote = document.getElementById('bm_running_note');
+  if (runNote) runNote.style.display = anyRunning ? '' : 'none';
+}
+
+async function doBulkMigrate() {
+  var vmids = _bmSelectedVmidsSorted();
+  var vmById = {};
+  _bmState.vms.forEach(function(v){ vmById[v.vmid] = v; });
+  var maxParallel = parseInt(document.getElementById('bm_max_parallel').value, 10) || 3;
+  var btn = document.getElementById('bmSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    var r = await apiPost('storage/bulk-migrate-start', {
+      source_mapping_id: _bmState.sourceMappingId,
+      target_mapping_id: _bmState.targetMappingId,
+      vmids: vmids,
+      max_parallel: maxParallel,
+    });
+    // vmids order matches job_ids order (both preserve the same ascending order)
+    var vmInfoList = vmids.map(function(vid){ return vmById[vid] || {vmid:vid, name:'VM '+vid}; });
+    closeBulkMigrateWizard();
+    bmOpenPanel(r.job_ids || [], vmInfoList, _bmState.targetName);
+  } catch(e) {
+    toast(e.message, 'error', e.detail);
+    btn.disabled = false; btn.textContent = 'Start Migration';
+  }
+}
+
+// ── Bulk Migrate floating progress panel ─────────────────────────────────
+// Separate from _activeJobs/trackJob — this panel aggregates N migrate jobs
+// from a single Bulk Migrate run into one status card with its own minimize state.
+var _bmPanelState = { min:false, jobIds:[], byId:{} };
+
+function bmOpenPanel(jobIds, vmInfoList, targetName) {
+  _bmPanelState = { min:false, jobIds:jobIds.slice(), byId:{}, notified:false };
+  jobIds.forEach(function(jid, i) {
+    var v = vmInfoList[i] || {};
+    _bmPanelState.byId[jid] = { vmid:v.vmid, name:v.name||('VM '+v.vmid), status:'running', pct:0, lastLog:'' };
+  });
+  var panel = document.getElementById('bulkMigratePanel');
+  panel.style.display = '';
+  panel.classList.remove('bulk-migrate-min');
+  document.getElementById('bmPanelChevron').textContent = '▲';
+  document.getElementById('bmPanelCloseBtn').style.display = 'none';
+  document.getElementById('bmPanelDoneRow').style.display = 'none';
+  document.getElementById('bmPanelTitle').textContent = 'Bulk Migrate: ' + jobIds.length + ' VM' + (jobIds.length===1?'':'s') + ' → ' + targetName;
+  _bmRenderPanel();
+  jobIds.forEach(_bmPollOne);
+}
+
+async function _bmPollOne(jobId) {
+  var entry = _bmPanelState.byId[jobId];
+  if (!entry) return;
+  try {
+    var d = await apiFetch('jobs/status?job_id=' + encodeURIComponent(jobId));
+    entry = _bmPanelState.byId[jobId];
+    if (!entry) return;
+    entry.pct = d.progress_pct || 0;
+    entry.status = d.status;
+    var logs = d.log || [];
+    entry.lastLog = logs.length ? (logs[logs.length-1].msg || '') : '';
+    _bmRenderPanel();
+    if (d.status === 'running' || d.status === 'cancelling') {
+      setTimeout(function(){ _bmPollOne(jobId); }, 2000);
+    }
+  } catch(e) {
+    entry = _bmPanelState.byId[jobId];
+    if (entry && entry.status === 'running') setTimeout(function(){ _bmPollOne(jobId); }, 3000);
+  }
+}
+
+function bmPanelToggleMin() {
+  _bmPanelState.min = !_bmPanelState.min;
+  document.getElementById('bulkMigratePanel').classList.toggle('bulk-migrate-min', _bmPanelState.min);
+  document.getElementById('bmPanelChevron').textContent = _bmPanelState.min ? '▼' : '▲';
+}
+
+function bmClosePanel() {
+  document.getElementById('bulkMigratePanel').style.display = 'none';
+}
+
+function _bmRenderPanel() {
+  var ids = _bmPanelState.jobIds;
+  if (!ids.length) return;
+  var entries = ids.map(function(id){ return _bmPanelState.byId[id]; });
+  var doneCount   = entries.filter(function(e){ return e.status==='done'; }).length;
+  var failedCount = entries.filter(function(e){ return e.status==='failed' || e.status==='cancelled'; }).length;
+  document.getElementById('bmPanelCount').textContent = (doneCount+failedCount) + '/' + ids.length;
+  var overallPct = Math.round(entries.reduce(function(s,e){
+    return s + (e.status==='done' || e.status==='failed' || e.status==='cancelled' ? 100 : (e.pct||0));
+  }, 0) / ids.length);
+  document.getElementById('bmPanelBar').style.width = overallPct + '%';
+  document.getElementById('bmPanelBody').innerHTML = entries.map(function(e){
+    var clr = e.status==='failed' ? '#f08080' : e.status==='cancelled' ? 'var(--muted)' : e.status==='done' ? '#56d364' : 'var(--primary)';
+    var ico = e.status==='failed' ? '✗' : e.status==='cancelled' ? '⊘' : e.status==='done' ? '✓' : '⟳';
+    var pctLabel = e.status==='done' ? '100%' : e.status==='failed' ? 'failed' : e.status==='cancelled' ? 'cancelled' : (e.pct||0)+'%';
+    return '<div class="bm-panel-row" title="'+esc(e.lastLog||'')+'">'
+      + '<span style="color:'+clr+'">'+ico+'</span>'
+      + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.name)+' <span style="color:var(--muted)">#'+e.vmid+'</span></span>'
+      + '<span style="color:var(--muted);font-size:11px">'+pctLabel+'</span>'
+      + '</div>';
+  }).join('');
+  if (doneCount + failedCount === ids.length) {
+    document.getElementById('bmPanelCloseBtn').style.display = '';
+    if (!_bmPanelState.notified) {
+      _bmPanelState.notified = true;
+      loadStorageUnified();
+      var msg = failedCount
+        ? doneCount + ' migrated, ' + failedCount + ' failed. You can close this panel now.'
+        : 'All ' + doneCount + ' VM' + (doneCount===1?'':'s') + ' migrated successfully. You can close this panel now.';
+      document.getElementById('bmPanelDoneMsg').textContent = msg;
+      document.getElementById('bmPanelDoneRow').style.display = 'flex';
+      document.getElementById('bmPanelTitle').textContent = (failedCount ? '⚠ ' : '✓ ') + 'Bulk Migrate complete';
+      toast(msg, failedCount ? 'error' : 'success');
+      // Make sure the completion is actually visible, even if minimized.
+      if (_bmPanelState.min) bmPanelToggleMin();
+    }
+  }
 }
 
 // ── Navigate from snapshot table ─────────────────────────────────────────
@@ -7895,6 +8822,8 @@ var _provOntapRes = {volumes:[], luns:[], igroups:[]};
 
 var _STORAGE_UNIFIED_CACHE_KEY = 'nasnap_storage_unified_cache';
 
+var _storageItemsById = {};
+
 function _renderStorageItems(items) {
   var tbody = document.getElementById('storageTbody');
   var empty = document.getElementById('storageEmpty');
@@ -7905,6 +8834,8 @@ function _renderStorageItems(items) {
     return;
   }
   if (empty) empty.style.display = 'none';
+  _storageItemsById = {};
+  items.forEach(function(ds){ _storageItemsById[ds.id] = ds; });
   tbody.innerHTML = items.map(function(ds) {
       var _protoBg = {nfs:'#0ea5e9', iscsi:'#f97316', nvme:'#a855f7'}[ds.protocol];
       var _protoBadge = '<span class="badge" style="background:'+(_protoBg||'#888')+';color:#fff">'
@@ -7951,34 +8882,9 @@ function _renderStorageItems(items) {
           + (_tipHtml ? '<div class="host-tip">'+_tipHtml+'</div>' : '')
           + '</span>';
       }
-      // Actions per source type
-      var actions;
-      if (ds.source === 'provisioned') {
-        var _provIdxBtn = (ds.mapping_id && (ds.protocol === 'nfs' || ds.snapinfo_initialized))
-          ? _icoBtn('ghost', 'Scan index', 'dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'restore')
-          : '';
-        actions = _provIdxBtn
-          + _icoBtn('success', '+ Host', 'showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
-            + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+',\''+esc(ds.protocol||'')+'\')' , 'addHost')
-          + _icoBtn('success', 'Resize', 'showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\',' + (ds.size_bytes||0) + ',\''+esc(ds.protocol||'')+'\')' , 'resize')
-          + _icoBtn('danger', 'Remove', 'confirmRemoveDatastore(\''+ds.id+'\',\''+esc(ds.name)+'\')', 'trash');
-      } else {
-        var _isSan = ds.protocol && ds.protocol !== 'nfs';
-        var smBtn = '';
-        if (_isSan) {
-          smBtn = ds.snapinfo_initialized
-            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 7px;background:var(--success);color:#000;border:none"'
-              + ' onclick="snapmanifestCheck(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')" title="Check snapmanifest">snapmanifest ✓</button> '
-            : '<button class="btn btn-sm" style="font-size:10px;padding:2px 7px;background:var(--warning);color:#000;border:none"'
-              + ' onclick="snapmanifestInit(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')" title="Setup snapmanifest">Setup snapmanifest</button> ';
-        }
-        var scanIdxBtn = (!_isSan || ds.snapinfo_initialized)
-          ? _icoBtn('ghost', 'Scan index', 'dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'restore')
-          : '';
-        actions = smBtn + scanIdxBtn
-          + _icoBtn('ghost',  'Manage',              'importToProvisioning(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'link')
-          + _icoBtn('danger', 'Remove from database', 'deleteMapping(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')', 'trash');
-      }
+      // Actions — single kebab menu (built on click, see dsOpenActionsMenu)
+      var actions = '<button class="btn btn-ghost btn-icon" title="Actions" '
+        + 'onclick="dsOpenActionsMenu(event,\''+esc(ds.id)+'\')">' + _icoKebab() + '</button>';
       var _svmEp = [ds.svm_name, ds.endpoint_name].filter(Boolean).join(' · ');
       return '<tr>'
         + '<td><strong>'+esc(ds.name)+'</strong> '+_srcBadge
@@ -7997,6 +8903,79 @@ function _renderStorageItems(items) {
         + '</tr>';
     }).join('');
 }
+
+// ── Row actions kebab menu (Datastores tab) — mirrors rcOpenActionsMenu ─────
+var _dsMenuEl = null;
+
+function dsOpenActionsMenu(evt, dsId) {
+  evt.stopPropagation();
+  dsCloseActionsMenu();
+  var ds = _storageItemsById[dsId];
+  if (!ds) return;
+  var isSan = ds.protocol && ds.protocol !== 'nfs';
+  var items = [];
+
+  if (ds.source === 'provisioned') {
+    if (ds.mapping_id && (ds.protocol === 'nfs' || ds.snapinfo_initialized)) {
+      items.push(_rcMenuItem('Scan index', _ico('restore',14),
+        'dsCloseActionsMenu();dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+    }
+    if (ds.mapping_id) {
+      items.push(_rcMenuItem('Bulk Migrate', _ico('migrate',14),
+        'dsCloseActionsMenu();openBulkMigrateWizard(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+    }
+    items.push(_rcMenuItem('+ Host', _ico('addHost',14),
+      'dsCloseActionsMenu();showAddHostDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','
+        + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+',\''+esc(ds.protocol||'')+'\')'));
+    items.push(_rcMenuItem('Resize', _ico('resize',14),
+      'dsCloseActionsMenu();showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','+(ds.size_bytes||0)+',\''+esc(ds.protocol||'')+'\')'));
+    items.push(_rcMenuItem('Remove', _ico('trash',14),
+      'dsCloseActionsMenu();confirmRemoveDatastore(\''+ds.id+'\',\''+esc(ds.name)+'\')'));
+  } else {
+    if (isSan) {
+      items.push(ds.snapinfo_initialized
+        ? _rcMenuItem('Check snapmanifest', _ico('check',14),
+            'dsCloseActionsMenu();snapmanifestCheck(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')')
+        : _rcMenuItem('Setup snapmanifest', _ico('edit',14),
+            'dsCloseActionsMenu();snapmanifestInit(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+    }
+    if (!isSan || ds.snapinfo_initialized) {
+      items.push(_rcMenuItem('Scan index', _ico('restore',14),
+        'dsCloseActionsMenu();dsScanIndex(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+    }
+    if (ds.mapping_id) {
+      items.push(_rcMenuItem('Bulk Migrate', _ico('migrate',14),
+        'dsCloseActionsMenu();openBulkMigrateWizard(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+    }
+    items.push(_rcMenuItem('Manage', _ico('link',14),
+      'dsCloseActionsMenu();importToProvisioning(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+    items.push(_rcMenuItem('Remove from database', _ico('trash',14),
+      'dsCloseActionsMenu();deleteMapping(\''+esc(ds.mapping_id)+'\',\''+esc(ds.name)+'\')'));
+  }
+
+  var menu = document.createElement('div');
+  menu.id = 'dsActionsMenu';
+  menu.style.cssText = 'position:fixed;z-index:9200;background:var(--card);color:var(--text);'
+    + 'border:1px solid var(--border);border-radius:8px;padding:4px;min-width:200px;'
+    + 'box-shadow:0 8px 24px rgba(0,0,0,.35);left:-9999px;top:-9999px';
+  menu.innerHTML = items.join('');
+  document.body.appendChild(menu);
+  _dsMenuEl = menu;
+  var r = evt.currentTarget.getBoundingClientRect();
+  var top  = r.bottom + 4;
+  var left = r.right - menu.offsetWidth;
+  if (left < 8) left = 8;
+  if (top + menu.offsetHeight > window.innerHeight - 8) top = r.top - menu.offsetHeight - 4;
+  menu.style.top  = top + 'px';
+  menu.style.left = left + 'px';
+  setTimeout(function(){ document.addEventListener('click', dsCloseActionsMenu, {once:true, capture:true}); }, 0);
+  document.addEventListener('keydown', _dsMenuEsc);
+}
+function dsCloseActionsMenu() {
+  if (_dsMenuEl) { _dsMenuEl.remove(); _dsMenuEl = null; }
+  document.removeEventListener('keydown', _dsMenuEsc);
+}
+function _dsMenuEsc(e) { if (e.key === 'Escape') dsCloseActionsMenu(); }
 
 async function loadStorageUnified() {
   // Show stale cache immediately so the tab feels instant
@@ -9904,6 +10883,7 @@ async function impDoImport() {
   var storageOld = (oldInput && (oldInput.value || oldInput.placeholder)) || '';
   if (storageOld === '(no rewrite needed)' || storageOld === '(auto-detected)') storageOld = '';
   var targetHostId = (document.getElementById('impHostSel') || {}).value || '';
+  var startAfter   = !!(document.getElementById('impStartAfter') || {}).checked;
   var btn          = document.getElementById('impImportBtn');
   var spinner    = document.getElementById('impImportSpinner');
   var errEl      = document.getElementById('impImportErr');
@@ -9921,11 +10901,13 @@ async function impDoImport() {
       storage_id_old:  storageOld,
       vmid_map:        vmid_map,
       target_host_id:  targetHostId || null,
+      start_after:     startAfter,
     });
     spinner.style.display = 'none';
     var cnt      = r.restored || 0;
+    var startedCnt = r.started || 0;
     var logLines = (r.log || []).filter(function(l){ return l; });
-    toast(cnt + ' VM config(s) imported.', 'success');
+    toast(cnt + ' VM config(s) recovered' + (startAfter ? (', ' + startedCnt + ' started') : '') + '.', 'success');
 
     // ── Show "Import Complete" result panel; keep impVmsCard intact in DOM ──
     var card = document.getElementById('impVmsCard');
@@ -9965,7 +10947,7 @@ async function impDoImport() {
       + '<span style="font-size:28px;line-height:1">✅</span>'
       + '<div>'
       +   '<div style="font-size:15px;font-weight:600;color:var(--success)">'
-      +     cnt + ' VM config(s) imported successfully'
+      +     cnt + ' VM config(s) recovered' + (startAfter ? (', ' + startedCnt + ' started') : '')
       +   '</div>'
       +   '<div style="font-size:12px;color:var(--muted);margin-top:3px">'
       +     'Datastore: <strong>' + esc((_impState.ds||{}).name || (_impState.ds||{}).pve_storage_id || '') + '</strong>'
@@ -9981,7 +10963,7 @@ async function impDoImport() {
       + '</table>'
       + logBlock
       + '<div style="margin-top:20px;display:flex;gap:8px">'
-      +   '<button class="btn btn-primary" onclick="impResetWizard()">Import another</button>'
+      +   '<button class="btn btn-primary" onclick="impResetWizard()">Recover another</button>'
       + '</div>';
 
     card.parentNode.insertBefore(resultDiv, card);
@@ -10593,7 +11575,7 @@ async function setupCreateOntapUser() {
 
 // helper: click a top-level nav tab by data-tab name
 function showTabByName(name) {
-  var pill = document.querySelector('.nav-tabs [data-tab="' + name + '"]');
+  var pill = document.querySelector('.subtabs [data-tab="' + name + '"]');
   if (pill) pill.click();
 }
 
@@ -10773,7 +11755,7 @@ var _drCurrentPlanId = null;
 var _drActiveSubTab = 'entries';
 var _drCurrentGroupId = null;
 var _drEntriesMap = {};
-var _drModalIds = ['drAddPlan','drAddEntry','drAddGroup','drAddVm','drRole','drEditEntry','drFailover'];
+var _drModalIds = ['drAddPlan','drAddEntry','drAddGroup','drAddVm','drEditEntry','drFailover'];
 
 function drShowModal(id) { document.getElementById(id+'Modal').style.display='block'; }
 function drHideModal(id) {
@@ -10789,159 +11771,7 @@ function drShowSubTab(name, el) {
   else { var btn=document.querySelector('[data-dr-tab="'+name+'"]'); if(btn) btn.classList.add('active'); }
 }
 
-// ── Role ──────────────────────────────────────────────────────────────────────
-
-async function drLoadRole() {
-  try {
-    var r = await apiFetch('dr/role');
-    var banner=document.getElementById('drRoleBanner');
-    var icon=document.getElementById('drRoleIcon');
-    var label=document.getElementById('drRoleLabel');
-    var sub=document.getElementById('drRoleSubtitle');
-    var role=r.role||'PRIMARY';
-    var peer=r.peer||null;
-
-    if(role==='PRIMARY'){
-      banner.style.borderColor='var(--success,#198754)';
-      icon.textContent='🟢'; label.textContent='PRIMARY'; label.style.color='var(--success,#198754)';
-      sub.textContent='This instance manages DR plans and pushes sync to the Secondary.';
-    } else if(role==='SECONDARY'){
-      banner.style.borderColor='var(--warning,#ffc107)';
-      icon.textContent='🟡'; label.textContent='SECONDARY'; label.style.color='var(--warning,#a07000)';
-      sub.textContent='Standby — receives plan sync from Primary. Ready for failover.';
-    } else {
-      banner.style.borderColor='var(--border)';
-      icon.textContent='⚪'; label.textContent='STANDALONE'; label.style.color='';
-      sub.textContent='No peer configured — operates independently.';
-    }
-    if(r.role_forced) sub.textContent+=' [forced override active]';
-    if(peer) {
-      var peerStatus=peer.sync_status==='online'?'🟢 Peer online':peer.sync_status==='offline'?'🔴 Peer offline':'⚪ Peer unconfigured';
-      sub.textContent += ' · '+peerStatus;
-    }
-  } catch(e){ document.getElementById('drRoleSubtitle').textContent='Could not load role info'; }
-}
-
-async function drShowRoleModal() {
-  try {
-    var r=await apiFetch('dr/role');
-    document.getElementById('drRoleSelect').value=r.role||'PRIMARY';
-    document.getElementById('drRoleForcedCheck').checked=!!r.role_forced;
-  } catch(e){}
-  drShowModal('drRole');
-}
-
-async function drSaveRole() {
-  var role=document.getElementById('drRoleSelect').value;
-  var forced=document.getElementById('drRoleForcedCheck').checked;
-  try {
-    await apiPost('dr/role/set',{role,forced});
-    toast('Role set to '+role,'success');
-    drHideModal('drRole'); drLoadRole();
-  } catch(e){ toast(e.message,'error'); }
-}
-
-// ── Peer management ───────────────────────────────────────────────────────────
-
-async function drLoadPeerStatus() {
-  var el=document.getElementById('drPeerStatusSection');
-  try {
-    var p=await apiFetch('dr/peer/status');
-    if(!p.configured){
-      el.innerHTML='<div class="card" style="padding:.75rem 1rem;display:flex;align-items:center;justify-content:space-between">'
-        +'<div><span style="color:var(--warning,#a07000)">⚠ No peer configured</span>'
-        +' <span style="color:var(--muted);font-size:.82rem">— Direct plugin-to-plugin sync not active.</span></div>'
-        +'<button class="btn btn-primary btn-sm" onclick="drShowPeerConfigModal()">⚙ Configure Peer</button>'
-        +'</div>';
-      return;
-    }
-    var statusColor=p.sync_status==='online'?'var(--success,#198754)':p.sync_status==='offline'?'var(--error,#f85149)':'var(--warning,#a07000)';
-    var statusIcon=p.sync_status==='online'?'🟢':p.sync_status==='offline'?'🔴':'🟡';
-    var lastSeen=p.last_seen?p.last_seen.slice(0,19).replace('T',' '):'never';
-    var lastSync=p.last_sync_sent?p.last_sync_sent.slice(0,19).replace('T',' '):'never';
-    var peerRoleBadge=p.peer_role?'<span class="badge badge-info" style="font-size:.72rem">'+esc(p.peer_role)+'</span>':'';
-    el.innerHTML='<div class="card" style="padding:.75rem 1rem">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">'
-      +'<div style="display:flex;align-items:center;gap:.75rem">'
-      +'<span style="font-size:1.4rem">'+statusIcon+'</span>'
-      +'<div>'
-      +'<div style="font-weight:600">'+esc(p.name||p.url)+' '+peerRoleBadge+'</div>'
-      +'<div style="font-size:.78rem;color:var(--muted)">'
-      +'<span style="color:'+statusColor+'">'+esc(p.sync_status)+'</span>'
-      +' · Last seen: '+esc(lastSeen)
-      +' · Last sync: '+esc(lastSync)
-      +(p.sync_error?' · <span style="color:var(--error,#f85149)">'+esc(p.sync_error.slice(0,80))+'</span>':'')
-      +'</div>'
-      +'</div></div>'
-      +'<div style="display:flex;gap:.4rem">'
-      +'<button class="btn btn-ghost btn-sm" onclick="drPushSync()">⬆ Sync now</button>'
-      +_icoBtn('ghost',  t('act_edit'),   'drShowPeerConfigModal()', 'edit')
-      +_icoBtn('danger', t('act_delete'), 'drRemovePeer()', 'trash')
-      +'</div>'
-      +'</div></div>';
-  } catch(e){ el.innerHTML='<div class="alert alert-danger" style="font-size:.85rem">'+esc(e.message)+'</div>'; }
-}
-
-async function drShowPeerConfigModal() {
-  document.getElementById('drPeerConfigError').style.display='none';
-  try {
-    var p=await apiFetch('dr/peer/status');
-    if(p.configured){
-      document.getElementById('peerConfigName').value=p.name||'';
-      document.getElementById('peerConfigUrl').value=p.url||'';
-      document.getElementById('peerConfigToken').value='';
-      document.getElementById('peerConfigSsl').checked=!!p.ssl_verify;
-    } else {
-      ['peerConfigName','peerConfigUrl','peerConfigToken'].forEach(function(id){ document.getElementById(id).value=''; });
-      document.getElementById('peerConfigSsl').checked=false;
-    }
-  } catch(e){}
-  document.getElementById('drPeerConfigModal').style.display='block';
-}
-
-function peerGenerateToken() {
-  var chars='abcdefghijklmnopqrstuvwxyz0123456789';
-  var token='';
-  for(var i=0;i<36;i++) token+=i===8||i===13||i===18||i===23?'-':chars[Math.floor(Math.random()*chars.length)];
-  document.getElementById('peerConfigToken').value=token;
-}
-
-async function drSavePeerConfig() {
-  var errEl=document.getElementById('drPeerConfigError');
-  errEl.style.display='none';
-  var payload={
-    name:    document.getElementById('peerConfigName').value.trim()||'DR Site',
-    url:     document.getElementById('peerConfigUrl').value.trim(),
-    ssl_verify:document.getElementById('peerConfigSsl').checked,
-    sync_token:document.getElementById('peerConfigToken').value.trim(),
-  };
-  if(!payload.url){ errEl.textContent='Peer URL is required'; errEl.style.display=''; return; }
-  try {
-    var r=await apiPost('dr/peer/configure',payload);
-    document.getElementById('drPeerConfigModal').style.display='none';
-    toast('Peer configured — sync token: '+r.sync_token,'success');
-    drLoadPeerStatus(); drLoadRole();
-  } catch(e){ errEl.textContent=e.message; errEl.style.display=''; }
-}
-
-async function drRemovePeer() {
-  if(!await uiConfirm('Remove peer configuration? Sync will stop.')) return;
-  try { await apiPost('dr/peer/remove',{}); toast('Peer removed','success'); drLoadPeerStatus(); drLoadRole(); }
-  catch(e){ toast(e.message,'error'); }
-}
-
-async function drPushSync() {
-  try {
-    var r=await apiPost('dr/peer/sync/push',{});
-    if(r.ok) toast('Sync pushed to peer ✓','success');
-    else toast('Sync failed: '+(r.error||'unknown error'),'error');
-    drLoadPeerStatus();
-  } catch(e){ toast(e.message,'error'); }
-}
-
 async function drInit() {
-  drLoadRole();
-  drLoadPeerStatus();
   drLoadPlans();
 }
 
@@ -11228,7 +12058,18 @@ async function drMoveGroup(groupId,direction) {
 function drShowAddVmModal(groupId) {
   _drCurrentGroupId=groupId;
   ['drVmVmid','drVmName','drVmNode'].forEach(function(id){ document.getElementById(id).value=''; });
+  drSetAddVmMode('manual');
   drShowModal('drAddVm');
+}
+
+function drSetAddVmMode(mode) {
+  document.getElementById('drVmModePill1').classList.toggle('active', mode==='manual');
+  document.getElementById('drVmModePill2').classList.toggle('active', mode==='scan');
+  document.getElementById('drAddVmManual').style.display = mode==='manual' ? '' : 'none';
+  document.getElementById('drAddVmScan').style.display   = mode==='scan'   ? '' : 'none';
+  document.getElementById('drAddVmManualBtn').style.display = mode==='manual' ? '' : 'none';
+  document.getElementById('drAddVmScanBtn').style.display   = mode==='scan'   ? '' : 'none';
+  if (mode==='scan') drScanForVms();
 }
 
 async function drAddVmToGroup() {
@@ -11242,6 +12083,77 @@ async function drAddVmToGroup() {
     });
     drHideModal('drAddVm'); toast('VM added to group','success'); drRefreshPlanDetail();
   } catch(e){ toast(e.message,'error'); }
+}
+
+// ── Scan plan's protected datastores for VMs (index/snapshot-driven,
+// replaces manual-only VMID entry) — reuses the same snapshot data the
+// VMs tab already aggregates, filtered to this plan's source datastores.
+var _drScanVms = [];
+
+async function drScanForVms() {
+  var listEl = document.getElementById('drScanVmList');
+  listEl.innerHTML = '<div class="muted-hint" style="padding:10px">Loading…</div>';
+  try {
+    var plan = await apiFetch('dr/plans/detail?plan_id='+_drCurrentPlanId);
+    var storageIds = (plan.entries||[]).map(function(e){ return e.source_pve_storage_id; }).filter(Boolean);
+    if (!storageIds.length) {
+      listEl.innerHTML = '<div class="muted-hint" style="padding:10px">No protected datastores with a resolvable source storage ID yet.</div>';
+      return;
+    }
+    var assignedVmids = {};
+    (plan.vm_groups||[]).forEach(function(g){ (g.vms||[]).forEach(function(v){ assignedVmids[v.vmid] = true; }); });
+
+    if (typeof _allSnapshots === 'undefined' || !_allSnapshots || !_allSnapshots.length) {
+      _allSnapshots = await apiFetch('snapshots');
+    }
+    var vmMap = {};
+    _allSnapshots.forEach(function(s) {
+      if (s.status !== 'done') return;
+      if (storageIds.indexOf(s.pve_storage_id) < 0) return;
+      (s.vmids||[]).forEach(function(vid) {
+        var name = (s.vm_names||{})[String(vid)] || '';
+        if (!vmMap[vid] || (name && (!s.created_at || s.created_at > (vmMap[vid].lastSeen||'')))) {
+          vmMap[vid] = { vmid: vid, name: name || vmMap[vid] && vmMap[vid].name || '', lastSeen: s.created_at };
+        }
+      });
+    });
+    _drScanVms = Object.values(vmMap).filter(function(v){ return !assignedVmids[v.vmid]; })
+      .sort(function(a,b){ return a.vmid - b.vmid; });
+
+    if (!_drScanVms.length) {
+      listEl.innerHTML = '<div class="muted-hint" style="padding:10px">No unassigned VMs found on this plan\'s datastores.</div>';
+      return;
+    }
+    listEl.innerHTML = _drScanVms.map(function(v, i) {
+      return '<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer">'
+        + '<input type="checkbox" class="dr-scan-vm-cb" data-idx="'+i+'">'
+        + '<span style="flex:1">'+esc(v.name||('VM '+v.vmid))+'</span>'
+        + '<code style="font-size:11px;color:var(--muted)">#'+v.vmid+'</code>'
+        + '</label>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div class="alert alert-danger" style="font-size:.85rem">'+esc(e.message)+'</div>';
+  }
+}
+
+async function drAddScannedVms() {
+  var checked = Array.from(document.querySelectorAll('.dr-scan-vm-cb:checked'));
+  if (!checked.length) { toast('Select at least one VM','error'); return; }
+  var added = 0, failed = 0;
+  for (var i = 0; i < checked.length; i++) {
+    var v = _drScanVms[parseInt(checked[i].dataset.idx, 10)];
+    if (!v) continue;
+    try {
+      await apiPost('dr/plans/groups/vms/add', {
+        plan_id: _drCurrentPlanId, group_id: _drCurrentGroupId,
+        vmid: v.vmid, vm_name: v.name || '', target_node: '',
+      });
+      added++;
+    } catch(e) { failed++; }
+  }
+  drHideModal('drAddVm');
+  toast(added + ' VM(s) added' + (failed ? ', ' + failed + ' failed' : ''), failed ? 'error' : 'success');
+  drRefreshPlanDetail();
 }
 
 async function drRemoveVm(groupId,vmAssignmentId) {
@@ -11380,6 +12292,10 @@ function _applyUiSettings(s) {
   var drBtn   = document.querySelector('.subtab[data-tab="dr"]');
   var drPanel = document.getElementById('tab-dr');
   if (drBtn)   drBtn.style.display   = s.dr_enabled ? '' : 'none';
+  if (s.dr_enabled) {
+    var pg = document.getElementById('sidebarGroupProtection');
+    if (pg) pg.classList.add('open');
+  }
   if (drPanel && !s.dr_enabled) {
     drPanel.style.display = 'none';
     // If the DR tab was active, switch to Snapshots
@@ -12622,14 +13538,21 @@ actLogPoll();
   </div><!-- /modal box -->
 </div><!-- /bindWizModal -->
 
-<!-- ── Import VMs from Datastore Modal ───────────────────────────── -->
+<!-- ── Recover VMs Modal (Disaster Recovery) ───────────────────────────── -->
 <div id="vmImportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="vmImportBackdropClick(event)">
   <div style="max-width:860px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
-      <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Import VMs from Datastore</div>
+      <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Recover VMs from Datastore</div>
       <button class="btn btn-ghost btn-sm" onclick="hideVmImportModal()" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
     </div>
     <div style="padding:20px">
+
+      <div style="margin-bottom:14px;padding:10px 14px;background:var(--bg);border-radius:6px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px">
+        <svg width="14" height="14" style="flex-shrink:0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Target datastore not yet mounted on the recovery cluster? Use
+        <a href="javascript:void(0)" onclick="hideVmImportModal();showBindWizard()" style="color:var(--accent)">⇢ Mount existing</a>
+        to bind the NetApp volume to a PVE host first, then come back here to recover the VMs.
+      </div>
 
       <!-- Step 1: Datastore + Snapshot -->
       <div class="card" style="margin-bottom:12px">
@@ -12740,9 +13663,15 @@ actLogPoll();
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Edit <em>From</em> only if the manifest uses a different name than auto-detected.</div>
         </div>
 
+        <div style="margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;font-weight:400">
+            <input type="checkbox" id="impStartAfter" checked> Start VMs after recovery
+          </label>
+        </div>
+
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn btn-primary" id="impImportBtn" onclick="impDoImport()">
-            Import VMs <span id="impImportSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+            Recover VMs <span id="impImportSpinner" class="spinner" style="display:none;margin-left:4px"></span>
           </button>
           <span id="impImportErr" style="color:var(--error);font-size:12px"></span>
           <span id="impImportOk" style="color:var(--success);font-size:12px"></span>
@@ -13438,82 +14367,28 @@ actLogPoll();
 
 <!-- Add VM to Group -->
 <div id="drAddVmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="if(event.target===this)drHideModal('drAddVm')">
-  <div style="max-width:420px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+  <div style="max-width:460px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
       <div style="font-size:16px;font-weight:700">➕ Add VM to Group</div>
       <button class="btn btn-ghost btn-sm" onclick="drHideModal('drAddVm')" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
     </div>
-    <div style="padding:20px;display:grid;gap:.75rem">
+    <div style="padding:16px 20px 0;display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--border);margin:0 20px">
+      <div id="drVmModePill1" class="setup-step-pill active" onclick="drSetAddVmMode('manual')" style="cursor:pointer">Manual</div>
+      <div id="drVmModePill2" class="setup-step-pill" onclick="drSetAddVmMode('scan')" style="cursor:pointer">Scan Datastores</div>
+    </div>
+    <div id="drAddVmManual" style="padding:20px;display:grid;gap:.75rem">
       <div class="form-group"><label>VMID</label><input id="drVmVmid" type="number" placeholder="100" autocomplete="off"></div>
       <div class="form-group"><label>VM Name <span style="font-weight:400;color:var(--muted)">(display only)</span></label><input id="drVmName" placeholder="my-vm" autocomplete="off"></div>
       <div class="form-group"><label>Target Node <span style="font-weight:400;color:var(--muted)">(DR PVE node hostname)</span></label><input id="drVmNode" placeholder="ucnlabpmx03" autocomplete="off"></div>
     </div>
+    <div id="drAddVmScan" style="display:none;padding:16px 20px">
+      <div class="hint" style="margin-bottom:8px">VMs found on this plan's protected datastores (already-assigned VMs are hidden).</div>
+      <div id="drScanVmList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"><div class="muted-hint" style="padding:10px">Loading…</div></div>
+    </div>
     <div style="display:flex;justify-content:flex-end;gap:.5rem;padding:12px 20px;border-top:1px solid var(--border)">
       <button class="btn btn-ghost" onclick="drHideModal('drAddVm')">Cancel</button>
-      <button class="btn btn-primary" onclick="drAddVmToGroup()">✅ Add VM</button>
-    </div>
-  </div>
-</div>
-
-<!-- Role Settings -->
-<div id="drRoleModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="if(event.target===this)drHideModal('drRole')">
-  <div style="max-width:460px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
-      <div style="font-size:16px;font-weight:700">⚙ Plugin Role</div>
-      <button class="btn btn-ghost btn-sm" onclick="drHideModal('drRole')" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
-    </div>
-    <div style="padding:20px;display:grid;gap:.75rem">
-      <div class="alert alert-info" style="font-size:.82rem">Role changes are pushed to the peer automatically if a peer is configured.</div>
-      <div class="form-group">
-        <label>Role</label>
-        <select id="drRoleSelect">
-          <option value="PRIMARY">🟢 PRIMARY — manages plans, pushes sync to Secondary</option>
-          <option value="SECONDARY">🟡 SECONDARY — standby, receives sync from Primary</option>
-          <option value="STANDALONE">⚪ STANDALONE — no peer, independent operation</option>
-        </select>
-      </div>
-      <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;cursor:pointer">
-        <input type="checkbox" id="drRoleForcedCheck">
-        <span>Force override (peer role-notify will not auto-change this)</span>
-      </label>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:.5rem;padding:12px 20px;border-top:1px solid var(--border)">
-      <button class="btn btn-ghost" onclick="drHideModal('drRole')">Cancel</button>
-      <button class="btn btn-primary" onclick="drSaveRole()">✅ Save Role</button>
-    </div>
-  </div>
-</div>
-
-<!-- Peer Configure Modal -->
-<div id="drPeerConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
-  <div style="max-width:520px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
-      <div style="font-size:16px;font-weight:700">🔗 Configure DR Peer</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('drPeerConfigModal').style.display='none'" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
-    </div>
-    <div style="padding:20px;display:grid;gap:.75rem">
-      <div class="alert alert-info" style="font-size:.82rem">
-        Enter the other NaSnap instance URL and an admin account. Both sides must use the <strong>same Sync Token</strong>.
-        Generate it on one side, copy it to the other.
-      </div>
-      <div id="drPeerConfigError" style="display:none;padding:.4rem .6rem;background:var(--error-bg,#2d1b1b);border:1px solid var(--error,#f85149);border-radius:4px;font-size:.8rem;color:var(--error,#f85149);word-break:break-word"></div>
-      <div class="form-group"><label>Label</label><input id="peerConfigName" placeholder="DR Site" autocomplete="off"></div>
-      <div class="form-group"><label>Peer URL <span style="font-weight:400;color:var(--muted)">e.g. https://10.230.40.113</span></label><input id="peerConfigUrl" placeholder="https://10.230.40.113" autocomplete="off"></div>
-      <div class="form-group">
-        <label>Sync Token <span style="font-weight:400;color:var(--muted)">— same value on both sides</span></label>
-        <div style="display:flex;gap:.4rem">
-          <input id="peerConfigToken" placeholder="paste token or generate new" autocomplete="off" style="flex:1">
-          <button class="btn btn-ghost btn-sm" onclick="peerGenerateToken()" style="white-space:nowrap">🔄 Generate</button>
-        </div>
-      </div>
-      <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;cursor:pointer">
-        <input type="checkbox" id="peerConfigSsl">
-        <span>Verify SSL certificate</span>
-      </label>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:.5rem;padding:12px 20px;border-top:1px solid var(--border)">
-      <button class="btn btn-ghost" onclick="document.getElementById('drPeerConfigModal').style.display='none'">Cancel</button>
-      <button class="btn btn-primary" onclick="drSavePeerConfig()">✅ Save Peer</button>
+      <button id="drAddVmManualBtn" class="btn btn-primary" onclick="drAddVmToGroup()">✅ Add VM</button>
+      <button id="drAddVmScanBtn" class="btn btn-primary" style="display:none" onclick="drAddScannedVms()">✅ Add Selected</button>
     </div>
   </div>
 </div>
@@ -13693,6 +14568,47 @@ actLogPoll();
 
 <div id="tlTooltip" style="display:none;position:fixed;z-index:9100;pointer-events:none;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:340px;line-height:1.55"></div>
 
+<!-- ══════════════ VM INFO MODAL ══════════════ -->
+<div id="vmInfoModal" role="dialog" aria-modal="true" aria-label="VM Info"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9150;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center"
+     onclick="if(event.target===this)closeVmInfoModal()">
+  <div style="max-width:720px;width:100%;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span style="font-size:15px;font-weight:700">VM Info</span>
+        <span id="vmInfo_hdr" style="font-size:13px;color:var(--muted);margin-left:4px"></span>
+      </div>
+      <button onclick="closeVmInfoModal()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
+    </div>
+
+    <div style="padding:20px;max-height:70vh;overflow-y:auto">
+      <div class="form-group">
+        <label class="form-label">Overview</label>
+        <div id="vmInfo_overview"><span class="spinner"></span></div>
+      </div>
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label">Disks</label>
+        <div id="vmInfo_disks" class="hint">—</div>
+      </div>
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label">Datastores</label>
+        <div id="vmInfo_datastores" class="hint">—</div>
+      </div>
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label">Snapshot History</label>
+        <div id="vmInfo_snaphistory" class="hint">—</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeVmInfoModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════ RESTORE WIZARD MODAL ══════════════ -->
 <div id="rwModal" role="dialog" aria-modal="true" aria-label="Restore Wizard"
      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9150;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
@@ -13721,7 +14637,8 @@ actLogPoll();
     <div id="rwStep1" style="padding:20px">
       <div class="form-group">
         <label class="form-label">Snapshot</label>
-        <select id="rw_snap" class="form-control" onchange="rwSnapChanged()" style="width:100%"></select>
+        <div id="rw_snap_picker" style="min-height:105px"></div>
+        <select id="rw_snap" class="form-control" onchange="rwSnapChanged()" style="width:100%;margin-top:6px"></select>
         <div id="rw_snap_info" class="hint"></div>
       </div>
       <div class="form-group" style="margin-top:14px">
@@ -13829,11 +14746,19 @@ actLogPoll();
 
     <!-- Step 1 -->
     <div id="cwStep1" style="padding:20px">
-      <div class="form-group">
+      <div id="cw_src_row" class="form-group" style="display:flex;gap:8px">
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:500">
+          <input type="checkbox" id="cw_src_live_cb" onchange="cwSetSource(this.checked?'live':'snapshot')">
+          Clone from live VM (current state)
+        </label>
+      </div>
+      <div id="cw_snap_picker_wrap" class="form-group">
         <label class="form-label">Snapshot to clone from</label>
-        <select id="cw_snap" class="form-control" onchange="cwSnapChanged()" style="width:100%"></select>
+        <div id="cw_snap_picker" style="min-height:105px"></div>
+        <select id="cw_snap" class="form-control" onchange="cwSnapChanged()" style="width:100%;margin-top:6px"></select>
         <div id="cw_snap_info" class="hint"></div>
       </div>
+      <div id="cw_live_note" class="hint" style="display:none"></div>
     </div>
 
     <!-- Step 2 -->
@@ -13891,6 +14816,91 @@ actLogPoll();
         <button class="btn btn-ghost" onclick="closeCloneWizard()">Cancel</button>
         <button id="cwNextBtn" class="btn btn-primary" onclick="cwNext()">Next →</button>
         <button id="cwSubmitBtn" class="btn btn-primary" onclick="doClone()" style="display:none" disabled>Start Clone</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════ BULK MIGRATE WIZARD MODAL ══════════════ -->
+<div id="bulkMigrateModal" role="dialog" aria-modal="true" aria-label="Bulk Migrate"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9150;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
+  <div style="max-width:640px;width:100%;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 8H8m0 0l4-4M8 8l4 4M3 16h13m0 0l-4-4m4 4l-4 4"/></svg>
+        <span style="font-size:15px;font-weight:700">Bulk Migrate</span>
+        <span id="bm_vm_hdr" style="font-size:13px;color:var(--muted);margin-left:4px"></span>
+      </div>
+      <button onclick="closeBulkMigrateWizard()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
+    </div>
+
+    <!-- Step pills -->
+    <div style="padding:16px 20px 0">
+      <div style="display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--border)">
+        <div id="bmPill1" class="setup-step-pill active">① Select VMs</div>
+        <div id="bmPill2" class="setup-step-pill">② Target Datastore</div>
+        <div id="bmPill3" class="setup-step-pill">③ Confirm</div>
+      </div>
+    </div>
+
+    <!-- Step 1: VM picker -->
+    <div id="bmStep1" style="padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <label class="form-label" style="margin:0">VMs on this datastore</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="bm_sel_count" style="font-size:11px;color:var(--muted)">0 VMs selected</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="bmSelectAll()">Select all</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="bmSelectNone()">Select none</button>
+        </div>
+      </div>
+      <div id="bm_vm_list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+    </div>
+
+    <!-- Step 2: target datastore -->
+    <div id="bmStep2" style="display:none;padding:20px">
+      <label class="form-label">Target datastore</label>
+      <div id="bm_target_list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+    </div>
+
+    <!-- Step 3: options + confirm -->
+    <div id="bmStep3" style="display:none;padding:20px">
+      <div class="form-group">
+        <label class="form-label">Parallel migrations</label>
+        <select id="bm_max_parallel" class="form-control" style="width:160px">
+          <option value="1">1 (sequential)</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-top:14px">
+        <table style="font-size:13px;width:100%;border-collapse:collapse">
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0;white-space:nowrap">VMs to migrate</td><td id="bm_sum_count"></td></tr>
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0">From</td><td id="bm_sum_source"></td></tr>
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0">To</td><td id="bm_sum_target"></td></tr>
+        </table>
+        <div id="bm_sum_vmlist" style="margin-top:10px;max-height:120px;overflow-y:auto;font-size:12px"></div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:rgba(240,173,78,.12);border:1px solid rgba(240,173,78,.35);border-radius:6px;font-size:12px;color:var(--warning,#e09600)">
+        Source disks are deleted from the source datastore after each VM's disks are successfully moved.
+      </div>
+      <div id="bm_running_note" style="display:none;margin-top:8px;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--muted)">
+        Some selected VMs are currently running. Live QEMU disk moves are generally safe; LXC volume moves may have more restrictions depending on mount type.
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg)">
+      <button id="bmBackBtn" class="btn btn-secondary" onclick="bmBack()" style="display:none">← Back</button>
+      <span></span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeBulkMigrateWizard()">Cancel</button>
+        <button id="bmNextBtn" class="btn btn-primary" onclick="bmNext()" disabled>Next →</button>
+        <button id="bmSubmitBtn" class="btn btn-primary" onclick="doBulkMigrate()" style="display:none">Start Migration</button>
       </div>
     </div>
 
@@ -14118,10 +15128,14 @@ var _sfrSvgLinux   = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none
 var _sfrSvgNoAgent = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="vertical-align:middle;flex-shrink:0;opacity:.4"><circle cx="6.5" cy="6.5" r="5"/><line x1="4" y1="6.5" x2="9" y2="6.5"/></svg>';
 
 function _sfrOsIcon(os_id, qga_ok) {
-  if (!qga_ok) return _sfrSvgNoAgent;
   var id = (os_id || '').toLowerCase();
+  // Show the OS-specific icon whenever we know the OS (even from a stale
+  // cached value) — only fall back to the "no agent" glyph when there is
+  // truly no OS info at all.
+  if (!qga_ok && !id) return _sfrSvgNoAgent;
   if (id.indexOf('windows') >= 0 || id === 'mswindows') return _sfrSvgWindows;
-  return _sfrSvgLinux;
+  if (id) return _sfrSvgLinux;
+  return _sfrSvgNoAgent;
 }
 
 async function _sfrLoadVmOsInfo(vmid, mappingId) {
@@ -14178,14 +15192,22 @@ function _sfrApplyOsInfo(key, info) {
   var btnEl   = document.getElementById('sfrbtn_'  + key);
   if (!iconEl) return;
   var ico = _sfrOsIcon(info.os_id, info.qga_ok);
-  var tip = info.qga_ok
-    ? (info.os_name || info.guest_os)
-    : 'Guest Agent not running — Single File Restore unavailable';
-  // Rebuild innerHTML: SVG icon + label span
-  var labelText = info.qga_ok ? (info.os_name || info.guest_os || '') : '';
-  iconEl.innerHTML = ico + '<span id="oslabel_'+key+'" style="font-size:11px">'+esc(labelText)+'</span>';
-  iconEl.title     = tip;
-  iconEl.style.opacity = '1';
+  // Keep showing the last known OS even when the live probe failed (VM off/
+  // unreachable) — info.stale marks a value that came from the server-side
+  // cache rather than a fresh probe. Only truly unknown VMs get a blank label.
+  var labelText = info.os_name || info.guest_os || '';
+  var tip;
+  if (info.qga_ok) {
+    tip = info.os_name || info.guest_os;
+  } else if (info.stale) {
+    tip = labelText + ' (last known — Guest Agent not currently reachable)';
+  } else {
+    tip = 'Guest Agent not running — Single File Restore unavailable';
+  }
+  iconEl.innerHTML = ico + '<span id="oslabel_'+key+'" style="font-size:11px'
+    + (info.stale ? ';font-style:italic' : '') + '">'+esc(labelText)+'</span>';
+  iconEl.title = tip;
+  iconEl.style.opacity = info.qga_ok ? '1' : (labelText ? '.65' : '.3');
   if (btnEl) {
     if (info.qga_ok) {
       btnEl.disabled      = false;
@@ -14196,7 +15218,9 @@ function _sfrApplyOsInfo(key, info) {
       btnEl.disabled      = true;
       btnEl.style.opacity = '.25';
       btnEl.style.cursor  = 'not-allowed';
-      btnEl.title = 'Guest Agent not running';
+      btnEl.title = info.stale
+        ? 'Guest Agent not currently reachable (VM stopped or not found) — showing last known OS'
+        : 'Guest Agent not running';
     }
   }
 }
@@ -15236,9 +16260,7 @@ var _helpData = {
   dr: {
     title: { en: 'Disaster Recovery', de: 'Disaster Recovery' },
     en: '<h3>Overview</h3>'
-      + '<p>The Disaster Recovery tab manages SnapMirror-based DR workflows between two NaSnap instances (primary and secondary site).</p>'
-      + '<h3>DR Peer</h3>'
-      + '<p>Configure the URL and credentials of the secondary NaSnap instance. Once connected, NaSnap can read SnapMirror replica snapshots at the secondary site and offer restore/clone from there.</p>'
+      + '<p>The Disaster Recovery tab manages SnapMirror-based DR workflows. One NaSnap instance holds both the production and DR-site ONTAP/PVE credentials and runs the whole failover locally — no second NaSnap installation is needed. If this instance itself is affected by a disaster, restore/redeploy it first (its configuration is included in the regular DB backup), then run failover from there.</p>'
       + '<h3>DR Plans</h3>'
       + '<p>Define named recovery plans that group one or more datastores and their associated VMs. Each plan can be triggered manually to:</p><ul>'
       + '<li>Fail over VMs to the DR site (mount replica volumes, register VMs on target PVE).</li>'
@@ -15251,9 +16273,7 @@ var _helpData = {
       + '<li><strong>✏ Edit / 🗑 Delete</strong> — Manage plan entries and groups.</li>'
       + '</ul>',
     de: '<h3>Übersicht</h3>'
-      + '<p>Der Disaster-Recovery-Tab verwaltet SnapMirror-basierte DR-Workflows zwischen zwei NaSnap-Instanzen (Primär- und Sekundärstandort).</p>'
-      + '<h3>DR Peer</h3>'
-      + '<p>URL und Zugangsdaten der sekundären NaSnap-Instanz konfigurieren. Danach kann NaSnap SnapMirror-Replikat-Snapshots am Sekundärstandort lesen und Wiederherstellungen/Klone von dort anbieten.</p>'
+      + '<p>Der Disaster-Recovery-Tab verwaltet SnapMirror-basierte DR-Workflows. Eine NaSnap-Instanz hält sowohl die Produktions- als auch die DR-seitigen ONTAP/PVE-Zugangsdaten und führt das komplette Failover lokal aus — eine zweite NaSnap-Installation ist nicht nötig. Ist diese Instanz selbst von einem Ausfall betroffen, zuerst wiederherstellen/neu aufsetzen (die Konfiguration ist im regulären DB-Backup enthalten), danach das Failover von dort ausführen.</p>'
       + '<h3>DR-Pläne</h3>'
       + '<p>Benannte Wiederherstellungspläne definieren, die einen oder mehrere Datastores und deren VMs gruppieren. Jeder Plan kann manuell ausgeführt werden:</p><ul>'
       + '<li>Failover von VMs auf den DR-Standort (Replikat-Volumes einbinden, VMs auf Ziel-PVE registrieren).</li>'

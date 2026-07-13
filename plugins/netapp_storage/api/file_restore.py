@@ -51,6 +51,38 @@ def _touch(db, sid):
     db.execute("UPDATE netapp_sfr_sessions SET last_active=? WHERE id=?", (_utcnow(), sid))
 
 
+def _os_cache_get(db, vmid, mapping_id):
+    row = db.query_one(
+        "SELECT guest_os, os_name, os_id FROM netapp_vm_os_cache WHERE vmid=? AND mapping_id=?",
+        (int(vmid), mapping_id),
+    )
+    return dict(row) if row else None
+
+
+def _os_cache_upsert(db, vmid, mapping_id, guest_os, os_name, os_id):
+    if not os_name and not guest_os:
+        return
+    db.execute(
+        "INSERT OR REPLACE INTO netapp_vm_os_cache (vmid, mapping_id, guest_os, os_name, os_id, updated_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (int(vmid), mapping_id, guest_os or "", os_name or "", os_id or "", _utcnow()),
+    )
+
+
+def _os_cache_fallback(db, vmid, mapping_id, base):
+    """On a failed/negative live probe, returns the last known OS from cache
+    (marked stale) instead of a blank result — VMs that are stopped or no
+    longer live keep showing their last valid OS info."""
+    try:
+        cached = _os_cache_get(db, vmid, mapping_id)
+    except Exception:
+        cached = None
+    if cached and (cached.get("os_name") or cached.get("guest_os")):
+        return {**base, "guest_os": cached.get("guest_os") or base.get("guest_os", "linux"),
+                "os_name": cached.get("os_name", ""), "os_id": cached.get("os_id", ""), "stale": True}
+    return base
+
+
 def _pve_for_mapping(db, mapping):
     """Try mapping's pve_cluster_id first, then fall back to any configured PVE host."""
     candidate = (mapping or {}).get("pve_cluster_id", "")
@@ -220,23 +252,26 @@ def _vm_qga_info():
         pve, _ = _pve_for_mapping(db, mapping)
         node = pve.find_vm_node(int(vmid))
         if not node:
-            return {"qga_ok": False, "guest_os": "linux", "os_name": "VM not found", "os_id": ""}
+            return _os_cache_fallback(db, vmid, mapping_id,
+                {"qga_ok": False, "guest_os": "linux", "os_name": "VM not found", "os_id": ""})
         osinfo = sfr_engine.get_osinfo(pve, vmid, node)
         if osinfo is None:
             # get-osinfo not supported by this QGA version — fall back
             if not sfr_engine.check_qga(pve, vmid, node):
-                return {"qga_ok": False, "guest_os": "linux", "os_name": "Agent not running", "os_id": ""}
+                return _os_cache_fallback(db, vmid, mapping_id,
+                    {"qga_ok": False, "guest_os": "linux", "os_name": "Agent not running", "os_id": ""})
             guest_os = sfr_engine.detect_guest_os(pve, vmid, node)
-            return {
-                "qga_ok":   True,
-                "guest_os": guest_os,
-                "os_name":  "Windows" if guest_os == "windows" else "Linux",
-                "os_id":    "mswindows" if guest_os == "windows" else "linux",
-            }
+            os_name = "Windows" if guest_os == "windows" else "Linux"
+            os_id   = "mswindows" if guest_os == "windows" else "linux"
+            _os_cache_upsert(db, vmid, mapping_id, guest_os, os_name, os_id)
+            return {"qga_ok": True, "guest_os": guest_os, "os_name": os_name, "os_id": os_id}
+        _os_cache_upsert(db, vmid, mapping_id, osinfo.get("guest_os", ""),
+                          osinfo.get("os_name", ""), osinfo.get("os_id", ""))
         return {"qga_ok": True, **osinfo}
     except Exception as e:
         log.debug(f"[sfr] vm_qga_info {vmid}: {e}")
-        return {"qga_ok": False, "guest_os": "linux", "os_name": "Unavailable", "os_id": ""}
+        return _os_cache_fallback(db, vmid, mapping_id,
+            {"qga_ok": False, "guest_os": "linux", "os_name": "Unavailable", "os_id": ""})
 
 
 def _vm_qga_info_batch():
@@ -289,28 +324,34 @@ def _vm_qga_info_batch():
         vmid = str(vm_spec.get("vmid", "")).strip()
         mid  = str(vm_spec.get("mapping_id", "")).strip()
         base = {"vmid": vmid, "mapping_id": mid}
+        # Own DB connection per worker thread — SQLite connections aren't thread-safe.
+        tdb = get_db()
         if not vmid or mid not in pve_by_mid:
-            return {**base, "qga_ok": False, "guest_os": "linux", "os_name": "", "os_id": ""}
+            return _os_cache_fallback(tdb, vmid, mid,
+                {**base, "qga_ok": False, "guest_os": "linux", "os_name": "", "os_id": ""})
         try:
             pve  = pve_by_mid[mid]
             node = nodes_by_base.get(pve._base, {}).get(vmid)
             if not node:
-                return {**base, "qga_ok": False, "guest_os": "linux",
-                        "os_name": "VM not found", "os_id": ""}
+                return _os_cache_fallback(tdb, vmid, mid,
+                    {**base, "qga_ok": False, "guest_os": "linux", "os_name": "VM not found", "os_id": ""})
             osinfo = sfr_engine.get_osinfo(pve, vmid, node)
             if osinfo is None:
                 if not sfr_engine.check_qga(pve, vmid, node):
-                    return {**base, "qga_ok": False, "guest_os": "linux",
-                            "os_name": "Agent not running", "os_id": ""}
+                    return _os_cache_fallback(tdb, vmid, mid,
+                        {**base, "qga_ok": False, "guest_os": "linux", "os_name": "Agent not running", "os_id": ""})
                 guest_os = sfr_engine.detect_guest_os(pve, vmid, node)
-                return {**base, "qga_ok": True, "guest_os": guest_os,
-                        "os_name": "Windows" if guest_os == "windows" else "Linux",
-                        "os_id":   "mswindows" if guest_os == "windows" else "linux"}
+                os_name = "Windows" if guest_os == "windows" else "Linux"
+                os_id   = "mswindows" if guest_os == "windows" else "linux"
+                _os_cache_upsert(tdb, vmid, mid, guest_os, os_name, os_id)
+                return {**base, "qga_ok": True, "guest_os": guest_os, "os_name": os_name, "os_id": os_id}
+            _os_cache_upsert(tdb, vmid, mid, osinfo.get("guest_os", ""),
+                              osinfo.get("os_name", ""), osinfo.get("os_id", ""))
             return {**base, "qga_ok": True, **osinfo}
         except Exception as exc:
             log.debug(f"[sfr] batch probe {vmid}: {exc}")
-            return {**base, "qga_ok": False, "guest_os": "linux",
-                    "os_name": "Unavailable", "os_id": ""}
+            return _os_cache_fallback(tdb, vmid, mid,
+                {**base, "qga_ok": False, "guest_os": "linux", "os_name": "Unavailable", "os_id": ""})
 
     max_workers = min(len(vms), 12)
     with _cf.ThreadPoolExecutor(max_workers=max_workers) as pool:

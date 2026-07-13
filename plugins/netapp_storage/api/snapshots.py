@@ -199,9 +199,32 @@ def _update_endpoint():
 
 def _list_pve_hosts():
     db = get_db()
-    rows = db.query("SELECT id, name, host, port, username, ssl_verify, nfs_ip, created_at "
-                    "FROM netapp_pve_hosts ORDER BY name")
+    rows = db.query(
+        "SELECT h.id, h.name, h.host, h.port, h.username, h.ssl_verify, h.nfs_ip, "
+        "h.cluster_group_id, h.created_at, c.name AS cluster_name "
+        "FROM netapp_pve_hosts h LEFT JOIN netapp_pve_clusters c ON c.id = h.cluster_group_id "
+        "ORDER BY c.name, h.name"
+    )
     return [dict(r) for r in rows]
+
+
+def _list_pve_clusters():
+    db = get_db()
+    rows = db.query("SELECT * FROM netapp_pve_clusters ORDER BY name")
+    return [dict(r) for r in rows]
+
+
+def _ensure_cluster_group(db, cluster_name):
+    """Returns the id of the netapp_pve_clusters row for cluster_name, creating it if needed."""
+    row = db.query_one("SELECT id FROM netapp_pve_clusters WHERE name=?", (cluster_name,))
+    if row:
+        return row["id"]
+    cid = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO netapp_pve_clusters (id, name, created_at) VALUES (?,?,?)",
+        (cid, cluster_name, datetime.now(timezone.utc).isoformat()),
+    )
+    return cid
 
 
 def _add_pve_host():
@@ -217,13 +240,14 @@ def _add_pve_host():
     now = datetime.now(timezone.utc).isoformat()
     db.execute(
         "INSERT INTO netapp_pve_hosts (id, name, host, port, username, password_encrypted, "
-        "ssl_verify, nfs_ip, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "ssl_verify, nfs_ip, cluster_group_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (hid, data["name"], data["host"],
          int(data.get("port", 8006)),
          data["username"],
          db._encrypt(data["password"]),
          1 if data.get("ssl_verify", False) else 0,
          data.get("nfs_ip", "").strip(),
+         (data.get("cluster_group_id") or "").strip(),
          now),
     )
     return {"success": True, "id": hid}
@@ -267,7 +291,22 @@ def _discover_pve_cluster():
         if not r.ok:
             return {"error": f"Failed to fetch nodes: HTTP {r.status_code}"}, 400
 
+        # /cluster/status tells us whether this is a real multi-node cluster
+        # (type == "cluster") and its name — /nodes alone doesn't expose this.
+        cluster_name = ""
+        try:
+            cr = pve._api_get(f"{pve._base}/cluster/status")
+            if cr.ok:
+                for item in cr.json().get("data", []):
+                    if item.get("type") == "cluster":
+                        cluster_name = item.get("name", "")
+                        break
+        except Exception:
+            pass
+
         db = get_db()
+        cluster_group_id = _ensure_cluster_group(db, cluster_name) if cluster_name else ""
+
         existing_hosts = {row["host"] for row in db.query("SELECT host FROM netapp_pve_hosts")}
         existing_names = {row["name"] for row in db.query("SELECT name FROM netapp_pve_hosts")}
 
@@ -305,7 +344,10 @@ def _discover_pve_cluster():
                     or node_name in existing_names
                 ),
             })
-        return {"success": True, "nodes": nodes}
+        return {
+            "success": True, "nodes": nodes,
+            "cluster_name": cluster_name, "cluster_group_id": cluster_group_id,
+        }
     except Exception as exc:
         return {"error": str(exc)}, 400
 
@@ -371,6 +413,58 @@ def _test_pve_host():
         return {"success": True, "pve_version": version, "nodes": nodes}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+def _detect_pve_host_cluster():
+    """POST pve-hosts/detect-cluster {host_id} — group an already-added host (and
+    any sibling hosts already known to NaSnap) under a real PVE cluster, using
+    the host's own stored credentials. For hosts added individually before
+    cluster grouping existed."""
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    hid = (data.get("host_id") or "").strip()
+    if not hid:
+        return {"error": "host_id required"}, 400
+    db = get_db()
+    try:
+        from ..core._helpers import build_pve_client
+        pve = build_pve_client(db, hid)
+
+        cluster_name = ""
+        cr = pve._api_get(f"{pve._base}/cluster/status")
+        if cr.ok:
+            for item in cr.json().get("data", []):
+                if item.get("type") == "cluster":
+                    cluster_name = item.get("name", "")
+                    break
+        if not cluster_name:
+            return {"success": True, "grouped": False,
+                    "message": "This host is not part of a multi-node PVE cluster."}
+
+        nr = pve._api_get(f"{pve._base}/nodes")
+        node_ips = set()
+        node_names = set()
+        if nr.ok:
+            for n in nr.json().get("data", []):
+                if n.get("node"):
+                    node_names.add(n["node"])
+                if n.get("ip"):
+                    node_ips.add(n["ip"].strip())
+
+        cluster_group_id = _ensure_cluster_group(db, cluster_name)
+        rows = db.query("SELECT id, host, name FROM netapp_pve_hosts") or []
+        matched = []
+        for row in rows:
+            if row["id"] == hid or row["host"] in node_ips or row["name"] in node_names or row["host"] in node_names:
+                db.execute("UPDATE netapp_pve_hosts SET cluster_group_id=? WHERE id=?",
+                           (cluster_group_id, row["id"]))
+                matched.append(row["id"])
+        return {"success": True, "grouped": True, "cluster_name": cluster_name,
+                "cluster_group_id": cluster_group_id, "matched_host_ids": matched}
+    except Exception as exc:
+        return {"error": str(exc)}, 400
 
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
@@ -679,6 +773,17 @@ def _do_fetch_vms_for_mapping(mapping_id: str) -> list:
     host_ids = [r["pve_cluster_id"] for r in host_rows]
     if mapping["pve_cluster_id"] not in host_ids:
         host_ids.insert(0, mapping["pve_cluster_id"])
+    # Fallback candidates in case every host tied to this volume was since
+    # removed from netapp_pve_hosts (dangling pve_cluster_id reference) —
+    # any other configured host in the same cluster can usually still list
+    # this shared storage's content and cluster/resources.
+    other_rows = db.query(
+        "SELECT id FROM netapp_pve_hosts WHERE id NOT IN ({}) LIMIT 5".format(
+            ",".join("?" * len(host_ids)) or "''"
+        ),
+        tuple(host_ids),
+    ) if host_ids else db.query("SELECT id FROM netapp_pve_hosts LIMIT 5")
+    host_ids += [r["id"] for r in (other_rows or [])]
 
     storage_vmids: set = set()
     vm_info_map: dict  = {}
@@ -719,6 +824,71 @@ def _do_fetch_vms_for_mapping(mapping_id: str) -> list:
     ]
 
 
+_VM_INFO_DISK_KEY_PREFIXES = ("scsi", "virtio", "ide", "sata", "efidisk", "tpmstate", "rootfs", "mp")
+
+
+def _vm_info():
+    """Single-VM overview: live status/node, disks (with size), datastores.
+
+    Synchronous, single-VM, user-initiated (opened from the row actions menu) —
+    the WORKERS=1 blocking-cache constraint that applies to list-load endpoints
+    doesn't apply here.
+    """
+    from ..core._helpers import get_mapping, pve_for_mapping, parse_disk_size
+
+    vmid = request.args.get("vmid", "")
+    mapping_id = request.args.get("mapping_id", "")
+    if not vmid or not mapping_id:
+        return {"error": "vmid and mapping_id required"}, 400
+    vmid = int(vmid)
+
+    db = get_db()
+    try:
+        mapping = get_mapping(db, mapping_id)
+        mgr, _hid = pve_for_mapping(db, mapping)
+    except Exception as exc:
+        return {"error": str(exc)}, 400
+
+    storage_id = mapping["pve_storage_id"]
+    node = None
+    vm_type = "qemu"
+    disks = []
+    try:
+        node = mgr.find_vm_node(vmid)
+        if node:
+            cfg = {}
+            for vtype in ("qemu", "lxc"):
+                ep = "qemu" if vtype == "qemu" else "lxc"
+                r = mgr._api_get(f"{mgr._base}/nodes/{node}/{ep}/{vmid}/config")
+                if r.ok:
+                    cfg = r.json().get("data", {})
+                    vm_type = vtype
+                    break
+            for k, v in cfg.items():
+                if not any(k.startswith(p) for p in _VM_INFO_DISK_KEY_PREFIXES):
+                    continue
+                if f"{storage_id}:" not in str(v):
+                    continue
+                file_part = str(v).split(f"{storage_id}:")[1].split(",")[0].strip()
+                disks.append({
+                    "key": k,
+                    "storage": storage_id,
+                    "file": file_part,
+                    "size_bytes": parse_disk_size(v),
+                })
+    except Exception as exc:
+        log.debug(f"[netapp_storage] vm-info {vmid}/{mapping_id}: {exc}")
+
+    return {
+        "vmid": vmid,
+        "found_in_pve": bool(node),
+        "node": node or "",
+        "vm_type": vm_type,
+        "disks": disks,
+        "datastores": sorted(set(d["storage"] for d in disks)) or [storage_id],
+    }
+
+
 def _refresh_vm_cache_bg(mapping_id: str) -> None:
     """Background thread: refresh one mapping's VM list and store in cache."""
     try:
@@ -730,6 +900,42 @@ def _refresh_vm_cache_bg(mapping_id: str) -> None:
     finally:
         with _vm_cache_lock:
             _vm_refreshing.discard(mapping_id)
+
+
+def _vms_for_mapping_batch():
+    """Non-blocking batch version for the VMs list's live-status badge.
+
+    POST body: {"mapping_ids": [...]}
+    Returns immediately for every mapping already cached (warm or stale — a
+    stale entry also kicks its own background refresh, same as the single
+    endpoint). Mappings never seen before are NOT fetched inline — a
+    background thread is kicked off and the mapping is simply omitted from
+    the response this time; the frontend caches per-mapping and will pick it
+    up on next reload once the cache is warm. This guarantees the request
+    itself never performs a blocking PVE call, no matter how many mappings
+    or how many are cold, which matters under Gunicorn WORKERS=1.
+    """
+    data = request.get_json() or {}
+    mapping_ids = data.get("mapping_ids") or []
+    now = time.monotonic()
+    results = {}
+    for mapping_id in mapping_ids:
+        with _vm_cache_lock:
+            entry      = _vm_cache.get(mapping_id)
+            refreshing = mapping_id in _vm_refreshing
+        if entry:
+            results[mapping_id] = entry["vms"]
+            if now - entry["ts"] >= _VM_CACHE_TTL and not refreshing:
+                with _vm_cache_lock:
+                    _vm_refreshing.add(mapping_id)
+                threading.Thread(target=_refresh_vm_cache_bg,
+                                 args=(mapping_id,), daemon=True).start()
+        elif not refreshing:
+            with _vm_cache_lock:
+                _vm_refreshing.add(mapping_id)
+            threading.Thread(target=_refresh_vm_cache_bg,
+                             args=(mapping_id,), daemon=True).start()
+    return {"results": results}
 
 
 def _vms_for_mapping():
@@ -1175,6 +1381,8 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "pve-hosts/update", _update_pve_host)
     register_plugin_route(PLUGIN_ID, "pve-hosts/delete", _delete_pve_host)
     register_plugin_route(PLUGIN_ID, "pve-hosts/test", _test_pve_host)
+    register_plugin_route(PLUGIN_ID, "pve-hosts/detect-cluster", _detect_pve_host_cluster)
+    register_plugin_route(PLUGIN_ID, "pve-clusters", _list_pve_clusters)
 
     register_plugin_route(PLUGIN_ID, "volume-mappings", _list_mappings)
     register_plugin_route(PLUGIN_ID, "volume-mappings/delete", _delete_mapping)
@@ -1187,6 +1395,8 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "snapshots/delete", _delete_snapshot)
     register_plugin_route(PLUGIN_ID, "snapshots/volumes", _list_ontap_volumes)
     register_plugin_route(PLUGIN_ID, "snapshots/vms-for-mapping", _vms_for_mapping)
+    register_plugin_route(PLUGIN_ID, "snapshots/vms-for-mapping-batch", _vms_for_mapping_batch)
+    register_plugin_route(PLUGIN_ID, "snapshots/vm-info", _vm_info)
     register_plugin_route(PLUGIN_ID, "snapshots/manifest", _snapshot_manifest)
     register_plugin_route(PLUGIN_ID, "snapshots/protection-summary", _protection_summary)
 

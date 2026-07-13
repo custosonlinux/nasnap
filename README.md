@@ -21,7 +21,8 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
 - **Lock snapshots** with ONTAP Snapshot Locking (WORM / tamperproof) — set an expiry time that prevents deletion even by ONTAP admins, protecting against ransomware and accidental removal. Independent locking for source and SnapMirror destination.
 - **Provision** new SAN datastores end-to-end (iSCSI and NVMe-oF): ONTAP volume + LUN/namespace + iGroup/subsystem creation, host-side iSCSI/NVMe setup, LVM VG creation, and PVE storage registration — in a single wizard.
-- **Import VMs from Datastore** *(Alpha)* — adopt an existing ONTAP volume with live VMs without reprovisioning. Reads the snapmanifest from the volume, reconstructs VM inventory, reassigns VMIDs on conflicts, and registers the datastore.
+- **Disaster Recovery** *(In Development)* — single-instance DR: SnapMirror-based failover (planned/emergency) with ordered VM boot groups, and a **Recover VMs** wizard that provisions a fresh or existing standby cluster with storage, then imports and restarts the VMs from it. No second coordinating NaSnap instance required — the same instance manages both the primary and DR side.
+- **Bulk Migrate** — move a set of VMs from one datastore to another with live progress tracking, driven entirely from NaSnap (something Proxmox has no built-in equivalent for).
 - **Datastore Index** — every NFS snapshot is self-describing via a `.nasnap/index.json` file written before each ONTAP snapshot. The index travels inside the snapshot, enabling import of historical snapshots on any NaSnap instance without a database — even after a complete reinstall. An optional startup auto-scan reconciles all visible datastores automatically.
 - **Manage users** — built-in admin/viewer roles with Argon2id password hashing and AES-256-GCM encrypted ONTAP credentials.
 - **Active Directory / LDAP authentication** *(Beta)* — connect NaSnap to your AD domain. Users authenticate with their AD credentials; group membership determines the role (Admin or Viewer). Local accounts always remain active as a fallback — even when AD is unreachable.
@@ -55,12 +56,12 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Storage Provisioning (auto-setup) | ✅ | 🟡 Beta | 🟡 Beta |
 | Storage Resize | ✅ grow & shrink | 🟡 Beta grow only | 🟡 Beta grow only |
 | Job Cancellation | ✅ | 🟡 Beta | 🟡 Beta |
-| Import VMs from Datastore (adopt existing volumes with VMs) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
+| Recover VMs from Datastore (adopt existing volumes with VMs, DR tab) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Datastore Index (self-describing index per snapshot) | ✅ NFS | ✅ snapmanifest LV | ✅ snapmanifest LV |
 | Startup auto-scan (reconcile index into DB on start) | ✅ | ✅ | ✅ |
 | PVE Host Maintenance (check/clean stale mounts, SFR dirs, LVM VGs; verify storage stack packages & services) | ✅ | ✅ | ✅ |
 | Dashboard (7-day stats, timeline, protection overview, alerts) | ✅ | ✅ | ✅ |
-| Full DR Failover (planned & emergency) | 🔵 In Development | 🔵 In Development | 🔵 In Development |
+| Full DR Failover (planned & emergency, single-instance) | 🔵 In Development | 🔄 Planned | 🔄 Planned |
 | DR Test via FlexClone | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 | DR Failback | 🔄 Planned | 🔄 Planned | 🔄 Planned |
 
@@ -77,6 +78,8 @@ These features are application-level and independent of the storage protocol.
 | AES-256-GCM Credential Encryption at Rest | ✅ |
 | DB Export / Import (full config + user backup) | ✅ |
 | Dark / Light / Liquid Glass Theme | ✅ |
+| PVE Cluster Grouping (auto-detected via `/cluster/status`, Settings → PVE Hosts) | 🟠 Alpha |
+| Bulk Migrate (move VMs between datastores with live progress) | 🟠 Alpha |
 
 ¹ NVMe Single VM Restore and Clone on ASA use a full volume clone via the ONTAP CLI bridge (`private/cli/volume/clone`). Direct namespace clone APIs are not available on ASA, but the volume clone approach achieves identical results.
 
@@ -547,7 +550,7 @@ If a clone or restore job fails after the temporary ONTAP LUN was mapped to the 
 2. Disable I/O queuing: `multipathd disablequeueing map <WWID>`
 3. Flush the device: `multipath -f <WWID>`
 4. Remove stale SCSI paths: `echo 1 > /sys/block/<dev>/device/delete` for each path
-5. Delete the temporary ONTAP clone volume (named `pgxclone_<job_id>` in current builds) via System Manager or CLI
+5. Delete the temporary ONTAP clone volume (named `nsclone_<job_id>` in current builds) via System Manager or CLI
 6. Verify: `multipath -ll` and `vgs` must return cleanly
 
 ### SQLite "database is locked"
@@ -666,15 +669,15 @@ dd if=<src_lv> of=<dst_lv> bs=512M iflag=direct oflag=direct conv=fsync
 
 ### Temporary ONTAP objects
 
-All temporary objects created during a clone or restore operation are deleted automatically when the job completes or fails. The naming patterns below reflect the current build; they will be updated to a `nasnap_` prefix in a future release.
+All temporary objects created during a clone or restore operation are deleted automatically when the job completes or fails.
 
 | Object | Pattern |
 |---|---|
-| NFS FlexClone volume | `pgxclone_{job_id[:8]}` |
-| iSCSI temporary LUN | `pgxclone_{job_id[:8]}` |
-| NVMe temporary namespace | `pgxclone_{job_id[:8]}` |
-| DR FlexClone volume (on secondary) | `pgxdrclone_{job_id[:8]}` |
-| DR temporary iGroup (on secondary) | `pgxdr_{job_id[:8]}` |
+| NFS FlexClone volume | `nsclone_{job_id[:8]}` |
+| iSCSI temporary LUN | `nsclone_{job_id[:8]}` |
+| NVMe temporary namespace | `nsclone_{job_id[:8]}` |
+| DR FlexClone volume (on secondary) | `nsdrclone_{job_id[:8]}` |
+| DR temporary iGroup/subsystem (on secondary) | `nsdr_{job_id[:8]}` |
 
 ### SAN: LVM objects on Proxmox
 
@@ -789,10 +792,14 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | POST | `endpoints/update` | Update endpoint |
 | POST | `endpoints/delete` | Delete endpoint |
 | POST | `endpoints/test` | Test connectivity |
-| GET | `pve-hosts` | List Proxmox hosts |
-| POST | `pve-hosts/add` | Add host |
+| GET | `pve-hosts` | List Proxmox hosts, grouped by cluster |
+| POST | `pve-hosts/add` | Add host (optional `cluster_group_id`) |
+| POST | `pve-hosts/update` | Update host |
 | POST | `pve-hosts/delete` | Delete host |
 | POST | `pve-hosts/test` | Test SSH connectivity |
+| POST | `pve-hosts/discover` | Discover all nodes of a PVE cluster from one seed host |
+| POST | `pve-hosts/detect-cluster` | Detect and persist cluster grouping for an already-registered host |
+| GET | `pve-clusters` | List known PVE cluster groups |
 | GET | `volume-mappings` | List volume mappings |
 | POST | `volume-mappings/delete` | Delete a volume mapping |
 | POST | `discover` | Run auto-discovery |
@@ -858,24 +865,21 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | GET | `provisioning/recovery/scan-volumes` | Scan ONTAP volumes for existing datastores |
 | GET | `provisioning/recovery/manifests` | Read snapmanifest from an existing volume |
 | POST | `provisioning/recovery/bind` | Adopt an existing volume as a NaSnap datastore |
-| POST | `provisioning/recovery/restore-vms` | Import VM configs from a bound datastore |
+| POST | `provisioning/recovery/restore-vms` | Recover VM configs from a bound datastore (optional `start_after` to start VMs once written) |
 | GET | `provisioning/recovery/used-vmids` | List VMIDs in use on the target cluster |
 | GET | `provisioning/datastores/index` | Read `.nasnap/index.json` from a datastore (`?mapping_id=` or `?pve_storage_id=`) |
 | POST | `provisioning/datastores/scan` | Scan index and reconcile snapshots into DB (single datastore) |
+| POST | `storage/bulk-migrate-start` | Start a Bulk Migrate job (move a set of VMs from one datastore to another) |
 | POST | `provisioning/datastores/scan-all` | Scan all NFS datastores in the background and reconcile |
 | POST | `provisioning/datastores/reindex` | Force-rewrite `.nasnap/index.json` from DB records |
 | GET/POST | `provisioning/plugin-settings` | Read/write plugin-wide settings (`auto_scan_on_startup`) |
 
 ### Disaster Recovery
 
+Single-instance model — one NaSnap instance manages both the primary and DR side directly using its own registered ONTAP/PVE credentials; there is no peer/role/heartbeat concept between two NaSnap deployments.
+
 | Method | Path | Description |
 |---|---|---|
-| GET | `dr/role` | Current DR role (PRIMARY / SECONDARY / STANDALONE) + peer status |
-| POST | `dr/role/set` | Set DR role |
-| GET | `dr/peer/status` | Peer configuration + live connectivity |
-| POST | `dr/peer/configure` | Store peer URL, credentials, and sync token |
-| POST | `dr/peer/remove` | Remove peer |
-| POST | `dr/peer/sync/push` | Trigger immediate config sync to peer |
 | GET | `dr/plans` | List DR plans |
 | POST | `dr/plans/create` | Create DR plan |
 | GET | `dr/plans/detail` | DR plan details (`?plan_id=`) |
@@ -969,7 +973,7 @@ DEBUG=1 .venv/bin/python app.py
 
 - **Configurable port + TLS** — set the listening port and HTTP/HTTPS mode in Settings → Server/Network. Self-signed certificates are auto-generated in `/data/tls/`. The container uses `network_mode: host` so port changes take effect on restart without editing `docker-compose.yml`.
 - **DR tab toggle** — Settings → UI Features lets you disable (hide) the Disaster Recovery tab for environments without a DR site.
-- **DR Failover *(In Development)*** — Peer-to-peer DR between two NaSnap instances with PRIMARY/SECONDARY roles, background heartbeat, config sync, DR plans with ordered VM boot groups, precheck, and planned/emergency failover are implemented. Still in active development and testing.
+- **DR Failover *(In Development)*** — DR plans with ordered VM boot groups, precheck, and planned/emergency failover. Originally coordinated two peered NaSnap instances (PRIMARY/SECONDARY roles, background heartbeat, config sync); redesigned to a single-instance model in a later release — see below.
 - **Tamperproof Snapshots *(Alpha)*** — ONTAP Snapshot Locking (WORM) with configurable lock duration per schedule. Automatic harmonization ensures the lock expires before the retention policy would attempt to delete the snapshot. Independent locking for source volumes and SnapMirror destinations.
 - **Dashboard** — Live protection overview with 7-day rolling stats, snapshot timeline, SnapMirror health, and alert banners for failed snapshots and unhealthy relationships.
 - **Light / Dark theme** — One-click toggle in the top bar; preference persisted per browser.
@@ -1013,6 +1017,13 @@ DEBUG=1 .venv/bin/python app.py
 - **SFR — Batch OS-type detection** — all VMs in the Restore & Clone view are probed concurrently (up to 12 threads), reducing wait from ~2 s × N to ~2–3 s for any number of VMs.
 - **SFR — UX improvements** — Finish button (clean session close), NaSnap-styled New Folder dialog (replaces native `prompt()`), copy destination auto-tracking, disk size shown in disk selector.
 - **Active Directory / LDAP Authentication** (🟡 Beta) — connect NaSnap to an AD domain. Users authenticate with domain credentials; group membership maps to Admin or Viewer role. Local accounts always remain active as a fallback.
+
+### Unreleased
+
+- **Disaster Recovery — single-instance redesign** — the two-instance peer/role/heartbeat/sync model is removed. One NaSnap instance now manages both the primary and DR side directly, using its own registered ONTAP and PVE credentials on both sides. DR Plan failover is consolidated onto the same reusable `recovery_engine` primitives (`_bind_nfs`, `restore_vm_configs`, `start_vms`) used by VM recovery, instead of duplicated inline logic.
+- **PVE Cluster Grouping** — Proxmox hosts are now automatically grouped into real cluster entities in Settings, detected via PVE's own `/cluster/status` API. Settings → PVE Hosts shows collapsible cluster groups instead of a flat host list.
+- **Recover VMs (Disaster Recovery tab)** — the former Datastores-tab "Import VMs" wizard moved into the DR tab as **Recover VMs**: pick a datastore snapshot, optionally discover or add a target PVE cluster, bind the storage, assign VMIDs, and optionally start the VMs immediately after recovery. Supports both a fresh cluster and an already-provisioned DR-standby cluster.
+- **Bulk Migrate** — move a set of VMs from one datastore to another directly from the Datastores tab, with a floating progress panel tracking each VM's migration and a clear completion notice (success/failure summary + explicit Close button) once all jobs finish.
 
 ### v1.7 — Planned
 

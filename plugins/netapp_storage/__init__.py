@@ -125,6 +125,7 @@ def _init_db():
         _add_column_if_missing(db, "netapp_plugin_config", "job_log_retention_days", "INTEGER NOT NULL DEFAULT 90")
 
         _add_column_if_missing(db, "netapp_pve_hosts",  "nfs_ip",        "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(db, "netapp_pve_hosts",  "cluster_group_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(db, "netapp_endpoints", "skip_nfs",      "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_endpoints", "san_optimized", "INTEGER NOT NULL DEFAULT 0")
 
@@ -219,6 +220,7 @@ def register(app):
     from .api.setup import register_routes as reg_setup
     from .api.dr import register_routes as reg_dr
     from .api.dashboard import register_routes as reg_dashboard
+    from .api.migrate import register_routes as reg_migrate
 
     reg_snap()
     reg_restore()
@@ -232,6 +234,7 @@ def register(app):
     reg_dr()
     reg_dashboard()
     reg_sfr()
+    reg_migrate()
     start_scheduler()
     _maybe_startup_scan()
     start_db_backup_scheduler()

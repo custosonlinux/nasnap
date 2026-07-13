@@ -404,7 +404,7 @@ def _recovery_restore_vms():
         return {"error": f"Unsupported protocol: {protocol}"}, 400
 
     # Write configs (+ rename disks if VMID changes)
-    from ..core.recovery_engine import restore_vm_configs
+    from ..core.recovery_engine import restore_vm_configs, start_vms
     fake_jlog = _FakeJlog()
     try:
         restored = restore_vm_configs(
@@ -417,9 +417,28 @@ def _recovery_restore_vms():
             protocol=protocol,
             vg_name=vg_name,
         )
+        started = 0
+        if body.get("start_after") and restored and pve_host_ids:
+            vm_list = []
+            for vm in manifest.get("vms", []):
+                try:
+                    vmid_orig = int(vm.get("vmid", 0))
+                except (TypeError, ValueError):
+                    continue
+                if not vmid_orig or (vmids_to_restore is not None and vmid_orig not in vmids_to_restore):
+                    continue
+                vmid_new = vmid_map.get(vmid_orig, vmid_orig + vmid_offset)
+                vm_list.append({
+                    "vmid": vmid_new,
+                    "vm_name": vm.get("name") or str(vmid_new),
+                    "vm_type": (vm.get("vmtype") or "qemu").lower(),
+                })
+            if vm_list:
+                started, _skipped = start_vms(pve_host_ids[0], vm_list, db, fake_jlog)
         return {
             "restored": restored,
-            "message":  f"{restored} VM config(s) written.",
+            "started":  started,
+            "message":  f"{restored} VM config(s) written." + (f" {started} started." if started else ""),
             "log":      fake_jlog.lines,
         }
     except Exception as exc:

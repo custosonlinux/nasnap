@@ -13,6 +13,7 @@ import re
 import os
 import shlex
 import random
+import uuid
 import logging
 import threading
 from datetime import datetime, timezone
@@ -187,6 +188,154 @@ def _run_clone(job_id, params, username):
                 pass
     except Exception as exc:
         log.error(f"[netapp_storage] Clone job {job_id} failed: {exc}")
+        _fail_job(db, job_id)
+        jlog.log(f"ERROR: {exc}")
+        if conf_path_reserved and pve_host:
+            try:
+                ssh_run(pve_host, pve_user, pve_pass,
+                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
+            except Exception:
+                pass
+    finally:
+        _reg_unregister(job_id)
+
+
+# ── Live-VM Clone (NFS) ──────────────────────────────────────────────────────
+# Clones directly from the VM's CURRENT state — no snapshot is created or needed.
+# ontap_client.clone_file() clones from the active filesystem when snap_name is
+# omitted, so this is a close variant of _run_clone() that builds the disk list
+# from a live PVE query (_disks_from_pve) instead of reading a snapshot manifest.
+
+def start_clone_live_nfs_job(job_id, params, username):
+    t = threading.Thread(target=_run_clone_live_nfs, args=(job_id, params, username), daemon=True)
+    t.start()
+    _reg_register(job_id, t)
+
+
+def _run_clone_live_nfs(job_id, params, username):
+    db = get_db()
+    jlog = JobLogger(job_id, db)
+
+    mapping_id       = params["mapping_id"]
+    src_vmid         = int(params["src_vmid"])
+    new_vmid         = int(params["new_vmid"])
+    target_node      = params.get("target_node", "")
+    new_name         = params.get("new_name", "")
+    start_after      = bool(params.get("start_after", False))
+    network_isolated = bool(params.get("network_isolated", False))
+
+    conf_path_reserved = ""
+    pve_host = ""
+    pve_user = "root"
+    pve_pass = ""
+    pve_key  = ""
+
+    try:
+        mapping  = get_mapping(db, mapping_id)
+        endpoint = get_endpoint(db, mapping["endpoint_id"])
+        client   = build_ontap_client(endpoint)
+
+        mgr  = build_pve_client(db, mapping["pve_cluster_id"])
+        node = mgr.find_vm_node(src_vmid) or ""
+        if not node:
+            raise RuntimeError(f"VM {src_vmid} not found in the PVE cluster — must be live to clone from its current state")
+
+        pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
+        eff_node = target_node or node
+        pve_host = _re_resolve_node_host(mgr, eff_node)
+
+        jlog.log(f"Reading live config for VM {src_vmid} …")
+        disks, vm_type, raw_conf = _disks_from_pve(mgr, src_vmid, mapping["pve_storage_id"], node)
+        if not disks:
+            raise RuntimeError(f"No disks found for VM {src_vmid} on this datastore")
+
+        # ── Reserve VMID before long disk operation ────────────────────
+        conf_path_reserved = _reserve_vmid(
+            pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type, jlog)
+
+        # ── Create target directory ────────────────────────────────────
+        target_dir = f"{mapping['nfs_mount_path']}/images/{new_vmid}"
+        ssh_run(pve_host, pve_user, pve_pass,
+                f"mkdir -p {shlex.quote(target_dir)}", key_material=pve_key)
+
+        # ── Clone disks via ONTAP File Clone API from the ACTIVE filesystem ──
+        check_cancel(job_id)
+        jlog.log(f"File-Clone (live source): {len(disks)} disk(s) for VM {src_vmid} → {new_vmid} …")
+        poll_cfg = load_plugin_config()
+        new_disk_map = {}
+
+        for i, disk in enumerate(disks, 1):
+            check_cancel(job_id)
+            old_file = disk["file"]
+            new_file = _remap_disk_path(old_file, src_vmid, new_vmid)
+            src_path = f"images/{old_file.lstrip('/')}"
+            dst_path = f"images/{new_file.lstrip('/')}"
+
+            jlog.log(f"  [{i}/{len(disks)}] {os.path.basename(src_path)}"
+                     f" → {os.path.basename(dst_path)}")
+            job_uuid = client.clone_file(mapping["volume_uuid"], src_path, dst_path, "")
+            if job_uuid:
+                client.poll_job(
+                    job_uuid,
+                    interval_s=poll_cfg.get("job_poll_interval_s", 3),
+                    timeout_s=poll_cfg.get("job_poll_timeout_s", 300),
+                )
+            new_disk_map[old_file] = new_file
+
+        _set_progress(db, job_id, 70)
+
+        # ── Build and write new VM config ──────────────────────────────
+        eff_name = new_name or f"clone-{src_vmid}"
+        jlog.log(f"Building VM config … (name: {eff_name!r})")
+        conf_str = _build_clone_config(
+            raw_conf, src_vmid, new_vmid,
+            mapping["pve_storage_id"], new_disk_map,
+            eff_name, vm_type,
+            network_isolated=network_isolated,
+        )
+        name_key = "hostname" if vm_type == "lxc" else "name"
+        conf_lines = [l for l in conf_str.splitlines() if not l.startswith(f"{name_key}:")]
+        conf_lines.append(f"{name_key}: {eff_name}")
+        conf_str = "\n".join(conf_lines) + "\n"
+
+        conf_subdir = "qemu-server" if vm_type == "qemu" else "lxc"
+        conf_path   = f"/etc/pve/{conf_subdir}/{new_vmid}.conf"
+        ssh_run(pve_host, pve_user, pve_pass,
+                f"cat > {shlex.quote(conf_path)}",
+                stdin_data=conf_str.encode(), key_material=pve_key)
+        jlog.log(f"Config written: {conf_path}")
+
+        if eff_name:
+            safe_name = re.sub(r'[^a-zA-Z0-9\-\.]', '-', eff_name).strip('-') or f"vm-{new_vmid}"
+            if vm_type == "qemu":
+                ssh_run(pve_host, pve_user, pve_pass,
+                        f"qm set {new_vmid} --name {shlex.quote(safe_name)}",
+                        key_material=pve_key)
+            else:
+                ssh_run(pve_host, pve_user, pve_pass,
+                        f"pct set {new_vmid} --hostname {shlex.quote(safe_name)}",
+                        key_material=pve_key)
+
+        _set_progress(db, job_id, 90)
+
+        if start_after:
+            jlog.log(f"Starting {vm_type.upper()} {new_vmid} …")
+            _vm_start(mgr, eff_node, new_vmid, vm_type)
+
+        _finish_job(db, job_id)
+        jlog.log(f"Clone completed (live source): {vm_type.upper()} {src_vmid} → {new_vmid}")
+
+    except JobCancelledError:
+        jlog.log("Job cancelled by user")
+        _cancel_job(db, job_id)
+        if conf_path_reserved and pve_host:
+            try:
+                ssh_run(pve_host, pve_user, pve_pass,
+                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
+            except Exception:
+                pass
+    except Exception as exc:
+        log.error(f"[netapp_storage] Live-clone (NFS) job {job_id} failed: {exc}")
         _fail_job(db, job_id)
         jlog.log(f"ERROR: {exc}")
         if conf_path_reserved and pve_host:
@@ -809,6 +958,102 @@ def _cancel_job(db, job_id):
         "UPDATE netapp_jobs SET status='cancelled', completed_at=? WHERE id=?",
         (now, job_id),
     )
+
+
+# ── Live-VM Clone (SAN) ──────────────────────────────────────────────────────
+# SAN FlexClone (LUN/namespace) always needs a real named ONTAP snapshot — there
+# is no active-filesystem shortcut for SAN. This orchestrates: create a temporary
+# ad-hoc snapshot of just the source VM -> run the existing _run_clone_san()
+# unmodified against it -> always delete the temporary snapshot afterward.
+
+def start_clone_live_san_job(job_id, params, username):
+    t = threading.Thread(target=_run_clone_live_san, args=(job_id, params, username), daemon=True)
+    t.start()
+    _reg_register(job_id, t)
+
+
+def _run_clone_live_san(job_id, params, username):
+    from .snapshot_engine import run_snapshot_sync
+
+    db   = get_db()
+    jlog = JobLogger(job_id, db)
+
+    mapping_id = params["mapping_id"]
+    src_vmid   = int(params["src_vmid"])
+
+    temp_job_id      = str(uuid.uuid4())
+    temp_snapshot_id = None
+
+    try:
+        mapping = get_mapping(db, mapping_id)
+
+        jlog.log("Creating temporary snapshot …")
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO netapp_jobs (id, job_type, vmid, node, status, created_by, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (temp_job_id, "snapshot", src_vmid, "", "running", username, now),
+        )
+
+        node = ""
+        try:
+            mgr  = build_pve_client(db, mapping["pve_cluster_id"])
+            node = mgr.find_vm_node(src_vmid) or ""
+        except Exception as exc:
+            log.warning(f"[netapp_storage] Live-clone (SAN) node lookup failed: {exc}")
+
+        snap_data = {
+            "cluster_id":       mapping["pve_cluster_id"],
+            "node":             node,
+            "vmids":            [src_vmid],
+            "mapping_id":       mapping_id,
+            "consistency":      "crash",
+            "snap_name_suffix": "liveclone",
+        }
+        run_snapshot_sync(temp_job_id, snap_data, username)
+
+        job_row = db.query_one("SELECT status, snapshot_id, log_json FROM netapp_jobs WHERE id=?", (temp_job_id,))
+        if not job_row or job_row["status"] != "done" or not job_row["snapshot_id"]:
+            detail = ""
+            try:
+                lines = json.loads(job_row["log_json"] or "[]") if job_row else []
+                if lines:
+                    detail = lines[-1].get("msg", "")
+            except Exception:
+                pass
+            raise RuntimeError("Temporary snapshot creation failed" + (f": {detail}" if detail else ""))
+
+        temp_snapshot_id = job_row["snapshot_id"]
+        jlog.log(f"Temporary snapshot ready, cloning …")
+
+        clone_params = dict(params)
+        clone_params["snapshot_id"] = temp_snapshot_id
+        # _run_clone_san manages job status/log/registry itself (success and
+        # failure) and never re-raises — it is safe to call directly here.
+        _run_clone_san(job_id, clone_params, username)
+
+    except Exception as exc:
+        log.error(f"[netapp_storage] Live-clone (SAN) job {job_id} failed: {exc}")
+        jlog.log(f"ERROR: {exc}")
+        _fail_job(db, job_id)
+    finally:
+        if temp_snapshot_id:
+            try:
+                jlog.log("Removing temporary snapshot …")
+                snap     = get_snapshot_record(db, temp_snapshot_id)
+                mp       = get_mapping(db, snap["mapping_id"])
+                endpoint = get_endpoint(db, mp["endpoint_id"])
+                client   = build_ontap_client(endpoint)
+                del_job  = client.delete_snapshot(mp["volume_uuid"], snap["ontap_snap_uuid"],
+                                                   snap_name=snap["snap_name"])
+                if del_job:
+                    client.poll_job(del_job, timeout_s=120)
+                db.execute("DELETE FROM netapp_snapshots WHERE id=?", (temp_snapshot_id,))
+                jlog.log("Temporary snapshot removed")
+            except Exception as cleanup_exc:
+                log.error(f"[netapp_storage] Failed to remove temp snapshot {temp_snapshot_id}: {cleanup_exc}")
+                jlog.log(f"WARNING: failed to remove temporary snapshot: {cleanup_exc}")
+        _reg_unregister(job_id)
 
 
 # ── DR clone (secondary volume → new VM) ────────────────────────────────────

@@ -2,6 +2,132 @@
 
 ---
 
+## Skalierungs-Architektur: Aufsplittung in Web / Scheduler / Worker
+
+**Prio: Hoch (für Enterprise-Umgebungen), aber Umsetzung zurückgestellt — nur Design, noch keine Freigabe zur Implementierung**
+
+Ziel-Umgebungen: 10–20 PVE-Hosts, ~1000 VMs, große Storage-Systeme. Die aktuelle
+Architektur (ein Gunicorn-Prozess, `WORKERS=1`, SQLite, In-Memory-Jobregistry)
+wurde für kleine/mittlere Installationen gebaut und stößt bei dieser Größenordnung
+an mehrere unabhängige Grenzen — nicht primär Rohdurchsatz, sondern Blockierung
+und fehlende horizontale Skalierung.
+
+### Problem (konkret an bestehendem Code festgemacht)
+
+1. **`WORKERS=1` ist erzwungen**, weil der Scheduler (`_scheduler_loop` in
+   `api/schedules.py`) als In-Process-Daemon-Thread in `create_app()` läuft.
+   Mehrere Gunicorn-Worker würden jeden Zeitplan mehrfach feuern.
+2. **Lange SSH/PVE/ONTAP-Calls blockieren den einzigen Worker.** Das Codebase
+   umgeht das bereits mehrfach mit dem "Background-Refresh-Cache"-Muster
+   (`_vm_cache` in `api/snapshots.py`, `_cap_cache` in `api/provisioning.py`) —
+   ein Symptom dafür, dass die Architektur eigentlich einen echten Worker-Pool
+   bräuchte, nicht mehr Workarounds im Web-Prozess.
+3. **`_job_registry.py` ist ein In-Memory-Dict** (Thread-Objekt + Cancel-Event
+   pro `job_id`). Funktioniert nur, solange Job-Start und Job-Ausführung im
+   selben Prozess passieren. Sobald Web und Worker getrennte Container sind,
+   funktioniert `jobs/cancel` nicht mehr ohne Weiteres.
+4. **SQLite als Datei** ist für einen einzelnen Prozess in Ordnung, aber riskant
+   sobald mehrere Container (Web + Scheduler + mehrere Worker) gleichzeitig
+   schreibend zugreifen — insbesondere über einen Bind-Mount/NFS-Volume.
+5. **PVE-Polling ist pro Web-Prozess im RAM gecacht** (`_vm_cache`,
+   `_STORAGE_UNIFIED_CACHE_KEY` clientseitig) — bei mehreren Web-Replicas wäre
+   das inkonsistent (jeder Replica pollt unabhängig, kein geteilter Zustand).
+6. **Parallele Operationen** (Bulk Migrate, Multi-Datastore-Schedules) laufen
+   heute als `ThreadPoolExecutor` innerhalb eines einzelnen Prozesses — skaliert
+   nicht über die CPU/Netzwerk-Kapazität eines einzelnen Containers hinaus.
+
+### Zielarchitektur
+
+```
+┌─────────────┐      ┌──────────────┐      ┌──────────────────┐
+│  nasnap-web  │─────▶│  Job-Queue    │◀────│ nasnap-scheduler  │
+│ (N Replicas) │      │ (Redis+RQ o.  │      │   (1 Replica,     │
+│  Gunicorn,   │      │  DB-Tabelle)  │      │   Singleton)      │
+│  kein Sched. │      └───────┬──────┘      └──────────────────┘
+└──────┬───────┘              │
+       │                      ▼
+       │             ┌──────────────────┐
+       │             │  nasnap-worker    │
+       │             │  (M Replicas)     │
+       │             │  SSH/PVE/ONTAP    │
+       │             └─────────┬────────┘
+       │                       │
+       ▼                       ▼
+┌─────────────────────────────────────┐
+│         nasnap-db (Postgres)         │
+│  netapp_jobs, netapp_snapshots, …     │
+└──────────────────────────────────────┘
+```
+
+- **`nasnap-web`**: Flask/Gunicorn, mehrere Worker möglich, da kein Scheduler
+  und keine langlaufenden Calls mehr inline laufen. Legt Jobs an (DB-Insert +
+  Queue-Publish) und liest Status/Progress aus der DB — identisch zum
+  heutigen Polling-Pattern (`jobs/status?job_id=`), das bleibt unverändert.
+- **`nasnap-scheduler`**: Singleton (genau 1 Replica) — exakt die heutige
+  `WORKERS=1`-Beschränkung, nur isoliert auf eine kleine, austauschbare
+  Komponente statt auf den gesamten Webserver. Feuert Zeitpläne, legt Jobs in
+  die Queue, führt sie nicht mehr selbst aus.
+- **`nasnap-worker`**: N Replicas, konsumieren Jobs aus der Queue
+  (Snapshot/Restore/Clone/Bulk-Migrate/SFR). Jeder Worker öffnet seine eigene
+  PVE-/ONTAP-Session — das Pattern existiert bereits (`pve_for_mapping`,
+  `build_pve_client`), muss nur aus dem Web-Prozess in den Worker-Prozess
+  wandern.
+- **Queue**: Redis+RQ (einfach, bewährt) oder minimal-invasiv eine
+  DB-Tabelle als Queue (`netapp_job_queue`, Worker pollen `SELECT ... FOR
+  UPDATE SKIP LOCKED` — geht erst mit Postgres, nicht mit SQLite).
+- **DB**: Postgres statt SQLite — nicht wegen Durchsatz, sondern weil mehrere
+  Prozesse/Container jetzt gleichzeitig schreiben.
+
+### Phasenplan (jede Phase einzeln lieferbar, Umsetzung erst nach Freigabe)
+
+**Phase 1 — Scheduler aus dem Web-Prozess lösen** (kleinstes Risiko, größter
+sofortiger Gewinn: `WORKERS>1` wird für den Web-Tier möglich)
+- Scheduler-Loop aus `create_app()` in einen eigenen Einstiegspunkt
+  (`scheduler_main.py` o.ä.) extrahieren, als separates Deployment/Container
+  mit fest 1 Replica.
+- Web-Prozess ruft `start_scheduler()` nicht mehr selbst auf.
+- **Aufwand: 2–3 Tage**
+
+**Phase 2 — Jobqueue + Worker-Container**
+- Neue Queue-Anbindung (Redis+RQ empfohlen — geringster Umbau, gute
+  Python-Integration).
+- Alle `start_*_job()`-Funktionen (`snapshot_engine.py`, `clone_engine.py`,
+  `restore_engine.py`, `migrate_engine.py`, …) von
+  `threading.Thread(daemon=True).start()` auf `queue.enqueue(...)` umstellen —
+  die eigentlichen `_run_*`-Funktionen bleiben inhaltlich fast unverändert,
+  nur der Start-Mechanismus ändert sich.
+- `_job_registry.py` (Cancel-Events) auf einen DB-Flag (`netapp_jobs.cancel_requested`)
+  oder Redis umstellen, da Web- und Worker-Prozess getrennt sind.
+- **Aufwand: 5–8 Tage** (inkl. Migration aller bestehenden Engines)
+
+**Phase 3 — SQLite → Postgres**
+- Schema-Migration (`schema.sql` ist bereits reines Standard-SQL, sollte
+  weitgehend kompatibel sein — SQLite-spezifische Syntax wie `INSERT OR
+  REPLACE` muss auf `INSERT ... ON CONFLICT DO UPDATE` vereinheitlicht werden,
+  Grossteil des Codes nutzt das bereits).
+- DB-Zugriffsschicht (`db.py`) auf einen Postgres-Treiber umstellen, Thread-
+  Local-Connection-Pattern durch echten Connection-Pool (z.B. `psycopg` Pool)
+  ersetzen.
+- Bestehendes Backup/Restore-Feature (JSON-Export) muss weiter funktionieren.
+- **Aufwand: 5–8 Tage** (inkl. Testing der Backup/Restore-Kompatibilität)
+
+**Phase 4 — Zentrales PVE-Polling** (optional, nach Bedarf)
+- `_vm_cache`/`_cap_cache` aus dem Web-Prozess-RAM in eine DB-Tabelle oder
+  Redis verlagern, damit mehrere Web-Replicas denselben Cache-Stand sehen.
+- **Aufwand: 2–3 Tage**
+
+### Gesamtaufwand
+
+**14–22 Tage** verteilt auf 4 unabhängig lieferbare Phasen. Phase 1 kann isoliert
+umgesetzt und getestet werden, ohne dass Phase 2–4 sofort folgen müssen.
+
+### Status
+
+Nur Design — **Umsetzung wartet auf explizite Freigabe.** Nicht mit der
+Implementierung beginnen, bevor das nicht ausdrücklich angefordert wird.
+
+---
+
 ## VM-Datenbank Garbage Collection
 
 **Prio: Mittel**

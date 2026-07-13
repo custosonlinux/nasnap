@@ -55,6 +55,29 @@ def get_mapping(db, mapping_id):
     return dict(row)
 
 
+_SIZE_SUFFIX = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+
+
+def parse_disk_size(conf_value: str):
+    """Extracts the size= token from a PVE disk config line, in bytes.
+
+    e.g. 'nfs-store:images/100/vm-100-disk-0.qcow2,size=20G' -> 21474836480
+    Returns None if no size= token is present or it can't be parsed.
+    """
+    for part in str(conf_value).split(","):
+        part = part.strip()
+        if not part.startswith("size="):
+            continue
+        raw = part[len("size="):].strip().upper()
+        try:
+            if raw and raw[-1] in _SIZE_SUFFIX:
+                return int(float(raw[:-1]) * _SIZE_SUFFIX[raw[-1]])
+            return int(raw)
+        except ValueError:
+            return None
+    return None
+
+
 def get_snapshot_record(db, snapshot_id):
     row = db.query_one("SELECT * FROM netapp_snapshots WHERE id=?", (snapshot_id,))
     if not row:
@@ -70,6 +93,28 @@ def build_ontap_client(endpoint):
         password=endpoint["password"],
         ssl_verify=bool(endpoint.get("ssl_verify", 1)),
     )
+
+
+def pve_for_mapping(db, mapping):
+    """Try mapping's pve_cluster_id first, then fall back to any configured PVE host.
+
+    Guards against a dangling pve_cluster_id reference (host removed from
+    netapp_pve_hosts after the mapping row was created) — any other host in
+    the same cluster can usually still reach the same shared storage.
+    """
+    candidate = (mapping or {}).get("pve_cluster_id", "")
+    ids = [candidate] if candidate else []
+    others = db.query(
+        "SELECT id FROM netapp_pve_hosts WHERE id!=? ORDER BY id LIMIT 10", (candidate,)
+    )
+    ids += [r["id"] for r in (others or [])]
+    last_exc = None
+    for hid in ids:
+        try:
+            return build_pve_client(db, hid), hid
+        except Exception as e:
+            last_exc = e
+    raise RuntimeError(f"No accessible PVE host found (tried {len(ids)}): {last_exc}")
 
 
 def build_pve_client(db, pve_host_id):

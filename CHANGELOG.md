@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Disaster Recovery — single-instance redesign** — removed the two-instance peer/role/heartbeat/sync model (`netapp_dr_peer` table, `dr/peer/*` and `dr/role/*` routes). One NaSnap instance now manages both the primary and DR side directly with its own registered ONTAP/PVE credentials — restoring/redeploying the NaSnap container itself always takes priority over any peer coordination, which never actually helped in that scenario. DR Plan failover (`_execute_failover`) is consolidated onto the same `recovery_engine` primitives (`_bind_nfs`, `restore_vm_configs`, new `start_vms`) used elsewhere, replacing duplicated inline SSH/pvesm logic — this also fixes a latent bug where failover never called `_ensure_nfs_export_rules`, which could previously cause "access denied" if DR PVE hosts weren't already in the NFS export policy.
+- **PVE Cluster Grouping** — new `netapp_pve_clusters` table and `netapp_pve_hosts.cluster_group_id` column. Cluster membership is auto-detected via PVE's own `/cluster/status` + `/nodes` APIs (`pve-hosts/discover`, new `pve-hosts/detect-cluster` route) instead of requiring manual grouping. Settings → PVE Hosts now displays collapsible cluster groups instead of a flat host list.
+- **Recover VMs (Disaster Recovery tab)** — the former Datastores-tab "Import VMs" wizard is now the DR tab's **Recover VMs** wizard: source datastore/snapshot selection, target PVE host/cluster selection (with inline cluster discovery, optional — not required if the target is already registered), VMID remap, and a new "Start VMs after recovery" option (`provisioning/recovery/restore-vms` gains a `start_after` param, calling the new `start_vms()` primitive). Includes a hint linking to the existing Bind Wizard for datastores not yet mounted on the recovery cluster.
+- **Bulk Migrate** — move a set of VMs from one datastore to another, driven entirely from NaSnap (`storage/bulk-migrate-start`). Floating progress panel tracks each VM's migrate job individually with a live progress bar. On completion, the panel now shows an explicit success/failure summary and a Close button (previously it stayed open with no indication that the migration had finished).
+- **VM OS type persistence** — detected VM OS type (used for restore/clone icons) is now cached in a new `netapp_vm_os_cache` table and only refreshed in the background, instead of disappearing and reloading on every view. VMs that are off or no longer live keep their last known value.
+
+### Fixed
+
+- **Bulk Migrate / Datastore move progress** — the disk-move progress bar for bulk datastore migration now reflects real progress (previously stuck at 0% while Proxmox showed live progress for the same move).
+
+---
+
 ## [1.6.1] — 2026-07-06
 
 ### Added

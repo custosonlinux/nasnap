@@ -15,7 +15,10 @@ from flask import request
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
-from ..core.clone_engine import start_clone_job, start_clone_san_job, start_dr_clone_job
+from ..core.clone_engine import (
+    start_clone_job, start_clone_san_job, start_dr_clone_job,
+    start_clone_live_nfs_job, start_clone_live_san_job,
+)
 
 log = logging.getLogger(__name__)
 from ..core._helpers import PLUGIN_ID  # noqa: F401
@@ -120,6 +123,58 @@ def _start_clone():
     return {"success": True, "job_id": job_id}
 
 
+def _start_clone_live():
+    """Clone directly from a VM's CURRENT state — no source snapshot picked.
+
+    NFS: storage-efficient file clone straight from the active filesystem.
+    SAN (iSCSI/NVMe): transparently creates a temporary snapshot, clones from
+    it, then deletes it — FlexClone for LUN/namespace always needs a named
+    snapshot, there is no active-filesystem shortcut for SAN.
+    """
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+
+    for field in ("src_vmid", "new_vmid", "mapping_id"):
+        if not str(data.get(field, "")).strip():
+            return {"error": f"Required field missing: {field}"}, 400
+
+    db = get_db()
+    now      = datetime.now(timezone.utc).isoformat()
+    username = request.session.get("user", "system")
+
+    from ..core._helpers import get_mapping
+    try:
+        mapping = get_mapping(db, data["mapping_id"])
+    except Exception as exc:
+        return {"error": str(exc)}, 400
+
+    job_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO netapp_jobs "
+        "(id, job_type, vmid, status, created_by, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (job_id, "clone_live", int(data["new_vmid"]), "running", username, now),
+    )
+
+    params = {
+        "mapping_id":       data["mapping_id"],
+        "src_vmid":         data["src_vmid"],
+        "new_vmid":         data["new_vmid"],
+        "target_node":      data.get("target_node", ""),
+        "new_name":         data.get("new_name", ""),
+        "start_after":      bool(data.get("start_after", False)),
+        "network_isolated": bool(data.get("network_isolated", False)),
+    }
+
+    if mapping.get("storage_protocol") in ("iscsi", "nvme"):
+        start_clone_live_san_job(job_id, params, username)
+    else:
+        start_clone_live_nfs_job(job_id, params, username)
+    return {"success": True, "job_id": job_id}
+
+
 def _get_nextid():
     """Returns the next free VMID from the PVE cluster."""
     pve_cluster_id = request.args.get("pve_cluster_id")
@@ -199,7 +254,8 @@ def _start_dr_clone():
 
 
 def register_routes():
-    register_plugin_route(PLUGIN_ID, "clone/start",    _start_clone)
-    register_plugin_route(PLUGIN_ID, "clone/dr-start", _start_dr_clone)
-    register_plugin_route(PLUGIN_ID, "clone/nextid",   _get_nextid)
-    register_plugin_route(PLUGIN_ID, "clone/nodes",    _get_nodes)
+    register_plugin_route(PLUGIN_ID, "clone/start",      _start_clone)
+    register_plugin_route(PLUGIN_ID, "clone/start-live", _start_clone_live)
+    register_plugin_route(PLUGIN_ID, "clone/dr-start",   _start_dr_clone)
+    register_plugin_route(PLUGIN_ID, "clone/nextid",     _get_nextid)
+    register_plugin_route(PLUGIN_ID, "clone/nodes",      _get_nodes)

@@ -542,7 +542,7 @@ def create_app():
 </script>
 """
 
-    # Logout button + username chip injected at the right end of .subtabs
+    # Logout button + username chip injected into the topbar (right end, via margin-left:auto)
     _LOGOUT_BTN = (
         '<div id="ns-userbar" style="margin-left:auto;display:flex;align-items:center;'
         'gap:8px;padding-bottom:4px;">'
@@ -623,10 +623,10 @@ def create_app():
             html = html.replace(old, new)
         # Auth guard before any other JS
         html = html.replace('<head>', '<head>' + _AUTH_GUARD, 1)
-        # Logout button at right end of .subtabs bar
+        # Logout button + userbar injected into the topbar (right of the sidebar)
         html = html.replace(
-            '</div>\n\n  <!-- Scrollable content -->',
-            _LOGOUT_BTN + '</div>\n\n  <!-- Scrollable content -->',
+            '<div class="topbar"></div>',
+            '<div class="topbar">' + _LOGOUT_BTN + '</div>',
             1,
         )
         return Response(html, mimetype='text/html')
