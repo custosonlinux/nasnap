@@ -163,7 +163,16 @@ class OntapClient:
         params = {"fields": "uuid,name,svm,nas.path,space.used,space.available,snaplock.snapshot_locking_enabled", "max_records": 500}
         if svm_name:
             params["svm.name"] = svm_name
-        return self._get_all_records("storage/volumes", params=params)
+        try:
+            return self._get_all_records("storage/volumes", params=params)
+        except OntapError as e:
+            # Some ONTAP versions reject snaplock.snapshot_locking_enabled in a
+            # collection-level fields list (only supported on the per-volume GET).
+            # Retry without it rather than failing the whole call.
+            if "invalid" in str(e).lower() and "fields" in str(e).lower():
+                params["fields"] = "uuid,name,svm,nas.path,space.used,space.available"
+                return self._get_all_records("storage/volumes", params=params)
+            raise
 
     def get_volume(self, volume_uuid):
         return self._get(f"storage/volumes/{volume_uuid}",
@@ -453,7 +462,7 @@ class OntapClient:
     def list_snapmirror_relationships(self):
         """Returns all SnapMirror® relationships (unfiltered, client-side matching)."""
         return self._get_all_records("snapmirror/relationships", params={
-            "fields": "uuid,state,healthy,lag_time,policy.type,"
+            "fields": "uuid,state,healthy,lag_time,policy.type,policy.name,"
                       "source.path,destination.path,destination.cluster.name,"
                       "transfer.end_time",
             "max_records": 200,
@@ -1982,8 +1991,13 @@ class OntapClient:
     # ── NFS Volume provisioning ───────────────────────────────────────────────
 
     def create_volume_nfs(self, svm_name, vol_name, size_bytes,
-                          junction_path, aggregate_name=None, export_policy="default"):
-        """Creates an NFS volume with a junction path. Returns volume UUID."""
+                          junction_path, aggregate_name=None, aggregate_names=None,
+                          export_policy="default"):
+        """Creates an NFS volume with a junction path. Returns volume UUID.
+
+        aggregate_names (list of 2+ names): creates a FlexGroup volume spanning
+        those aggregates instead of a regular FlexVol on a single aggregate.
+        """
         body = {
             "name":      vol_name,
             "svm":       {"name": svm_name},
@@ -1997,13 +2011,17 @@ class OntapClient:
                 "export_policy": {"name": export_policy},
             },
         }
-        if aggregate_name:
+        if aggregate_names:
+            body["style"] = "flexgroup"
+            body["aggregates"] = [{"name": a} for a in aggregate_names]
+        elif aggregate_name:
             body["aggregates"] = [{"name": aggregate_name}]
         resp = self._post("storage/volumes", body=body, params={"return_timeout": 30})
         vol_uuid = resp.get("uuid", "")
         job_uuid = (resp.get("job") or {}).get("uuid", "")
         if job_uuid:
-            self.poll_job(job_uuid, interval_s=3, timeout_s=180)
+            # FlexGroup creation spans multiple constituents per aggregate — allow more time.
+            self.poll_job(job_uuid, interval_s=3, timeout_s=420 if aggregate_names else 180)
         if not vol_uuid:
             for v in self.get_volumes(svm_name=svm_name):
                 if v.get("name") == vol_name:
@@ -2129,6 +2147,13 @@ class OntapClient:
             except Exception:
                 return None
 
+    def update_snapmirror_policy(self, relationship_uuid, policy_name):
+        """Changes the policy applied to an existing SnapMirror relationship."""
+        self._patch(
+            f"snapmirror/relationships/{relationship_uuid}",
+            body={"policy": {"name": policy_name}},
+        )
+
     def snapmirror_break(self, relationship_uuid):
         """Breaks a SnapMirror relationship (transitions DP volume to RW).
 
@@ -2244,7 +2269,11 @@ class OntapClient:
             _cb(f"[INFO] ONTAP job started ({job_uuid[:8]}…) — creating destination volume and relationship...")
             start = time.monotonic()
             last_log = start
-            deadline = start + 300
+            # Destination volume creation + relationship linkage over an intercluster
+            # link can legitimately take much longer than a same-cluster clone job,
+            # especially for large volumes — allow up to 30 minutes.
+            timeout_s = 1800
+            deadline = start + timeout_s
             while True:
                 data = self._get(f"cluster/jobs/{job_uuid}")
                 state = data.get("state", "")
@@ -2261,7 +2290,7 @@ class OntapClient:
                     last_log = time.monotonic()
                 if time.monotonic() > deadline:
                     raise OntapError(
-                        f"ONTAP job {job_uuid[:8]} timed out after 300s (state: {state}). "
+                        f"ONTAP job {job_uuid[:8]} timed out after {timeout_s}s (state: {state}). "
                         f"The operation may still complete on ONTAP — check System Manager."
                     )
                 time.sleep(4)
@@ -2289,3 +2318,164 @@ class OntapClient:
             if "already" in str(e).lower() or "409" in str(e):
                 return  # already initialized
             raise
+
+    def delete_snapmirror_relationship(self, relationship_uuid):
+        """Deletes a SnapMirror relationship's metadata after it has been broken.
+
+        Does not touch the destination volume — call delete_volume() separately
+        on the destination endpoint's client if the volume should also be removed.
+        """
+        try:
+            self._delete(
+                f"snapmirror/relationships/{relationship_uuid}",
+                params={"return_timeout": 30},
+            )
+        except OntapError as e:
+            if "404" in str(e) or "not found" in str(e).lower() or "entry doesn't exist" in str(e).lower():
+                return  # already gone
+            raise
+
+    # ── Cluster / SVM peering ────────────────────────────────────────────
+
+    def list_cluster_peers(self):
+        """Lists cluster peer relationships visible from this cluster."""
+        return self._get_all_records(
+            "cluster/peers",
+            params={"fields": "uuid,name,remote,status", "max_records": 100},
+        )
+
+    def get_cluster_peer_status(self, remote_cluster_name):
+        """Returns the cluster peer record matching remote_cluster_name, or None."""
+        for peer in self.list_cluster_peers():
+            if peer.get("name", "") == remote_cluster_name:
+                return peer
+            remote = peer.get("remote") or {}
+            if remote.get("name", "") == remote_cluster_name:
+                return peer
+        return None
+
+    def get_intercluster_lif_addresses(self):
+        """Returns IP addresses of this cluster's intercluster LIFs.
+
+        Required on both sides before cluster peering can be established —
+        NaSnap cannot create these (too network/topology-specific); a clear
+        error is raised here so the caller can surface an actionable message.
+        """
+        records = self._get_all_records(
+            "network/ip/interfaces",
+            params={"services": "intercluster-core", "fields": "ip.address", "max_records": 50},
+        )
+        addrs = [r.get("ip", {}).get("address", "") for r in records if (r.get("ip") or {}).get("address")]
+        if not addrs:
+            raise OntapError(
+                "No intercluster LIF found on this cluster — cluster peering requires at "
+                "least one LIF with the 'intercluster-core' service configured first."
+            )
+        return addrs
+
+    def create_cluster_peer_passphrase(self, expiry="PT1H"):
+        """Generates a one-time cluster-peering passphrase on this ('responder') cluster.
+
+        Returns (passphrase, this_cluster's intercluster LIF addresses).
+        """
+        resp = self._post(
+            "cluster/peers",
+            body={"authentication": {"generate_passphrase": True, "expiry_time": expiry}},
+        )
+        passphrase = (resp.get("authentication") or {}).get("passphrase", "")
+        if not passphrase:
+            raise OntapError("ONTAP did not return a cluster-peering passphrase")
+        return passphrase, self.get_intercluster_lif_addresses()
+
+    def complete_cluster_peer(self, remote_ip_addresses, passphrase):
+        """Completes cluster peering from the initiating ('requester') side.
+
+        remote_ip_addresses: intercluster LIF addresses of the responder cluster
+        (as returned by create_cluster_peer_passphrase on that cluster).
+        """
+        self._post(
+            "cluster/peers",
+            body={
+                "remote": {"ip_addresses": remote_ip_addresses},
+                "authentication": {"passphrase": passphrase},
+            },
+        )
+
+    def list_svm_peers(self, svm_name=None):
+        """Lists SVM peer relationships, optionally filtered to one local SVM."""
+        params = {"fields": "uuid,svm,peer,state,applications", "max_records": 200}
+        if svm_name:
+            params["svm.name"] = svm_name
+        return self._get_all_records("svm/peers", params=params)
+
+    def get_svm_peer_status(self, local_svm, remote_svm, remote_cluster_name=None):
+        """Returns the svm/peers record matching local_svm <-> remote_svm, or None."""
+        for peer in self.list_svm_peers(svm_name=local_svm):
+            remote = peer.get("peer") or {}
+            remote_svm_info = remote.get("svm") or {}
+            if remote_svm_info.get("name", "") != remote_svm:
+                continue
+            if remote_cluster_name:
+                remote_cluster = remote.get("cluster") or {}
+                if remote_cluster.get("name", "") and remote_cluster.get("name", "") != remote_cluster_name:
+                    continue
+            return peer
+        return None
+
+    def create_svm_peer(self, local_svm, remote_svm, remote_cluster_name, applications=None):
+        """Initiates an SVM peer request from this (source) cluster.
+
+        Cluster peering must already be established. The peer must still be
+        accepted on the destination side — see accept_svm_peer().
+        Returns the new svm/peers record (contains 'uuid').
+        """
+        body = {
+            "svm":          {"name": local_svm},
+            "peer":         {"cluster": {"name": remote_cluster_name}, "svm": {"name": remote_svm}},
+            "applications": applications or ["snapmirror"],
+        }
+        return self._post("svm/peers", body=body)
+
+    def accept_svm_peer(self, remote_svm, remote_cluster_name):
+        """Accepts a pending SVM peer request on this (destination) cluster."""
+        peer = self.get_svm_peer_status(remote_svm, remote_svm, remote_cluster_name)
+        # The pending record is visible under the *local* svm name on this side,
+        # which is the peer's remote svm — re-scan without a name filter to find it.
+        if not peer:
+            for p in self.list_svm_peers():
+                remote = p.get("peer") or {}
+                if (remote.get("svm") or {}).get("name", "") == remote_svm and p.get("state") == "pending":
+                    peer = p
+                    break
+        if not peer:
+            raise OntapError(f"No pending SVM peer request found for '{remote_svm}'")
+        if peer.get("state") == "peered":
+            return peer
+        self._patch(f"svm/peers/{peer['uuid']}", body={"state": "peered"})
+        return peer
+
+    # ── SnapMirror policies ──────────────────────────────────────────────
+
+    def list_snapmirror_policies(self, svm_name):
+        """Lists SnapMirror policies visible to (or scoped to) svm_name."""
+        return self._get_all_records(
+            "snapmirror/policies",
+            params={"svm.name": svm_name, "fields": "name,type,retention", "max_records": 200},
+        )
+
+    def create_snapmirror_policy(self, svm_name, name, policy_type,
+                                  snapmirror_label=None, retention_count=7):
+        """Creates a SnapMirror policy.
+
+        policy_type: 'mirror' (simple async mirror, no retention rule — behaves
+        like the built-in MirrorAllSnapshots) or 'vault' (async policy with one
+        retention rule keyed by snapmirror_label, SnapVault-style).
+        Returns the policy name (unchanged — provided by the caller).
+        """
+        body = {"name": name, "svm": {"name": svm_name}, "type": "async"}
+        if policy_type == "vault":
+            if not snapmirror_label:
+                raise ValueError("snapmirror_label is required for a vault policy")
+            body["retention"] = [{"label": snapmirror_label, "count": int(retention_count or 7)}]
+        self._post("snapmirror/policies", body=body)
+        return name

@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [1.6.2] — 2026-07-15
 
 ### Added
 
@@ -15,10 +15,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Recover VMs (Disaster Recovery tab)** — the former Datastores-tab "Import VMs" wizard is now the DR tab's **Recover VMs** wizard: source datastore/snapshot selection, target PVE host/cluster selection (with inline cluster discovery, optional — not required if the target is already registered), VMID remap, and a new "Start VMs after recovery" option (`provisioning/recovery/restore-vms` gains a `start_after` param, calling the new `start_vms()` primitive). Includes a hint linking to the existing Bind Wizard for datastores not yet mounted on the recovery cluster.
 - **Bulk Migrate** — move a set of VMs from one datastore to another, driven entirely from NaSnap (`storage/bulk-migrate-start`). Floating progress panel tracks each VM's migrate job individually with a live progress bar. On completion, the panel now shows an explicit success/failure summary and a Close button (previously it stayed open with no indication that the migration had finished).
 - **VM OS type persistence** — detected VM OS type (used for restore/clone icons) is now cached in a new `netapp_vm_os_cache` table and only refreshed in the background, instead of disappearing and reloading on every view. VMs that are off or no longer live keep their last known value.
+- **FlexGroup volumes (NFS)** — the Provision Wizard can create a FlexGroup volume (`aggregate_names`, multi-aggregate) instead of a single-aggregate FlexVol, for datastores that need to scale past one aggregate's capacity. NFS-only — iSCSI/NVMe are LUN/namespace-limited, not aggregate-limited.
+- **SnapMirror/SnapVault replication automation** — new `core/replication_engine.py` with `setup_replication()`/`teardown_replication()`, plus cluster-peer, SVM-peer, and SnapMirror-policy primitives in `ontap_client.py`. Replicate a datastore to a second registered NetApp system in one step: NaSnap automatically establishes cluster and SVM peering if not already present (both endpoints must already be registered in NaSnap, since it needs admin credentials for both sides), then creates the relationship with an existing or newly created policy (Mirror for DR, Vault with a retention rule for backup). Available both at provisioning time (new wizard step 4) and retroactively via a new **SnapMirror / Vault** kebab action on any datastore (status, trigger update, change policy, break & remove). Deleting a replicated datastore now prompts whether to keep or delete the destination volume — the relationship itself is always broken and released first, as ONTAP requires.
 
 ### Fixed
 
 - **Bulk Migrate / Datastore move progress** — the disk-move progress bar for bulk datastore migration now reflects real progress (previously stuck at 0% while Proxmox showed live progress for the same move).
+- **SnapMirror relationship creation on the wrong cluster** — `create_snapmirror_relationship()` with `create_destination.enabled` must be issued against the *destination* cluster's API (it provisions the destination volume and resolves the policy locally); issuing it from the source side made the source cluster fetch that information over the intercluster link instead, which could fail right after peering/policy creation with a "Policy not found" error.
+- **`get_volumes()` 400 on some ONTAP versions** — some ONTAP versions reject `snaplock.snapshot_locking_enabled` in the `fields` list of the `GET storage/volumes` collection endpoint (HTTP 400), even though it's used elsewhere for the 🔒 Tamperproof badge. Now retries once without that field instead of failing the whole call (and, transitively, new-volume provisioning whenever the create response didn't include the UUID directly).
+- **SnapMirror relationship creation job timeout too short** — destination volume creation + relationship linkage over an intercluster link can take much longer than a same-cluster operation for large volumes; the job-poll timeout was raised from 300s to 30 minutes.
+- **Datastores list not refreshing after retrofitting SnapMirror** — the automatic "refresh datastore list on job completion" mechanism only recognized job labels starting with `Provision/Remove/Resize/Add host/Mount:`; the new SnapMirror setup/teardown jobs now use a matching `SnapMirror:` label prefix so the list updates automatically instead of requiring a manual Detect & Scan.
 
 ---
 

@@ -189,6 +189,7 @@ def _prov_remove():
         return {"error": "id required"}, 400
     delete_ontap = bool(body.get("delete_ontap_objects", False))
     force        = bool(body.get("force", False))
+    snapmirror_action = body.get("snapmirror_action", "keep")
 
     db  = get_db()
     row = db.query_one(
@@ -218,7 +219,7 @@ def _prov_remove():
         (_now(), ds_id),
     )
     job_id = _start_job(db, "provision_remove", ds_id, username)
-    _run_remove_job_async(job_id, ds_id, delete_ontap, username)
+    _run_remove_job_async(job_id, ds_id, delete_ontap, snapmirror_action, username)
     return {"job_id": job_id}, 202
 
 
@@ -621,7 +622,9 @@ def _storage_unified():
                sm.id AS sm_id, sm.state AS sm_state, sm.lag_time AS sm_lag,
                sm.healthy AS sm_healthy, sm.dest_cluster_name AS sm_dest_cluster,
                sm.last_transfer_time AS sm_last_transfer,
-               sm.dest_endpoint_id AS sm_dest_ep_id
+               sm.dest_endpoint_id AS sm_dest_ep_id,
+               sm.dest_svm AS sm_dest_svm, sm.dest_volume AS sm_dest_volume,
+               sm.relationship_uuid AS sm_rel_uuid, sm.policy_name AS sm_policy_name
         FROM netapp_provisioned_datastores p
         LEFT JOIN netapp_endpoints ep ON ep.id = p.endpoint_id
         LEFT JOIN netapp_snapmirror_relationships sm
@@ -686,10 +689,15 @@ def _storage_unified():
                 "dest_cluster_name": d.pop("sm_dest_cluster", None),
                 "last_transfer_time":d.pop("sm_last_transfer", None),
                 "dest_endpoint_id":  d.pop("sm_dest_ep_id", None),
+                "dest_svm":          d.pop("sm_dest_svm", None),
+                "dest_volume":       d.pop("sm_dest_volume", None),
+                "relationship_uuid": d.pop("sm_rel_uuid", None),
+                "policy_name":       d.pop("sm_policy_name", None),
             }
         else:
             for k in ("sm_id", "sm_state", "sm_lag", "sm_healthy",
-                      "sm_dest_cluster", "sm_last_transfer", "sm_dest_ep_id"):
+                      "sm_dest_cluster", "sm_last_transfer", "sm_dest_ep_id",
+                      "sm_dest_svm", "sm_dest_volume", "sm_rel_uuid", "sm_policy_name"):
                 d.pop(k, None)
             d["snapmirror"] = None
         prov_storage_ids.add(d.get("pve_storage_id", ""))
@@ -704,7 +712,9 @@ def _storage_unified():
                sm.id AS sm_id, sm.state AS sm_state, sm.lag_time AS sm_lag,
                sm.healthy AS sm_healthy, sm.dest_cluster_name AS sm_dest_cluster,
                sm.last_transfer_time AS sm_last_transfer,
-               sm.dest_endpoint_id AS sm_dest_ep_id
+               sm.dest_endpoint_id AS sm_dest_ep_id,
+               sm.dest_svm AS sm_dest_svm, sm.dest_volume AS sm_dest_volume,
+               sm.relationship_uuid AS sm_rel_uuid, sm.policy_name AS sm_policy_name
         FROM netapp_volume_mapping m
         LEFT JOIN netapp_endpoints ep ON ep.id = m.endpoint_id
         LEFT JOIN netapp_snapmirror_relationships sm
@@ -775,6 +785,10 @@ def _storage_unified():
                 "dest_cluster_name": m.get("sm_dest_cluster"),
                 "last_transfer_time":m.get("sm_last_transfer"),
                 "dest_endpoint_id":  m.get("sm_dest_ep_id"),
+                "dest_svm":          m.get("sm_dest_svm"),
+                "dest_volume":       m.get("sm_dest_volume"),
+                "relationship_uuid": m.get("sm_rel_uuid"),
+                "policy_name":       m.get("sm_policy_name"),
             }
         else:
             item["snapmirror"] = None
@@ -1274,6 +1288,159 @@ def _prov_ds_reindex():
     return {"written": len(snapshots), "mapping_id": mapping_id}
 
 
+# ── SnapMirror / SnapVault replication ────────────────────────────────────────
+
+def _prov_replication_peering_status():
+    """GET: live cluster+SVM peer status between a source and target endpoint/SVM."""
+    err = _require_admin()
+    if err:
+        return err
+    from flask import request
+    source_ep_id = request.args.get("source_endpoint_id")
+    target_ep_id = request.args.get("target_endpoint_id")
+    source_svm   = request.args.get("source_svm", "")
+    target_svm   = request.args.get("target_svm", "")
+    if not (source_ep_id and target_ep_id and source_svm and target_svm):
+        return {"error": "source_endpoint_id, target_endpoint_id, source_svm, target_svm required"}, 400
+    db = get_db()
+    try:
+        source_client = build_ontap_client(get_endpoint(db, source_ep_id))
+        target_client = build_ontap_client(get_endpoint(db, target_ep_id))
+        source_cluster_name, _, _ = source_client.test_connection()
+        target_cluster_name, _, _ = target_client.test_connection()
+        cluster_peered = bool(source_client.get_cluster_peer_status(target_cluster_name))
+        svm_peer = source_client.get_svm_peer_status(source_svm, target_svm, target_cluster_name)
+        svm_peered = bool(svm_peer and svm_peer.get("state") == "peered")
+        return {
+            "source_cluster_name": source_cluster_name,
+            "target_cluster_name": target_cluster_name,
+            "cluster_peered": cluster_peered,
+            "svm_peered": svm_peered,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+
+def _prov_replication_policies():
+    """GET: list SnapMirror policies visible on an endpoint's SVM."""
+    err = _require_admin()
+    if err:
+        return err
+    from flask import request
+    endpoint_id = request.args.get("endpoint_id")
+    svm_name    = request.args.get("svm_name", "")
+    if not (endpoint_id and svm_name):
+        return {"error": "endpoint_id and svm_name required"}, 400
+    db = get_db()
+    try:
+        client = build_ontap_client(get_endpoint(db, endpoint_id))
+        policies = client.list_snapmirror_policies(svm_name)
+        return {"policies": [{"name": p.get("name", ""), "type": p.get("type", "")} for p in policies]}
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+
+def _prov_replication_setup():
+    """POST: set up (or retrofit) SnapMirror replication for an existing datastore."""
+    err = _require_admin()
+    if err:
+        return err
+    from flask import request
+    body  = request.get_json(force=True) or {}
+    ds_id = body.get("ds_id")
+    target_endpoint_id = body.get("target_endpoint_id")
+    target_svm         = body.get("target_svm")
+    policy              = body.get("policy") or {}
+    if not (ds_id and target_endpoint_id and target_svm):
+        return {"error": "ds_id, target_endpoint_id, target_svm required"}, 400
+    db  = get_db()
+    row = db.query_one(
+        "SELECT endpoint_id, svm_name, volume_name FROM netapp_provisioned_datastores WHERE id=?",
+        (ds_id,))
+    if not row:
+        return {"error": "Datastore not found"}, 404
+    ds = dict(row)
+    username = request.session.get("user", "unknown")
+    job_id = _start_job(db, "snapmirror_setup", ds_id, username)
+
+    import threading
+    def _run():
+        jdb = get_db()
+        jlog = JobLogger(job_id, jdb)
+        try:
+            from ..core.replication_engine import setup_replication
+            setup_replication(
+                ds["endpoint_id"], ds["svm_name"], ds["volume_name"],
+                target_endpoint_id, target_svm, policy, jdb, jlog,
+            )
+            _finish_job(jdb, job_id)
+        except Exception as exc:
+            jlog.log(f"ERROR: {exc}")
+            _fail_job(jdb, job_id)
+    threading.Thread(target=_run, daemon=True).start()
+    return {"job_id": job_id}, 202
+
+
+def _prov_replication_update_policy():
+    """POST: change the SnapMirror policy on an existing relationship."""
+    err = _require_admin()
+    if err:
+        return err
+    from flask import request
+    body = request.get_json(force=True) or {}
+    relationship_id = body.get("relationship_id")
+    policy_name      = body.get("policy_name")
+    if not (relationship_id and policy_name):
+        return {"error": "relationship_id and policy_name required"}, 400
+    db  = get_db()
+    row = db.query_one(
+        "SELECT source_endpoint_id, relationship_uuid FROM netapp_snapmirror_relationships WHERE id=?",
+        (relationship_id,))
+    if not row:
+        return {"error": "Relationship not found"}, 404
+    rel = dict(row)
+    try:
+        client = build_ontap_client(get_endpoint(db, rel["source_endpoint_id"]))
+        client.update_snapmirror_policy(rel["relationship_uuid"], policy_name)
+        db.execute(
+            "UPDATE netapp_snapmirror_relationships SET policy_name=? WHERE id=?",
+            (policy_name, relationship_id),
+        )
+        return {"success": True}
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+
+def _prov_replication_remove():
+    """POST: break and remove a SnapMirror relationship (without deleting the datastore)."""
+    err = _require_admin()
+    if err:
+        return err
+    from flask import request
+    body = request.get_json(force=True) or {}
+    relationship_id   = body.get("relationship_id")
+    delete_destination = bool(body.get("delete_destination", False))
+    if not relationship_id:
+        return {"error": "relationship_id required"}, 400
+    db = get_db()
+    username = request.session.get("user", "unknown")
+    job_id = _start_job(db, "snapmirror_teardown", relationship_id, username)
+
+    import threading
+    def _run():
+        jdb = get_db()
+        jlog = JobLogger(job_id, jdb)
+        try:
+            from ..core.replication_engine import teardown_replication
+            teardown_replication(relationship_id, delete_destination, jdb, jlog)
+            _finish_job(jdb, job_id)
+        except Exception as exc:
+            jlog.log(f"ERROR: {exc}")
+            _fail_job(jdb, job_id)
+    threading.Thread(target=_run, daemon=True).start()
+    return {"job_id": job_id}, 202
+
+
 def register_routes():
     from nasnap_core.api.plugins import register_plugin_route
     register_plugin_route(PLUGIN_ID, "storage/unified",                    _storage_unified)
@@ -1294,6 +1461,11 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan-all",   _prov_ds_scan_all)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/reindex",    _prov_ds_reindex)
     register_plugin_route(PLUGIN_ID, "provisioning/plugin-settings",       _prov_plugin_settings)
+    register_plugin_route(PLUGIN_ID, "provisioning/replication/peering-status", _prov_replication_peering_status)
+    register_plugin_route(PLUGIN_ID, "provisioning/replication/policies",       _prov_replication_policies)
+    register_plugin_route(PLUGIN_ID, "provisioning/replication/setup",         _prov_replication_setup)
+    register_plugin_route(PLUGIN_ID, "provisioning/replication/update-policy", _prov_replication_update_policy)
+    register_plugin_route(PLUGIN_ID, "provisioning/replication/remove",        _prov_replication_remove)
 
 
 # ── Job helpers ───────────────────────────────────────────────────────────────
@@ -1360,10 +1532,10 @@ def _run_remove_host_job_async(job_id, ds_id, host_id, username):
     t.start()
 
 
-def _run_remove_job_async(job_id, ds_id, delete_ontap, username):
+def _run_remove_job_async(job_id, ds_id, delete_ontap, snapmirror_action, username):
     import threading
     t = threading.Thread(
-        target=_run_remove, args=(job_id, ds_id, delete_ontap, username), daemon=True)
+        target=_run_remove, args=(job_id, ds_id, delete_ontap, snapmirror_action, username), daemon=True)
     t.start()
 
 
@@ -1386,6 +1558,27 @@ def _run_provision(job_id, ds_id, params, username):
             _set_ds_status(db, ds_id, "error", f"Protocol not implemented: {protocol}")
             _fail_job(db, job_id)
             return
+
+        replication = params.get("replication") or {}
+        if replication.get("enabled"):
+            jlog.log("Setting up SnapMirror/SnapVault replication …")
+            try:
+                from ..core.replication_engine import setup_replication
+                ds_row = dict(db.query_one(
+                    "SELECT endpoint_id, svm_name, volume_name FROM netapp_provisioned_datastores WHERE id=?",
+                    (ds_id,)))
+                setup_replication(
+                    ds_row["endpoint_id"], ds_row["svm_name"], ds_row["volume_name"],
+                    replication["target_endpoint_id"], replication["target_svm"],
+                    replication.get("policy") or {}, db, jlog,
+                )
+            except Exception as exc:
+                # Replication failure does not roll back the already-created datastore —
+                # it can be retried later via the "SnapMirror / Vault" action.
+                jlog.log(f"WARNING: replication setup failed: {exc}")
+                jlog.log("The datastore itself was created successfully; retry replication "
+                         "from the datastore's SnapMirror / Vault action.")
+
         _finish_job(db, job_id)
     except Exception as exc:
         log.error(f"[netapp_storage] provision job {job_id}: {exc}")
@@ -2069,7 +2262,7 @@ def _run_remove_host(job_id, ds_id, host_id, username):
         _fail_job(db, job_id)
 
 
-def _run_remove(job_id, ds_id, delete_ontap, username):
+def _run_remove(job_id, ds_id, delete_ontap, snapmirror_action, username):
     db = get_db()
     jlog = JobLogger(job_id, db)
     try:
@@ -2079,6 +2272,23 @@ def _run_remove(job_id, ds_id, delete_ontap, username):
         ds       = dict(row)
         protocol = ds.get("protocol", "")
         jlog.log(f"Removing {protocol} datastore '{ds.get('name')}' (delete_ontap={delete_ontap}) …")
+
+        # SnapMirror relationships must be broken/released before ONTAP allows the
+        # source volume to be deleted — tear this down first, regardless of protocol.
+        sm_row = db.query_one(
+            "SELECT id FROM netapp_snapmirror_relationships WHERE source_volume_uuid=? "
+            "OR (source_endpoint_id=? AND source_svm=? AND source_volume=?)",
+            (ds.get("volume_uuid", ""), ds.get("endpoint_id", ""),
+             ds.get("svm_name", ""), ds.get("volume_name", "")),
+        )
+        if sm_row:
+            jlog.log("SnapMirror relationship detected on this datastore — tearing it down first …")
+            try:
+                from ..core.replication_engine import teardown_replication
+                teardown_replication(
+                    dict(sm_row)["id"], snapmirror_action == "delete", db, jlog)
+            except Exception as exc:
+                jlog.log(f"WARNING: SnapMirror teardown failed: {exc}")
 
         if protocol == "iscsi":
             _remove_iscsi(ds_id, ds, delete_ontap, db, jlog)
@@ -3114,6 +3324,7 @@ def _provision_nfs(ds_id, params, db, jlog):
     pve_host_ids   = params["pve_host_ids"]
     size_bytes     = int(params.get("size_bytes", 0))
     aggregate_name = params.get("aggregate_name", "") or None
+    aggregate_names = [a for a in (params.get("aggregate_names") or []) if a] or None
     junction_path  = params.get("nfs_junction_path", "") or f"/{name.replace(' ', '-').lower()}"
     volume_name    = _ontap_safe_name(params.get("volume_name", ""))
     nfs_lif_ip_sel = params.get("nfs_lif_ip", "").strip()   # user-selected LIF IP
@@ -3160,7 +3371,12 @@ def _provision_nfs(ds_id, params, db, jlog):
     volume_uuid = params.get("volume_uuid", "")
     snap_locking_enabled = 0
     if not volume_uuid:
-        ag_info = f" on aggregate '{aggregate_name}'" if aggregate_name else " (auto-placement)"
+        if aggregate_names:
+            ag_info = f" as a FlexGroup on aggregates: {', '.join(aggregate_names)}"
+        elif aggregate_name:
+            ag_info = f" on aggregate '{aggregate_name}'"
+        else:
+            ag_info = " (auto-placement)"
         jlog.log(f"Creating NFS volume '{volume_name}' ({size_bytes} bytes)"
                  f" junction='{junction_path}'{ag_info} …")
         # Create a dedicated export policy for this datastore
@@ -3209,8 +3425,12 @@ def _provision_nfs(ds_id, params, db, jlog):
         volume_uuid = client.create_volume_nfs(svm_name, volume_name, size_bytes,
                                                junction_path,
                                                aggregate_name=aggregate_name,
+                                               aggregate_names=aggregate_names,
                                                export_policy=policy_name)
         jlog.log(f"Volume created: {volume_uuid}")
+        if aggregate_names:
+            db.execute(
+                "UPDATE netapp_provisioned_datastores SET is_flexgroup=1 WHERE id=?", (ds_id,))
         try:
             client.enable_inline_compression(volume_uuid)
             jlog.log("Inline compression enabled.")

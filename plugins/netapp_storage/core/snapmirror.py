@@ -138,6 +138,7 @@ def _upsert_relationship(db, rel, mapping):
     lag = rel.get("lag_time", "")
     last_transfer = transfer.get("end_time", "")
     policy_type = policy.get("type", "")
+    policy_name = policy.get("name", "")
 
     # ONTAP returns source/destination as {path: "svm:volume", cluster: {...}}
     # path format: "svm_name:volume_name"
@@ -152,9 +153,9 @@ def _upsert_relationship(db, rel, mapping):
     if existing:
         db.execute(
             "UPDATE netapp_snapmirror_relationships "
-            "SET state=?, healthy=?, lag_time=?, last_transfer_time=?, last_scanned_at=? "
+            "SET state=?, healthy=?, lag_time=?, last_transfer_time=?, last_scanned_at=?, policy_name=? "
             "WHERE relationship_uuid=?",
-            (state, healthy, lag, last_transfer, now, rel_uuid),
+            (state, healthy, lag, last_transfer, now, policy_name, rel_uuid),
         )
     else:
         rid = str(uuid.uuid4())
@@ -162,12 +163,12 @@ def _upsert_relationship(db, rel, mapping):
             "INSERT INTO netapp_snapmirror_relationships "
             "(id, source_endpoint_id, source_volume_uuid, source_svm, source_volume, "
             "dest_cluster_name, dest_svm, dest_volume, "
-            "relationship_uuid, policy_type, state, healthy, lag_time, last_transfer_time, last_scanned_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "relationship_uuid, policy_type, policy_name, state, healthy, lag_time, last_transfer_time, last_scanned_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (rid, mapping["endpoint_id"], mapping["volume_uuid"],
              src_svm, src_vol,
              dest_cluster, dest_svm, dest_vol,
-             rel_uuid, policy_type, state, healthy, lag, last_transfer, now),
+             rel_uuid, policy_type, policy_name, state, healthy, lag, last_transfer, now),
         )
 
 

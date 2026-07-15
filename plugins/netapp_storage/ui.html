@@ -848,6 +848,7 @@
   body.glass-theme #cwModal > div,
   body.glass-theme #vmInfoModal > div,
   body.glass-theme #bulkMigrateModal > div,
+  body.glass-theme #smConfigModal > div,
   body.glass-theme #dsScanIndexModal > div {
     background: rgba(14,24,42,0.88) !important;
     backdrop-filter: blur(32px) saturate(1.6);
@@ -2990,7 +2991,7 @@ window.addEventListener('pageshow', function(evt) {
     'drAddGroupModal','drAddVmModal',
     'drFailoverModal','drEditEntryModal','restoreConfirmModal',
     'deleteConfirmModal','logViewModal','rwModal','cwModal','ncModal',
-    'vmInfoModal','bulkMigrateModal'
+    'vmInfoModal','bulkMigrateModal','smConfigModal'
   ];
   forms.forEach(function(id) {
     var el = document.getElementById(id);
@@ -3064,6 +3065,29 @@ function uiAlert(msg) {
   });
 }
 
+// Generic multi-choice dialog. options: [{value, label, class}]. Resolves to
+// the chosen value, or null if cancelled/escaped.
+function uiChoice(msg, options) {
+  return new Promise(function(resolve) {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:9500;display:flex;align-items:center;justify-content:center';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;min-width:300px;max-width:480px;word-break:break-word';
+    box.innerHTML = '<div style="margin-bottom:16px;white-space:pre-line">'+esc(msg)+'</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
+      + options.map(function(o,i){ return '<button class="_uch-opt btn '+(o.class||'btn-secondary')+'" data-i="'+i+'">'+esc(o.label)+'</button>'; }).join('')
+      + '<button class="_uch-cancel btn btn-ghost">Cancel</button></div>';
+    overlay.appendChild(box);
+    _uiOverlayShow(overlay);
+    function done(v){ _uiOverlayHide(overlay); resolve(v); }
+    box.querySelectorAll('._uch-opt').forEach(function(btn){
+      btn.onclick = function(){ done(options[parseInt(btn.dataset.i)].value); };
+    });
+    box.querySelector('._uch-cancel').onclick = function(){ done(null); };
+    overlay.addEventListener('keydown', function(ev){ if(ev.key==='Escape') done(null); });
+  });
+}
+
 // ── Focus trap + keyboard helpers ──────────────────────────────────────────
 var _FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
@@ -3093,6 +3117,7 @@ document.addEventListener('keydown', function(ev) {
     { id: 'cwModal',  fn: function(){ closeCloneWizard(); } },
     { id: 'vmInfoModal', fn: function(){ closeVmInfoModal(); } },
     { id: 'bulkMigrateModal', fn: function(){ closeBulkMigrateWizard(); } },
+    { id: 'smConfigModal', fn: function(){ hideSmConfigModal(); } },
     { id: 'ncModal',  fn: function(){ closeNativeCloneModal(); } },
     { id: 'addScheduleForm', fn: function(){ hideForm('addScheduleForm'); } }
   ];
@@ -3112,7 +3137,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
     // Close any open full-screen form overlays so they don't block the new tab
     ['createSnapshotForm','addScheduleForm','addEndpointForm','editEndpointForm',
      'addPveHostForm','editPveHostForm','setupWizardModal','provWizModal','bindWizModal',
-     'vmImportModal'].forEach(function(fid) {
+     'vmImportModal','smConfigModal'].forEach(function(fid) {
       var fe = document.getElementById(fid);
       if (fe && fe.style.display !== 'none') hideForm(fid);
     });
@@ -4445,6 +4470,7 @@ var _I = {
   play:    'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   info:    'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   migrate: 'M21 8H8m0 0l4-4M8 8l4 4M3 16h13m0 0l-4-4m4 4l-4 4',
+  sync:    'M17 1l4 4-4 4M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 01-4 4H3',
 };
 function _ico(key, sz) {
   sz = sz || 18;
@@ -8929,6 +8955,8 @@ function dsOpenActionsMenu(evt, dsId) {
         + JSON.stringify(ds.pve_host_ids||[]).replace(/"/g,'&quot;')+',\''+esc(ds.protocol||'')+'\')'));
     items.push(_rcMenuItem('Resize', _ico('resize',14),
       'dsCloseActionsMenu();showResizeDialog(\''+ds.id+'\',\''+esc(ds.name)+'\','+(ds.size_bytes||0)+',\''+esc(ds.protocol||'')+'\')'));
+    items.push(_rcMenuItem('SnapMirror / Vault', _ico('sync',14),
+      'dsCloseActionsMenu();openSmConfigModal(\''+ds.id+'\')'));
     items.push(_rcMenuItem('Remove', _ico('trash',14),
       'dsCloseActionsMenu();confirmRemoveDatastore(\''+ds.id+'\',\''+esc(ds.name)+'\')'));
   } else {
@@ -8976,6 +9004,221 @@ function dsCloseActionsMenu() {
   document.removeEventListener('keydown', _dsMenuEsc);
 }
 function _dsMenuEsc(e) { if (e.key === 'Escape') dsCloseActionsMenu(); }
+
+// ── SnapMirror / Vault config modal ──────────────────────────────────────────
+var _smState = { dsId: null, ds: null };
+
+async function openSmConfigModal(dsId) {
+  var ds = _storageItemsById[dsId];
+  if (!ds) return;
+  _smState = { dsId: dsId, ds: ds };
+  document.getElementById('smConfigTitle').textContent = 'SnapMirror / Vault — ' + ds.name;
+  document.getElementById('smActionMsg').textContent = '';
+  document.getElementById('smChangePolicyRow').style.display = 'none';
+  document.getElementById('smBreakRemoveRow').style.display = 'none';
+  document.getElementById('smConfigModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  if (ds.snapmirror) {
+    document.getElementById('smStatusPanel').style.display = '';
+    document.getElementById('smSetupPanel').style.display = 'none';
+    var sm = ds.snapmirror;
+    document.getElementById('smStState').textContent = sm.state || '–';
+    document.getElementById('smStHealthy').textContent = sm.healthy ? 'Yes' : 'No';
+    document.getElementById('smStLag').textContent = sm.lag_time || '–';
+    document.getElementById('smStPolicy').textContent = sm.policy_name || '–';
+    document.getElementById('smStDest').textContent =
+      (sm.dest_cluster_name || '–') + ' · ' + (sm.dest_svm || '–') + ':' + (sm.dest_volume || '–');
+  } else {
+    document.getElementById('smStatusPanel').style.display = 'none';
+    document.getElementById('smSetupPanel').style.display = '';
+    document.getElementById('smSetupErr').textContent = '';
+    try {
+      var eps = await apiFetch('endpoints');
+      var others = (eps || []).filter(function(ep){ return ep.id !== ds.endpoint_id; });
+      var sel = document.getElementById('smEndpoint');
+      sel.innerHTML = others.length
+        ? '<option value="">— select —</option>' + others.map(function(ep){
+            return '<option value="' + esc(ep.id) + '">' + esc(ep.name) + ' (' + esc(ep.host) + ')</option>'; }).join('')
+        : '<option value="">— no other NetApp systems registered —</option>';
+    } catch (e) { /* leave dropdown empty */ }
+  }
+}
+
+function hideSmConfigModal() {
+  document.getElementById('smConfigModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+function smConfigBackdropClick(e) {
+  if (e.target === document.getElementById('smConfigModal')) hideSmConfigModal();
+}
+
+async function smEndpointChange() {
+  var epId = document.getElementById('smEndpoint').value;
+  var sel = document.getElementById('smSvm');
+  document.getElementById('smPeerStatus').style.display = 'none';
+  if (!epId) { sel.innerHTML = '<option value="">— select endpoint first —</option>'; return; }
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  try {
+    var data = await apiFetch('provisioning/svms?endpoint_id=' + encodeURIComponent(epId));
+    sel.innerHTML = '<option value="">— select SVM —</option>' +
+      (data.svms || []).map(function(s){ return '<option value="' + esc(s.name) + '">' + esc(s.name) + '</option>'; }).join('');
+  } catch (e) { sel.innerHTML = '<option value="">— error loading SVMs —</option>'; }
+}
+
+async function smCheckPeering() {
+  var ds = _smState.ds;
+  var targetEpId = document.getElementById('smEndpoint').value;
+  var targetSvm  = document.getElementById('smSvm').value.trim();
+  var box = document.getElementById('smPeerStatus');
+  if (!(ds && ds.endpoint_id && ds.svm_name && targetEpId && targetSvm)) { box.style.display = 'none'; smPolicyChange(); return; }
+  box.style.display = 'block';
+  box.style.cssText = 'display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:var(--bg);color:var(--muted)';
+  box.textContent = 'Checking cluster/SVM peering status…';
+  try {
+    var qs = 'source_endpoint_id=' + encodeURIComponent(ds.endpoint_id) + '&target_endpoint_id=' + encodeURIComponent(targetEpId)
+      + '&source_svm=' + encodeURIComponent(ds.svm_name) + '&target_svm=' + encodeURIComponent(targetSvm);
+    var st = await apiFetch('provisioning/replication/peering-status?' + qs);
+    if (st.cluster_peered && st.svm_peered) {
+      box.style.cssText = 'display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:rgba(46,160,67,.1);border:1px solid rgba(46,160,67,.35);color:#3fb950';
+      box.textContent = '✓ Cluster and SVM already peered — ready to replicate.';
+    } else {
+      var missing = [];
+      if (!st.cluster_peered) missing.push('cluster peering');
+      if (!st.svm_peered) missing.push('SVM peering');
+      box.style.cssText = 'display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:rgba(240,160,64,.08);border:1px solid rgba(240,160,64,.3);color:#f0a040';
+      box.textContent = '⚠ ' + missing.join(' and ') + ' not yet established — NaSnap will set it up automatically '
+        + '(requires intercluster LIFs already configured on both clusters).';
+    }
+  } catch (e) {
+    box.style.cssText = 'display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:rgba(240,80,80,.08);border:1px solid rgba(240,80,80,.3);color:var(--error)';
+    box.textContent = 'Could not check peering status: ' + (e.message || e);
+  }
+  smPolicyChange();
+}
+
+async function smPolicyChange() {
+  var epId = document.getElementById('smEndpoint').value;
+  var svm  = document.getElementById('smSvm').value.trim();
+  var sel  = document.getElementById('smPolicy');
+  if (!(epId && svm)) { sel.innerHTML = '<option value="">— select endpoint &amp; SVM first —</option>'; return; }
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  try {
+    var data = await apiFetch('provisioning/replication/policies?endpoint_id=' + encodeURIComponent(epId) + '&svm_name=' + encodeURIComponent(svm));
+    var opts = (data.policies || []).map(function(p){ return '<option value="' + esc(p.name) + '">' + esc(p.name) + ' (' + esc(p.type) + ')</option>'; }).join('');
+    sel.innerHTML = opts + '<option value="__new__">+ New Policy…</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="__new__">+ New Policy…</option>';
+  }
+  smPolicySelectChange();
+}
+
+function smPolicySelectChange() {
+  document.getElementById('smNewPolicyRow').style.display =
+    document.getElementById('smPolicy').value === '__new__' ? '' : 'none';
+}
+function smPolicyTypeChange() {
+  var type = (document.querySelector('input[name="smPolicyType"]:checked') || {}).value || 'mirror';
+  document.getElementById('smVaultRow').style.display = type === 'vault' ? '' : 'none';
+}
+
+async function smDoSetup() {
+  var targetEpId = document.getElementById('smEndpoint').value;
+  var targetSvm  = document.getElementById('smSvm').value.trim();
+  var errEl = document.getElementById('smSetupErr');
+  errEl.textContent = '';
+  if (!targetEpId || !targetSvm) { errEl.textContent = 'Select a target NetApp system and SVM.'; return; }
+  var policySel = document.getElementById('smPolicy').value;
+  var policy;
+  if (policySel === '__new__') {
+    var pname = document.getElementById('smPolicyName').value.trim();
+    if (!pname) { errEl.textContent = 'Enter a name for the new SnapMirror policy.'; return; }
+    var ptype = (document.querySelector('input[name="smPolicyType"]:checked') || {}).value || 'mirror';
+    policy = { new: { name: pname, type: ptype,
+      label: document.getElementById('smVaultLabel').value.trim(),
+      retention_count: parseInt(document.getElementById('smVaultRetention').value) || 7 } };
+    if (ptype === 'vault' && !policy.new.label) { errEl.textContent = 'Enter a SnapMirror label for the Vault policy.'; return; }
+  } else if (policySel) {
+    policy = { existing_name: policySel };
+  } else {
+    errEl.textContent = 'Select or create a SnapMirror policy.'; return;
+  }
+  var btn = document.getElementById('smSetupBtn');
+  var spinner = document.getElementById('smSetupSpinner');
+  btn.disabled = true; spinner.style.display = '';
+  try {
+    var r = await apiPost('provisioning/replication/setup', {
+      ds_id: _smState.dsId, target_endpoint_id: targetEpId, target_svm: targetSvm, policy: policy,
+    });
+    hideSmConfigModal();
+    toast('SnapMirror replication setup started', 'success');
+    if (r.job_id) trackJob(r.job_id, 'SnapMirror: setup ' + (_smState.ds || {}).name);
+    actLogStart();
+    loadStorageUnified();
+  } catch (e) {
+    errEl.textContent = e.message || String(e);
+  } finally {
+    btn.disabled = false; spinner.style.display = 'none';
+  }
+}
+
+function smTriggerUpdate() {
+  var relId = ((_smState.ds || {}).snapmirror || {}).id;
+  if (!relId) return;
+  apiPost('snapmirror/update', { relationship_id: relId })
+    .then(function(){ document.getElementById('smActionMsg').textContent = 'Update triggered.'; toast('SnapMirror update triggered', 'success'); })
+    .catch(function(e){ document.getElementById('smActionMsg').textContent = 'Failed: ' + (e.message || e); });
+}
+
+async function smShowChangePolicy() {
+  document.getElementById('smBreakRemoveRow').style.display = 'none';
+  var row = document.getElementById('smChangePolicyRow');
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+  if (row.style.display === 'none') return;
+  var ds = _smState.ds;
+  var sel = document.getElementById('smChangePolicySel');
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  try {
+    var data = await apiFetch('provisioning/replication/policies?endpoint_id=' + encodeURIComponent(ds.endpoint_id) + '&svm_name=' + encodeURIComponent(((ds.snapmirror||{}).dest_svm)||''));
+    sel.innerHTML = (data.policies || []).map(function(p){ return '<option value="' + esc(p.name) + '">' + esc(p.name) + ' (' + esc(p.type) + ')</option>'; }).join('');
+  } catch (e) { sel.innerHTML = '<option value="">— error loading policies —</option>'; }
+}
+
+function smSaveChangePolicy() {
+  var relId = ((_smState.ds || {}).snapmirror || {}).id;
+  var policyName = document.getElementById('smChangePolicySel').value;
+  if (!relId || !policyName) return;
+  apiPost('provisioning/replication/update-policy', { relationship_id: relId, policy_name: policyName })
+    .then(function(){
+      document.getElementById('smActionMsg').textContent = 'Policy updated to ' + policyName + '.';
+      toast('SnapMirror policy updated', 'success');
+      loadStorageUnified();
+    })
+    .catch(function(e){ document.getElementById('smActionMsg').textContent = 'Failed: ' + (e.message || e); });
+}
+
+function smShowBreakRemove() {
+  document.getElementById('smChangePolicyRow').style.display = 'none';
+  var row = document.getElementById('smBreakRemoveRow');
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+async function smBreakRemove(deleteDestination) {
+  var relId = ((_smState.ds || {}).snapmirror || {}).id;
+  if (!relId) return;
+  if (!await uiConfirm('Break and remove this SnapMirror relationship?' +
+      (deleteDestination ? '\n\nThe destination volume will also be permanently deleted.' : '\n\nThe destination volume will be kept.'))) return;
+  try {
+    var r = await apiPost('provisioning/replication/remove', { relationship_id: relId, delete_destination: deleteDestination });
+    hideSmConfigModal();
+    toast('SnapMirror teardown started', 'success');
+    if (r.job_id) trackJob(r.job_id, 'SnapMirror: teardown ' + (_smState.ds || {}).name);
+    actLogStart();
+    loadStorageUnified();
+  } catch (e) {
+    toast(e.message || String(e), 'error');
+  }
+}
 
 async function loadStorageUnified() {
   // Show stale cache immediately so the tab feels instant
@@ -9633,7 +9876,7 @@ function hideProvWizard() {
 }
 
 function provWizShowStep(n) {
-  [1,2,3].forEach(function(i){
+  [1,2,3,4].forEach(function(i){
     var s=document.getElementById('provWizStep'+i);
     var tb=document.getElementById('provWizStepTab'+i);
     if(s) s.style.display=i===n?'block':'none';
@@ -9698,14 +9941,18 @@ function renderProvOntapRes() {
       return '<option value="'+esc(v.uuid)+'">'+esc(v.name)+lock+'</option>';
     }).join('');
   var agSel=document.getElementById('provWizAggregate');
+  var agMultiSel=document.getElementById('provWizAggregateMulti');
   var aggs=_provOntapRes.aggregates||[];
   if(aggs.length) {
-    agSel.innerHTML=aggs.map(function(a){
+    var aggOpts=aggs.map(function(a){
       var free=a.available_bytes?' — '+fmtBytes(a.available_bytes)+' free':'';
       return '<option value="'+esc(a.name)+'">'+esc(a.name)+(a.node?' ('+esc(a.node)+')':'')+free+'</option>';
     }).join('');
+    agSel.innerHTML=aggOpts;
+    agMultiSel.innerHTML=aggOpts;
   } else {
     agSel.innerHTML='<option value="">— no aggregates found —</option>';
+    agMultiSel.innerHTML='';
   }
   if(proto==='iscsi') {
     var igSel=document.getElementById('provWizIgroup');
@@ -9891,12 +10138,25 @@ function _nfsLifHostRow(r, lifIp) {
     + '</div>';
 }
 
+function provWizToggleFlexGroup() {
+  var on=document.getElementById('provWizFlexGroup').checked;
+  document.getElementById('provWizAggregate').style.display=on?'none':'';
+  document.getElementById('provWizAggregateMulti').style.display=on?'':'none';
+  document.getElementById('provWizFlexGroupHint').style.display=on?'':'none';
+}
+
 function provWizVolumeChange() {
   var proto=(document.querySelector('input[name="provProto"]:checked')||{}).value||'iscsi';
   var volId=document.getElementById('provWizVolume').value;
   var isNew=volId==='__new__';
   document.getElementById('provWizNewVolRow').style.display=isNew?'':'none';
   document.getElementById('provWizAggRow').style.display=isNew?'':'none';
+  var fgRow=document.getElementById('provWizFlexGroupRow');
+  if(fgRow) {
+    var showFg=isNew&&proto==='nfs';
+    fgRow.style.display=showFg?'':'none';
+    if(!showFg) { document.getElementById('provWizFlexGroup').checked=false; provWizToggleFlexGroup(); }
+  }
   // Snapshot locking: checkbox for new volumes, info note for existing
   var snapLockRow=document.getElementById('provWizSnapLockRow');
   var snapLockNote=document.getElementById('provWizVolSnapLockNote');
@@ -10011,6 +10271,126 @@ async function provWizNext2() {
   } catch(e) { toast(e.message,'error'); }
 }
 
+async function provWizNext3() {
+  var storageId=document.getElementById('provWizStorageId').value.trim();
+  if(!storageId) return toast('Enter storage ID','error');
+  var hostIds=[];
+  document.querySelectorAll('#provWizHostList input[type=checkbox]:checked').forEach(function(cb){ hostIds.push(cb.value); });
+  if(!hostIds.length) return toast('Select at least one host','error');
+  try {
+    var eps=await apiFetch('endpoints');
+    var sourceEpId=document.getElementById('provWizEndpoint').value;
+    var sel=document.getElementById('provWizReplEndpoint');
+    var others=(eps||[]).filter(function(ep){ return ep.id!==sourceEpId; });
+    sel.innerHTML='<option value="">— select —</option>'+
+      others.map(function(ep){ return '<option value="'+esc(ep.id)+'">'+esc(ep.name)+' ('+esc(ep.host)+')</option>'; }).join('');
+    if(!others.length) {
+      sel.innerHTML='<option value="">— no other NetApp systems registered —</option>';
+    }
+  } catch(e) { /* non-fatal — replication step just stays empty */ }
+  provWizShowStep(4);
+}
+
+function provWizToggleReplication() {
+  document.getElementById('provWizReplBody').style.display=
+    document.getElementById('provWizReplEnable').checked?'':'none';
+}
+
+async function provWizReplEndpointChange() {
+  var epId=document.getElementById('provWizReplEndpoint').value;
+  var sel=document.getElementById('provWizReplSvm');
+  document.getElementById('provWizReplPeerStatus').style.display='none';
+  if(!epId) { sel.innerHTML='<option value="">— select endpoint first —</option>'; return; }
+  sel.innerHTML='<option value="">— loading… —</option>';
+  try {
+    var data=await apiFetch('provisioning/svms?endpoint_id='+encodeURIComponent(epId));
+    sel.innerHTML='<option value="">— select SVM —</option>'+
+      (data.svms||[]).map(function(s){ return '<option value="'+esc(s.name)+'">'+esc(s.name)+'</option>'; }).join('');
+  } catch(e) { sel.innerHTML='<option value="">— error loading SVMs —</option>'; }
+}
+
+async function provWizReplCheckPeering() {
+  var sourceEpId=document.getElementById('provWizEndpoint').value;
+  var sourceSvm=document.getElementById('provWizSvm').value.trim();
+  var targetEpId=document.getElementById('provWizReplEndpoint').value;
+  var targetSvm=document.getElementById('provWizReplSvm').value.trim();
+  var box=document.getElementById('provWizReplPeerStatus');
+  if(!(sourceEpId&&sourceSvm&&targetEpId&&targetSvm)) { box.style.display='none'; provWizReplPolicyChange(); return; }
+  box.style.display='block';
+  box.style.cssText='display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:var(--bg);color:var(--muted)';
+  box.textContent='Checking cluster/SVM peering status…';
+  try {
+    var qs='source_endpoint_id='+encodeURIComponent(sourceEpId)+'&target_endpoint_id='+encodeURIComponent(targetEpId)
+      +'&source_svm='+encodeURIComponent(sourceSvm)+'&target_svm='+encodeURIComponent(targetSvm);
+    var st=await apiFetch('provisioning/replication/peering-status?'+qs);
+    if(st.cluster_peered&&st.svm_peered) {
+      box.style.cssText='display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:rgba(46,160,67,.1);border:1px solid rgba(46,160,67,.35);color:#3fb950';
+      box.textContent='✓ Cluster and SVM already peered — ready to replicate.';
+    } else {
+      var missing=[];
+      if(!st.cluster_peered) missing.push('cluster peering');
+      if(!st.svm_peered) missing.push('SVM peering');
+      box.style.cssText='display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:rgba(240,160,64,.08);border:1px solid rgba(240,160,64,.3);color:#f0a040';
+      box.textContent='⚠ '+missing.join(' and ')+' not yet established — NaSnap will set it up automatically '
+        +'(requires intercluster LIFs already configured on both clusters).';
+    }
+  } catch(e) {
+    box.style.cssText='display:block;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;background:rgba(240,80,80,.08);border:1px solid rgba(240,80,80,.3);color:var(--error)';
+    box.textContent='Could not check peering status: '+(e.message||e);
+  }
+  provWizReplPolicyChange();
+}
+
+async function provWizReplPolicyChange() {
+  var epId=document.getElementById('provWizReplEndpoint').value;
+  var svm=document.getElementById('provWizReplSvm').value.trim();
+  var sel=document.getElementById('provWizReplPolicy');
+  if(!(epId&&svm)) { sel.innerHTML='<option value="">— select endpoint &amp; SVM first —</option>'; return; }
+  sel.innerHTML='<option value="">— loading… —</option>';
+  try {
+    var data=await apiFetch('provisioning/replication/policies?endpoint_id='+encodeURIComponent(epId)+'&svm_name='+encodeURIComponent(svm));
+    var opts=(data.policies||[]).map(function(p){ return '<option value="'+esc(p.name)+'">'+esc(p.name)+' ('+esc(p.type)+')</option>'; }).join('');
+    sel.innerHTML=opts+'<option value="__new__">+ New Policy…</option>';
+  } catch(e) {
+    sel.innerHTML='<option value="__new__">+ New Policy…</option>';
+  }
+  provWizReplPolicySelectChange();
+}
+
+function provWizReplPolicySelectChange() {
+  var isNew=document.getElementById('provWizReplPolicy').value==='__new__';
+  document.getElementById('provWizReplNewPolicyRow').style.display=isNew?'':'none';
+}
+
+function provWizReplPolicyTypeChange() {
+  var type=(document.querySelector('input[name="provWizReplPolicyType"]:checked')||{}).value||'mirror';
+  document.getElementById('provWizReplVaultRow').style.display=type==='vault'?'':'none';
+}
+
+function provWizCollectReplication() {
+  var enabled=document.getElementById('provWizReplEnable');
+  if(!enabled||!enabled.checked) return null;
+  var targetEpId=document.getElementById('provWizReplEndpoint').value;
+  var targetSvm=document.getElementById('provWizReplSvm').value.trim();
+  if(!targetEpId||!targetSvm) { toast('Select a target NetApp system and SVM for replication, or uncheck replication','error'); return false; }
+  var policySel=document.getElementById('provWizReplPolicy').value;
+  var policy;
+  if(policySel==='__new__') {
+    var pname=document.getElementById('provWizReplPolicyName').value.trim();
+    if(!pname) { toast('Enter a name for the new SnapMirror policy','error'); return false; }
+    var ptype=(document.querySelector('input[name="provWizReplPolicyType"]:checked')||{}).value||'mirror';
+    policy={new:{name:pname, type:ptype,
+      label:document.getElementById('provWizReplVaultLabel').value.trim(),
+      retention_count:parseInt(document.getElementById('provWizReplVaultRetention').value)||7}};
+    if(ptype==='vault'&&!policy.new.label) { toast('Enter a SnapMirror label for the Vault policy','error'); return false; }
+  } else if(policySel) {
+    policy={existing_name:policySel};
+  } else {
+    toast('Select or create a SnapMirror policy','error'); return false;
+  }
+  return {enabled:true, target_endpoint_id:targetEpId, target_svm:targetSvm, policy:policy};
+}
+
 async function submitProvWizard() {
   var proto=(document.querySelector('input[name="provProto"]:checked')||{}).value;
   var epId=document.getElementById('provWizEndpoint').value;
@@ -10082,7 +10462,17 @@ async function submitProvWizard() {
     var pveContent=contentTypes.length?contentTypes.join(','):'images,rootdir';
     Object.assign(body,{ nfs_junction_path:junction, nfs_lif_ip:nfsLifIp, size_bytes:sizeBytes,
       nfs_nconnect:nconnectVal, pve_content:pveContent });
+    var fgChk=document.getElementById('provWizFlexGroup');
+    if(volId==='__new__'&&fgChk&&fgChk.checked) {
+      var aggNames=Array.from(document.getElementById('provWizAggregateMulti').selectedOptions).map(function(o){ return o.value; });
+      if(aggNames.length<2) return toast('Select at least 2 aggregates for a FlexGroup volume','error');
+      body.aggregate_name='';
+      body.aggregate_names=aggNames;
+    }
   }
+  var repl=provWizCollectReplication();
+  if(repl===false) return; // validation error already toasted
+  if(repl) body.replication=repl;
   var btn=document.getElementById('provSubmitBtn');
   btn.disabled=true; btn.textContent='Creating…';
   try {
@@ -10229,8 +10619,24 @@ async function confirmRemoveDatastore(id, name) {
     + 'This cannot be undone. The volume and all its snapshots will be destroyed.',
     'I understand this will permanently delete data on the NetApp'
   );
+  var ds = _storageItemsById[id];
+  var snapmirrorAction = 'keep';
+  if (ds && ds.snapmirror) {
+    var sm = ds.snapmirror;
+    var choice = await uiChoice(
+      'This datastore is replicated via SnapMirror to '
+      + (sm.dest_cluster_name || 'a secondary system') + ' (' + (sm.dest_svm || '?') + ':' + (sm.dest_volume || '?') + ').\n\n'
+      + 'The relationship must be broken and removed either way. What should happen to the destination volume?',
+      [
+        { value: 'keep',   label: 'Keep destination volume', class: 'btn-secondary' },
+        { value: 'delete', label: 'Delete destination volume too', class: 'btn-danger' },
+      ]
+    );
+    if (choice === null) return;
+    snapmirrorAction = choice;
+  }
   try {
-    var rRm=await apiPost('provisioning/datastores/remove', {id:id, delete_ontap_objects:delOntap});
+    var rRm=await apiPost('provisioning/datastores/remove', {id:id, delete_ontap_objects:delOntap, snapmirror_action:snapmirrorAction});
     toast('Removal job started','success');
     if (rRm && rRm.job_id) trackJob(rRm.job_id, 'Remove: ' + name);
     actLogStart();
@@ -12843,7 +13249,7 @@ async function pveCleanupHost(idx, btn) {
 var _activeJobs = {};
 
 function _isStorageJob(label) {
-  return /^(Provision|Remove|Resize|Add host|Mount):/.test(label || '');
+  return /^(Provision|Remove|Resize|Add host|Mount|SnapMirror):/.test(label || '');
 }
 
 function trackJob(jobId, label) {
@@ -13153,6 +13559,7 @@ actLogPoll();
         <div id="provWizStepTab1" style="flex:1;text-align:center;font-size:12px;font-weight:600;color:var(--primary);padding:4px 0">1 · Protocol</div>
         <div id="provWizStepTab2" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">2 · Resource</div>
         <div id="provWizStepTab3" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">3 · Hosts &amp; Name</div>
+        <div id="provWizStepTab4" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">4 · Replication</div>
       </div>
 
       <!-- Step 1: Protocol + Endpoint + SVM + Datastore name -->
@@ -13215,7 +13622,16 @@ actLogPoll();
             <select class="form-control" id="provWizAggregate">
               <option value="">— loading… —</option>
             </select>
+            <select class="form-control" id="provWizAggregateMulti" multiple size="4" style="display:none;margin-top:6px">
+            </select>
           </div>
+        </div>
+        <div class="form-group" id="provWizFlexGroupRow" style="display:none;margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;font-weight:400">
+            <input type="checkbox" id="provWizFlexGroup" onchange="provWizToggleFlexGroup()"> FlexGroup volume
+            <span style="font-weight:400;color:var(--muted);font-size:11px">(spans multiple aggregates — recommended for very large datastores)</span>
+          </label>
+          <div id="provWizFlexGroupHint" style="display:none;font-size:11px;color:var(--muted);margin-top:4px">Select 2 or more aggregates above (Ctrl/Cmd-click to select multiple).</div>
         </div>
         <!-- Snapshot Locking: only shown for new volumes -->
         <div id="provWizSnapLockRow" style="display:none;padding:10px 12px;margin-bottom:10px;background:rgba(88,166,255,.06);border:1px solid rgba(88,166,255,.2);border-radius:6px">
@@ -13385,6 +13801,73 @@ actLogPoll();
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" onclick="provWizShowStep(2)">← Back</button>
+          <button class="btn btn-primary" onclick="provWizNext3()">Next →</button>
+          <button class="btn btn-ghost" onclick="hideProvWizard()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Step 4: Replication (optional) -->
+      <div id="provWizStep4" style="display:none">
+        <div class="form-group" style="margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;font-weight:400">
+            <input type="checkbox" id="provWizReplEnable" onchange="provWizToggleReplication()">
+            Replicate this datastore via SnapMirror/SnapVault
+          </label>
+        </div>
+        <div id="provWizReplBody" style="display:none">
+          <div class="form-grid" style="margin-bottom:6px">
+            <div class="form-group">
+              <label>Target NetApp System</label>
+              <select class="form-control" id="provWizReplEndpoint" onchange="provWizReplEndpointChange()">
+                <option value="">— select —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Target SVM</label>
+              <select class="form-control" id="provWizReplSvm" onchange="provWizReplCheckPeering()">
+                <option value="">— select endpoint first —</option>
+              </select>
+            </div>
+          </div>
+          <div id="provWizReplPeerStatus" style="display:none;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
+          <div class="form-group" style="margin-bottom:6px">
+            <label>SnapMirror Policy</label>
+            <select class="form-control" id="provWizReplPolicy" onchange="provWizReplPolicySelectChange()">
+              <option value="">— select endpoint &amp; SVM first —</option>
+            </select>
+          </div>
+          <div id="provWizReplNewPolicyRow" style="display:none;padding:10px 12px;margin-bottom:6px;background:var(--bg);border-radius:6px">
+            <div class="form-grid" style="margin-bottom:8px">
+              <div class="form-group">
+                <label>New Policy Name</label>
+                <input class="form-control" id="provWizReplPolicyName" placeholder="e.g. nasnap-vault-01">
+              </div>
+              <div class="form-group">
+                <label>Type</label>
+                <div style="display:flex;gap:12px;margin-top:6px">
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;cursor:pointer">
+                    <input type="radio" name="provWizReplPolicyType" value="mirror" checked onchange="provWizReplPolicyTypeChange()"> Mirror (DR)
+                  </label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;cursor:pointer">
+                    <input type="radio" name="provWizReplPolicyType" value="vault" onchange="provWizReplPolicyTypeChange()"> Vault (backup retention)
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="form-grid" id="provWizReplVaultRow" style="display:none">
+              <div class="form-group">
+                <label>SnapMirror Label</label>
+                <input class="form-control" id="provWizReplVaultLabel" placeholder="e.g. daily">
+              </div>
+              <div class="form-group">
+                <label>Retention Count</label>
+                <input class="form-control" id="provWizReplVaultRetention" type="number" min="1" value="7" style="width:90px">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="provWizShowStep(3)">← Back</button>
           <button class="btn btn-primary" id="provSubmitBtn" onclick="submitProvWizard()">Create Datastore</button>
           <button class="btn btn-ghost" onclick="hideProvWizard()">Cancel</button>
         </div>
@@ -13393,6 +13876,109 @@ actLogPoll();
     </div><!-- /modal body -->
   </div><!-- /modal box -->
 </div><!-- /provWizModal -->
+
+<!-- ── SnapMirror / Vault Config Modal ───────────────────────────── -->
+<div id="smConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center" onclick="smConfigBackdropClick(event)">
+  <div style="max-width:640px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="font-size:16px;font-weight:700" id="smConfigTitle">SnapMirror / Vault</div>
+      <button class="btn btn-ghost btn-sm" onclick="hideSmConfigModal()" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
+    </div>
+    <div style="padding:20px">
+
+      <!-- Status panel (relationship already exists) -->
+      <div id="smStatusPanel" style="display:none">
+        <div class="form-grid" style="margin-bottom:14px;font-size:13px">
+          <div><span style="color:var(--muted)">State:</span> <strong id="smStState">–</strong></div>
+          <div><span style="color:var(--muted)">Healthy:</span> <strong id="smStHealthy">–</strong></div>
+          <div><span style="color:var(--muted)">Lag:</span> <strong id="smStLag">–</strong></div>
+          <div><span style="color:var(--muted)">Policy:</span> <strong id="smStPolicy">–</strong></div>
+          <div style="grid-column:1/-1"><span style="color:var(--muted)">Destination:</span> <strong id="smStDest">–</strong></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-secondary btn-sm" onclick="smTriggerUpdate()">Trigger update now</button>
+          <button class="btn btn-secondary btn-sm" onclick="smShowChangePolicy()">Change policy</button>
+          <button class="btn btn-danger btn-sm" onclick="smShowBreakRemove()">Break &amp; Remove…</button>
+        </div>
+        <div id="smChangePolicyRow" style="display:none;padding:10px 12px;margin-bottom:10px;background:var(--bg);border-radius:6px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="form-control" id="smChangePolicySel" style="flex:1"><option value="">— loading… —</option></select>
+            <button class="btn btn-primary btn-sm" onclick="smSaveChangePolicy()">Save</button>
+          </div>
+        </div>
+        <div id="smBreakRemoveRow" style="display:none;padding:10px 12px;margin-bottom:10px;background:var(--bg);border-radius:6px">
+          <div style="font-size:12px;margin-bottom:8px">Breaks and removes the SnapMirror relationship. What should happen to the destination volume?</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" onclick="smBreakRemove(false)">Keep destination volume</button>
+            <button class="btn btn-danger btn-sm" onclick="smBreakRemove(true)">Delete destination volume too</button>
+          </div>
+        </div>
+        <div id="smActionMsg" style="font-size:12px;color:var(--muted)"></div>
+      </div>
+
+      <!-- Setup panel (no relationship yet) -->
+      <div id="smSetupPanel" style="display:none">
+        <div class="form-grid" style="margin-bottom:6px">
+          <div class="form-group">
+            <label>Target NetApp System</label>
+            <select class="form-control" id="smEndpoint" onchange="smEndpointChange()">
+              <option value="">— select —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Target SVM</label>
+            <select class="form-control" id="smSvm" onchange="smCheckPeering()">
+              <option value="">— select endpoint first —</option>
+            </select>
+          </div>
+        </div>
+        <div id="smPeerStatus" style="display:none;margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
+        <div class="form-group" style="margin-bottom:6px">
+          <label>SnapMirror Policy</label>
+          <select class="form-control" id="smPolicy" onchange="smPolicySelectChange()">
+            <option value="">— select endpoint &amp; SVM first —</option>
+          </select>
+        </div>
+        <div id="smNewPolicyRow" style="display:none;padding:10px 12px;margin-bottom:10px;background:var(--bg);border-radius:6px">
+          <div class="form-grid" style="margin-bottom:8px">
+            <div class="form-group">
+              <label>New Policy Name</label>
+              <input class="form-control" id="smPolicyName" placeholder="e.g. nasnap-vault-01">
+            </div>
+            <div class="form-group">
+              <label>Type</label>
+              <div style="display:flex;gap:12px;margin-top:6px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;cursor:pointer">
+                  <input type="radio" name="smPolicyType" value="mirror" checked onchange="smPolicyTypeChange()"> Mirror (DR)
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;cursor:pointer">
+                  <input type="radio" name="smPolicyType" value="vault" onchange="smPolicyTypeChange()"> Vault (backup retention)
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="form-grid" id="smVaultRow" style="display:none">
+            <div class="form-group">
+              <label>SnapMirror Label</label>
+              <input class="form-control" id="smVaultLabel" placeholder="e.g. daily">
+            </div>
+            <div class="form-group">
+              <label>Retention Count</label>
+              <input class="form-control" id="smVaultRetention" type="number" min="1" value="7" style="width:90px">
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-primary" id="smSetupBtn" onclick="smDoSetup()">
+            Set Up Replication <span id="smSetupSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+          </button>
+          <span id="smSetupErr" style="color:var(--error);font-size:12px"></span>
+        </div>
+      </div>
+
+    </div><!-- /modal body -->
+  </div><!-- /modal box -->
+</div><!-- /smConfigModal -->
 
 <!-- ── Mount existing Datastore Modal ─────────────────────────────── -->
 <div id="bindWizModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center" onclick="bindWizBackdropClick(event)">
@@ -16148,12 +16734,16 @@ var _helpData = {
       + '<li><strong>SnapMirror Secondary</strong> — Snapshots on a DR replica. Select the SnapMirror relationship from the dropdown that appears.</li>'
       + '</ul>'
       + '<h3>VM table</h3>'
-      + '<p>Lists all VMs that have at least one snapshot. Columns: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (count), <strong>Last Snapshot</strong>, <strong>OS</strong> (detected via QEMU Guest Agent). Click any column header to sort. Use the search box to filter by VMID, name, or datastore. The <strong>Imported</strong> filter shows only VMs with index-imported snapshots.</p>'
-      + '<h3>Row action icons</h3><ul>'
-      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Opens the restore wizard inline. Choose a snapshot and confirm to roll the VM back in-place.</li>'
-      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Opens the clone wizard inline. Choose a snapshot, target PVE node, new VMID and name to create an independent VM copy.</li>'
-      + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Opens a file browser (Total Commander style) that mounts the snapshot disk and lets you copy individual files directly into the running VM via QEMU Guest Agent. The button activates automatically once the OS type is detected (Linux or Windows).</li>'
+      + '<p>Lists all VMs that have at least one snapshot. Columns: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (count), <strong>Last Snapshot</strong>, <strong>OS</strong> (detected via QEMU Guest Agent, cached in the database and refreshed in the background so it stays visible even when the VM is off). Click any column header to sort. Use the search box to filter by VMID, name, or datastore. The <strong>Imported</strong> filter shows only VMs with index-imported snapshots.</p>'
+      + '<h3>Row actions (⋮ menu)</h3>'
+      + '<p>Click the ⋮ button on any row to open its actions menu:</p><ul>'
+      + '<li>'+_hi('info')+'<strong>Info</strong> — Opens the VM Info panel: overview, disk layout, datastores in use, and snapshot history for this VM.</li>'
+      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Opens the restore wizard. Pick a snapshot from the visual timeline picker and confirm to roll the VM back in-place.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Opens the clone wizard. Pick a snapshot from the timeline picker — or check <strong>Clone from live VM</strong> to clone the VM\'s current running state instead of a snapshot — then choose target PVE node, new VMID and name.</li>'
+      + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Opens a file browser (Total Commander style) that mounts the snapshot disk and lets you copy individual files directly into the running VM via QEMU Guest Agent. Greyed out with a tooltip if the Guest Agent isn\'t running.</li>'
       + '</ul>'
+      + '<h3>Snapshot timeline picker</h3>'
+      + '<p>Both the Restore and Clone wizards use the same visual timeline (matching the Dashboard timeline) to pick a source snapshot instead of a plain dropdown — zoom, click a point to select, or click a clustered bubble to see all snapshots at that time.</p>'
       + '<h3>Refresh button</h3>'
       + '<p>Reloads the VM list from the snapshot database. Use this after new snapshots have been taken or deleted.</p>',
     de: '<h3>Übersicht</h3>'
@@ -16163,12 +16753,16 @@ var _helpData = {
       + '<li><strong>SnapMirror Secondary</strong> — Snapshots auf einem DR-Replikat. Die SnapMirror-Beziehung aus dem Dropdown auswählen.</li>'
       + '</ul>'
       + '<h3>VM-Tabelle</h3>'
-      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (Anzahl), <strong>Last Snapshot</strong>, <strong>OS</strong> (per QEMU Guest Agent erkannt). Spaltenköpfe klicken zum Sortieren. Suchfeld filtert nach VMID, Name oder Datastore. Filter <strong>Imported</strong> zeigt nur VMs mit per Datastore-Index importierten Snapshots.</p>'
-      + '<h3>Zeilen-Icons</h3><ul>'
-      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Öffnet den Wiederherstellungs-Assistenten direkt. Snapshot auswählen und bestätigen, um die VM zurückzusetzen.</li>'
-      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Öffnet den Klon-Assistenten direkt. Snapshot, Ziel-PVE-Node, neue VMID und Name wählen, um eine unabhängige VM-Kopie zu erstellen.</li>'
-      + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Öffnet einen Datei-Browser (Total Commander-Stil), der den Snapshot-Datenträger einbindet und das Kopieren einzelner Dateien direkt in die laufende VM via QEMU Guest Agent ermöglicht. Der Button aktiviert sich automatisch, sobald der OS-Typ erkannt wurde (Linux oder Windows).</li>'
+      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (Anzahl), <strong>Last Snapshot</strong>, <strong>OS</strong> (per QEMU Guest Agent erkannt, in der Datenbank zwischengespeichert und im Hintergrund aktualisiert — bleibt so auch bei ausgeschalteter VM sichtbar). Spaltenköpfe klicken zum Sortieren. Suchfeld filtert nach VMID, Name oder Datastore. Filter <strong>Imported</strong> zeigt nur VMs mit per Datastore-Index importierten Snapshots.</p>'
+      + '<h3>Zeilen-Aktionen (⋮-Menü)</h3>'
+      + '<p>Klick auf ⋮ in einer Zeile öffnet das Aktionsmenü:</p><ul>'
+      + '<li>'+_hi('info')+'<strong>Info</strong> — Öffnet das VM-Info-Panel: Übersicht, Datenträger-Layout, verwendete Datastores und Snapshot-Historie dieser VM.</li>'
+      + '<li>'+_hi('restore')+'<strong>Restore</strong> — Öffnet den Wiederherstellungs-Assistenten. Snapshot in der visuellen Zeitleiste auswählen und bestätigen, um die VM zurückzusetzen.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Öffnet den Klon-Assistenten. Snapshot in der Zeitleiste wählen — oder <strong>Clone from live VM</strong> aktivieren, um den aktuellen laufenden Zustand statt eines Snapshots zu klonen — dann Ziel-PVE-Node, neue VMID und Name festlegen.</li>'
+      + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Öffnet einen Datei-Browser (Total Commander-Stil), der den Snapshot-Datenträger einbindet und das Kopieren einzelner Dateien direkt in die laufende VM via QEMU Guest Agent ermöglicht. Ausgegraut mit Tooltip, wenn der Guest Agent nicht läuft.</li>'
       + '</ul>'
+      + '<h3>Snapshot-Zeitleiste</h3>'
+      + '<p>Restore- und Clone-Assistent nutzen dieselbe visuelle Zeitleiste (wie im Dashboard) zur Snapshot-Auswahl statt eines einfachen Dropdowns — zoomen, Punkt anklicken zum Auswählen, oder eine gebündelte Blase anklicken für alle Snapshots zu diesem Zeitpunkt.</p>'
       + '<h3>Refresh-Button</h3>'
       + '<p>Lädt die VM-Liste aus der Snapshot-Datenbank neu. Verwenden nach dem Erstellen neuer oder Löschen vorhandener Snapshots.</p>'
   },
@@ -16178,7 +16772,7 @@ var _helpData = {
     en: '<h3>Overview</h3>'
       + '<p>The Storage tab shows all datastores known to NaSnap — both provisioned (created via the wizard) and auto-discovered (via Detect &amp; Scan).</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>+ Provision Wizard</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE.</li>'
+      + '<li><strong>+ Provision Wizard</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE. For new NFS volumes, optionally create a <strong>FlexGroup</strong> spanning multiple aggregates instead of a single-aggregate FlexVol. The last step can also set up SnapMirror/SnapVault replication to a second registered NetApp system.</li>'
       + '<li><strong>Detect &amp; Scan / Run Discovery</strong> — Scans connected ONTAP systems and Proxmox VE hosts to discover existing datastores and volume mappings automatically.</li>'
       + '</ul>'
       + '<h3>Datastore table columns</h3><ul>'
@@ -16190,14 +16784,18 @@ var _helpData = {
       + '<li><strong>Index</strong> — Whether a <code>.nasnap/index.json</code> exists in the datastore, enabling snapshot import.</li>'
       + '<li><strong>SnapMirror</strong> — Replication status if a SnapMirror relationship exists.</li>'
       + '</ul>'
-      + '<h3>Row actions</h3><ul>'
-      + '<li><strong>⚙ Manage</strong> — View details, manage hosts, update settings.</li>'
-      + '<li><strong>🗑 Remove</strong> — Detach and optionally destroy the datastore.</li>'
+      + '<h3>Row actions (⋮ menu)</h3><ul>'
+      + '<li><strong>Scan index</strong> — Re-read <code>.nasnap/index.json</code> and reconcile snapshots into the database.</li>'
+      + '<li><strong>Bulk Migrate</strong> — Move a set of VMs from this datastore to another one. A floating panel tracks each VM\'s progress individually and shows a clear success/failure summary with a Close button once all VMs have finished — something Proxmox has no built-in equivalent for.</li>'
+      + '<li><strong>+ Host</strong> — Add another PVE host to this datastore.</li>'
+      + '<li><strong>Resize</strong> — Grow (and for NFS, shrink) the underlying ONTAP volume.</li>'
+      + '<li><strong>SnapMirror / Vault</strong> — Set up (or manage) SnapMirror/SnapVault replication to a second registered NetApp system. If no relationship exists yet, pick a target system, SVM, and policy (existing or new, Mirror for DR / Vault for retention) — NaSnap peers the clusters and SVMs automatically if needed. If one already exists, shows its status and offers trigger update, change policy, and break &amp; remove (with the choice to keep or delete the destination volume).</li>'
+      + '<li><strong>Remove</strong> — Detach and optionally destroy the datastore. If the datastore is replicated, you\'ll be asked whether to keep or delete the destination volume — the relationship itself is always broken and released first.</li>'
       + '</ul>',
     de: '<h3>Übersicht</h3>'
       + '<p>Der Speicher-Tab zeigt alle NaSnap bekannten Datastores — provisionierte (über den Assistenten erstellt) und automatisch erkannte (via Erkennung &amp; Scan).</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>+ Provisionierungs-Assistent</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE.</li>'
+      + '<li><strong>+ Provisionierungs-Assistent</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE. Für neue NFS-Volumes optional als <strong>FlexGroup</strong> über mehrere Aggregate statt als Single-Aggregat-FlexVol. Im letzten Schritt kann zusätzlich SnapMirror/SnapVault-Replikation zu einem zweiten registrierten NetApp-System eingerichtet werden.</li>'
       + '<li><strong>Erkennen &amp; Scannen / Discovery</strong> — Scannt verbundene ONTAP-Systeme und Proxmox-VE-Hosts auf vorhandene Datastores und Volume-Zuordnungen.</li>'
       + '</ul>'
       + '<h3>Datastore-Tabellen-Spalten</h3><ul>'
@@ -16209,9 +16807,13 @@ var _helpData = {
       + '<li><strong>Index</strong> — Ob eine <code>.nasnap/index.json</code> im Datastore vorhanden ist (ermöglicht Snapshot-Import).</li>'
       + '<li><strong>SnapMirror</strong> — Replikationsstatus bei vorhandener SnapMirror-Beziehung.</li>'
       + '</ul>'
-      + '<h3>Zeilen-Aktionen</h3><ul>'
-      + '<li><strong>⚙ Verwalten</strong> — Details anzeigen, Hosts verwalten, Einstellungen aktualisieren.</li>'
-      + '<li><strong>🗑 Entfernen</strong> — Datastore trennen und optional löschen.</li>'
+      + '<h3>Zeilen-Aktionen (⋮-Menü)</h3><ul>'
+      + '<li><strong>Scan index</strong> — <code>.nasnap/index.json</code> neu einlesen und Snapshots in der Datenbank abgleichen.</li>'
+      + '<li><strong>Bulk Migrate</strong> — Mehrere VMs von diesem Datastore auf einen anderen verschieben. Ein schwebendes Panel verfolgt den Fortschritt jeder VM einzeln und zeigt nach Abschluss aller VMs eine klare Erfolgs-/Fehlermeldung mit Close-Button — eine Funktion, die Proxmox selbst nicht mitbringt.</li>'
+      + '<li><strong>+ Host</strong> — Weiteren PVE-Host zu diesem Datastore hinzufügen.</li>'
+      + '<li><strong>Resize</strong> — Das zugrundeliegende ONTAP-Volume vergrößern (bei NFS auch verkleinern).</li>'
+      + '<li><strong>SnapMirror / Vault</strong> — SnapMirror/SnapVault-Replikation zu einem zweiten registrierten NetApp-System einrichten oder verwalten. Ohne bestehende Beziehung: Zielsystem, SVM und Policy wählen (vorhanden oder neu, Mirror für DR / Vault für Aufbewahrung) — Cluster- und SVM-Peering erfolgt bei Bedarf automatisch. Mit bestehender Beziehung: Status anzeigen, Update jetzt auslösen, Policy ändern, Break &amp; Remove (mit Wahl, ob das Ziel-Volume erhalten bleibt).</li>'
+      + '<li><strong>Remove</strong> — Datastore trennen und optional löschen. Bei replizierten Datastores wird gefragt, ob das Ziel-Volume erhalten bleiben oder gelöscht werden soll — die Beziehung selbst wird in jedem Fall zuerst abgebaut.</li>'
       + '</ul>'
   },
 
@@ -16271,7 +16873,9 @@ var _helpData = {
       + '<li><strong>+ Add Entry</strong> — Add a datastore/VM group to the plan.</li>'
       + '<li><strong>▶ Execute</strong> — Trigger the DR plan (confirm before running in production!).</li>'
       + '<li><strong>✏ Edit / 🗑 Delete</strong> — Manage plan entries and groups.</li>'
-      + '</ul>',
+      + '</ul>'
+      + '<h3>⛑ Recover VMs</h3>'
+      + '<p>For ad-hoc recovery outside a saved DR plan — e.g. bringing VMs back on a fresh or existing standby cluster: pick a datastore and snapshot, optionally discover/register the target PVE cluster inline (not required if it\'s already registered under Settings), assign VMIDs, and optionally start the VMs immediately once their configs are written. If the target datastore isn\'t mounted on the recovery cluster yet, use the linked <strong>⇢ Mount existing</strong> wizard first.</p>',
     de: '<h3>Übersicht</h3>'
       + '<p>Der Disaster-Recovery-Tab verwaltet SnapMirror-basierte DR-Workflows. Eine NaSnap-Instanz hält sowohl die Produktions- als auch die DR-seitigen ONTAP/PVE-Zugangsdaten und führt das komplette Failover lokal aus — eine zweite NaSnap-Installation ist nicht nötig. Ist diese Instanz selbst von einem Ausfall betroffen, zuerst wiederherstellen/neu aufsetzen (die Konfiguration ist im regulären DB-Backup enthalten), danach das Failover von dort ausführen.</p>'
       + '<h3>DR-Pläne</h3>'
@@ -16285,6 +16889,8 @@ var _helpData = {
       + '<li><strong>▶ Ausführen</strong> — DR-Plan auslösen (in der Produktion immer vorher bestätigen!).</li>'
       + '<li><strong>✏ Bearbeiten / 🗑 Löschen</strong> — Plan-Einträge und Gruppen verwalten.</li>'
       + '</ul>'
+      + '<h3>⛑ Recover VMs</h3>'
+      + '<p>Für die Ad-hoc-Wiederherstellung außerhalb eines gespeicherten DR-Plans — z.B. VMs auf einem frischen oder bereits vorhandenen Standby-Cluster wieder in Betrieb nehmen: Datastore und Snapshot wählen, optional den Ziel-PVE-Cluster direkt im Assistenten erkennen/registrieren (nicht nötig, falls bereits unter Einstellungen registriert), VMIDs zuweisen und die VMs optional sofort nach dem Schreiben der Konfiguration starten. Ist der Ziel-Datastore auf dem Recovery-Cluster noch nicht eingebunden, zuerst den verlinkten <strong>⇢ Mount existing</strong>-Assistenten nutzen.</p>'
   },
 
   settings: {
@@ -16296,7 +16902,7 @@ var _helpData = {
       + '<h3>NetApp Systems</h3>'
       + '<p>Add, edit, or remove ONTAP endpoints (cluster management IP or hostname, credentials, HTTPS port). Each endpoint represents one ONTAP cluster or SVM. <strong>Test</strong> the connection before saving.</p>'
       + '<h3>Proxmox VE Hosts</h3>'
-      + '<p>Register PVE nodes or clusters. NaSnap uses these to enumerate VMs, manage storage, and perform restore/clone operations. SSH credentials are also stored here for direct host operations (mount, SFR, maintenance).</p>'
+      + '<p>Register PVE nodes or clusters. NaSnap uses these to enumerate VMs, manage storage, and perform restore/clone operations. SSH credentials are also stored here for direct host operations (mount, SFR, maintenance). Hosts that belong to the same PVE cluster are automatically grouped under a collapsible cluster header — detected via Proxmox\'s own cluster API, either while adding a host (<strong>Discover Cluster</strong>) or afterwards per host (<strong>Detect cluster</strong>). Standalone hosts are listed separately.</p>'
       + '<h3>Email Notifications (SMTP)</h3>'
       + '<p>Configure an SMTP relay for snapshot success/failure alerts. Set sender, recipients, and when to notify (always, on failure only, or on success only). Notifications can also be configured per protection plan.</p>'
       + '<h3>Active Directory / LDAP</h3>'
@@ -16308,11 +16914,11 @@ var _helpData = {
       + '<h3>UI Features</h3>'
       + '<p>Toggle dark/light theme, change the UI language (EN, DE, FR, ES, PT, KO, IT), and configure other display preferences.</p>'
       + '<h3>Data Backup / Restore</h3>'
-      + '<p>Export the full NaSnap configuration (endpoints, hosts, mappings, schedules, settings) as a JSON file for backup or migration. Import restores the configuration from a previously exported file.</p>'
+      + '<p>Export the full NaSnap configuration (endpoints, hosts, mappings, schedules, settings, user accounts) as a JSON file for backup or migration — plain or gzip-compressed (<code>.json.gz</code>). Import accepts either format and restores the configuration from a previously exported file.</p>'
       + '<h3>Automated Backup Schedule</h3>'
-      + '<p>Automatically export the NaSnap database to SFTP, a CIFS/SMB share, or a local NFS datastore on a schedule. Configure frequency, target, credentials, subdirectory, and retention (how many backup files to keep).</p>'
+      + '<p>Automatically export the NaSnap database to SFTP, a CIFS/SMB share, or a local NFS datastore on a schedule. Configure frequency, target, credentials, subdirectory, and retention (how many backup files to keep). Use <strong>Browse &amp; Restore</strong> to list the backup files already stored on the configured remote target and restore directly from one of them, without downloading it manually first.</p>'
       + '<h3>PVE Host Maintenance</h3>'
-      + '<p>Scan all registered PVE hosts for leftover resources from interrupted operations: stale NFS mounts, SFR temporary directories, orphaned LVM volume groups. Click <strong>Scan</strong> to detect and <strong>Clean up</strong> to remove them safely.</p>'
+      + '<p>Scan all registered PVE hosts for leftover resources from interrupted operations: stale NFS mounts, SFR temporary directories, orphaned LVM volume groups. Click <strong>Scan</strong> to detect and <strong>Clean up</strong> to remove them safely. <strong>Check All Hosts</strong> additionally verifies the storage stack packages and services on each node (<code>nfs-common</code>, <code>open-iscsi</code> incl. <code>iscsid</code> and initiator name, <code>nvme-cli</code> incl. the <code>nvme_tcp</code> kernel module, <code>lvm2</code>, <code>qemu-utils</code>) — auto-triggered when a host is added, with a one-click Fix button for auto-fixable issues.</p>'
       + '<h3>Plugin Update</h3>'
       + '<p>Check for and apply updates to the NaSnap plugin. The current and available versions are shown. Updates are downloaded and applied in-place; a container restart completes the process.</p>',
     de: '<h3>Übersicht</h3>'
@@ -16322,7 +16928,7 @@ var _helpData = {
       + '<h3>NetApp-Systeme</h3>'
       + '<p>ONTAP-Endpunkte hinzufügen, bearbeiten oder entfernen (Cluster-Management-IP oder Hostname, Zugangsdaten, HTTPS-Port). Jeder Endpunkt repräsentiert einen ONTAP-Cluster oder eine SVM. Vor dem Speichern die Verbindung <strong>testen</strong>.</p>'
       + '<h3>Proxmox-VE-Hosts</h3>'
-      + '<p>PVE-Nodes oder Cluster registrieren. NaSnap nutzt diese zur VM-Auflistung, Speicherverwaltung sowie für Wiederherstellungs- und Klon-Operationen. SSH-Zugangsdaten werden hier für direkte Host-Operationen gespeichert.</p>'
+      + '<p>PVE-Nodes oder Cluster registrieren. NaSnap nutzt diese zur VM-Auflistung, Speicherverwaltung sowie für Wiederherstellungs- und Klon-Operationen. SSH-Zugangsdaten werden hier für direkte Host-Operationen gespeichert. Hosts desselben PVE-Clusters werden automatisch unter einer einklappbaren Cluster-Kopfzeile gruppiert — erkannt über die eigene Cluster-API von Proxmox, entweder beim Hinzufügen (<strong>Discover Cluster</strong>) oder nachträglich pro Host (<strong>Detect cluster</strong>). Eigenständige Hosts werden separat gelistet.</p>'
       + '<h3>E-Mail-Benachrichtigungen (SMTP)</h3>'
       + '<p>SMTP-Relay für Snapshot-Erfolgs- und Fehlermeldungen konfigurieren. Absender, Empfänger und Benachrichtigungszeitpunkt festlegen (immer, nur bei Fehler oder nur bei Erfolg). Benachrichtigungen können auch pro Schutzplan konfiguriert werden.</p>'
       + '<h3>Active Directory / LDAP</h3>'
@@ -16334,11 +16940,11 @@ var _helpData = {
       + '<h3>UI-Funktionen</h3>'
       + '<p>Hell-/Dunkel-Design umschalten, UI-Sprache wählen (EN, DE, FR, ES, PT, KO, IT) und weitere Anzeigeeinstellungen konfigurieren.</p>'
       + '<h3>Datensicherung / Wiederherstellung</h3>'
-      + '<p>Die komplette NaSnap-Konfiguration (Endpunkte, Hosts, Zuordnungen, Pläne, Einstellungen) als JSON exportieren. Der Import stellt die Konfiguration aus einer zuvor exportierten Datei wieder her.</p>'
+      + '<p>Die komplette NaSnap-Konfiguration (Endpunkte, Hosts, Zuordnungen, Pläne, Einstellungen, Benutzerkonten) als JSON exportieren — unkomprimiert oder gzip-komprimiert (<code>.json.gz</code>). Der Import akzeptiert beide Formate und stellt die Konfiguration aus einer zuvor exportierten Datei wieder her.</p>'
       + '<h3>Automatischer Backup-Zeitplan</h3>'
-      + '<p>Die NaSnap-Datenbank automatisch per Zeitplan auf SFTP, eine CIFS/SMB-Freigabe oder einen lokalen NFS-Datastore exportieren. Häufigkeit, Ziel, Zugangsdaten, Unterverzeichnis und Aufbewahrungsanzahl konfigurierbar.</p>'
+      + '<p>Die NaSnap-Datenbank automatisch per Zeitplan auf SFTP, eine CIFS/SMB-Freigabe oder einen lokalen NFS-Datastore exportieren. Häufigkeit, Ziel, Zugangsdaten, Unterverzeichnis und Aufbewahrungsanzahl konfigurierbar. Mit <strong>Browse &amp; Restore</strong> die bereits auf dem konfigurierten Ziel liegenden Backup-Dateien auflisten und direkt daraus wiederherstellen, ohne sie manuell herunterzuladen.</p>'
       + '<h3>PVE-Host-Wartung</h3>'
-      + '<p>Alle registrierten PVE-Hosts auf verwaiste Ressourcen aus unterbrochenen Operationen scannen: veraltete NFS-Mounts, temporäre SFR-Verzeichnisse, verwaiste LVM-Volume-Groups. <strong>Scan</strong> zur Erkennung, <strong>Bereinigen</strong> zur sicheren Entfernung.</p>'
+      + '<p>Alle registrierten PVE-Hosts auf verwaiste Ressourcen aus unterbrochenen Operationen scannen: veraltete NFS-Mounts, temporäre SFR-Verzeichnisse, verwaiste LVM-Volume-Groups. <strong>Scan</strong> zur Erkennung, <strong>Bereinigen</strong> zur sicheren Entfernung. <strong>Check All Hosts</strong> prüft zusätzlich die Storage-Stack-Pakete und -Dienste auf jedem Node (<code>nfs-common</code>, <code>open-iscsi</code> inkl. <code>iscsid</code> und Initiator-Name, <code>nvme-cli</code> inkl. Kernel-Modul <code>nvme_tcp</code>, <code>lvm2</code>, <code>qemu-utils</code>) — automatisch beim Hinzufügen eines Hosts ausgelöst, mit Ein-Klick-Fix-Button für automatisch behebbare Probleme.</p>'
       + '<h3>Plugin-Update</h3>'
       + '<p>Updates für das NaSnap-Plugin prüfen und anwenden. Aktuelle und verfügbare Version werden angezeigt. Updates werden heruntergeladen und direkt angewendet; ein Container-Neustart schließt den Vorgang ab.</p>'
   }

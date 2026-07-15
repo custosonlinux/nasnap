@@ -6,7 +6,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.6.1** · [Changelog](CHANGELOG.md)
+**Current stable: 1.6.2** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -19,6 +19,8 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Clone** VMs from any snapshot to a new VMID with fresh MAC addresses.
 - **Protect datastores with Protection Plans** — assign multiple datastores to a single plan with unified scheduling, retention, hooks, and email notifications. Each datastore runs as an independent job (Veeam-style); a consolidated email summarises all results per plan run.
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
+- **Set up SnapMirror/SnapVault replication in one click** *(Alpha)* — pick a second registered NetApp system and NaSnap automatically peers the clusters and SVMs (if not already peered), then creates the relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available at provisioning time or retroactively via the datastore's **SnapMirror / Vault** action, which also handles policy changes and safely breaking/removing a relationship (optionally keeping the destination volume for restore).
+- **FlexGroup volumes** *(Alpha, NFS only)* — provision a datastore as a FlexGroup spanning multiple aggregates instead of a single-aggregate FlexVol, for datastores that need to scale past a single aggregate's capacity.
 - **Lock snapshots** with ONTAP Snapshot Locking (WORM / tamperproof) — set an expiry time that prevents deletion even by ONTAP admins, protecting against ransomware and accidental removal. Independent locking for source and SnapMirror destination.
 - **Provision** new SAN datastores end-to-end (iSCSI and NVMe-oF): ONTAP volume + LUN/namespace + iGroup/subsystem creation, host-side iSCSI/NVMe setup, LVM VG creation, and PVE storage registration — in a single wizard.
 - **Disaster Recovery** *(In Development)* — single-instance DR: SnapMirror-based failover (planned/emergency) with ordered VM boot groups, and a **Recover VMs** wizard that provisions a fresh or existing standby cluster with storage, then imports and restarts the VMs from it. No second coordinating NaSnap instance required — the same instance manages both the primary and DR side.
@@ -54,6 +56,8 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | ONTAP-native snapshot visibility | ✅ | 🟡 Beta | 🟡 Beta |
 | SnapMirror® visibility & DR restore/clone | ✅ | 🟡 Beta | 🟡 Beta |
 | Storage Provisioning (auto-setup) | ✅ | 🟡 Beta | 🟡 Beta |
+| FlexGroup volumes (spans multiple aggregates) | 🟠 Alpha | ❌ n/a | ❌ n/a |
+| SnapMirror/SnapVault replication setup (auto cluster+SVM peering, policy create/select) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
 | Storage Resize | ✅ grow & shrink | 🟡 Beta grow only | 🟡 Beta grow only |
 | Job Cancellation | ✅ | 🟡 Beta | 🟡 Beta |
 | Recover VMs from Datastore (adopt existing volumes with VMs, DR tab) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
@@ -873,6 +877,11 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | POST | `provisioning/datastores/scan-all` | Scan all NFS datastores in the background and reconcile |
 | POST | `provisioning/datastores/reindex` | Force-rewrite `.nasnap/index.json` from DB records |
 | GET/POST | `provisioning/plugin-settings` | Read/write plugin-wide settings (`auto_scan_on_startup`) |
+| GET | `provisioning/replication/peering-status` | Live cluster+SVM peer status between a source and target endpoint/SVM |
+| GET | `provisioning/replication/policies` | List SnapMirror policies visible on an endpoint's SVM |
+| POST | `provisioning/replication/setup` | Set up (or retrofit) SnapMirror/SnapVault replication for a datastore — auto-peers clusters/SVMs if needed |
+| POST | `provisioning/replication/update-policy` | Change the SnapMirror policy on an existing relationship |
+| POST | `provisioning/replication/remove` | Break and remove a SnapMirror relationship (destination volume optionally kept) |
 
 ### Disaster Recovery
 
@@ -1018,12 +1027,14 @@ DEBUG=1 .venv/bin/python app.py
 - **SFR — UX improvements** — Finish button (clean session close), NaSnap-styled New Folder dialog (replaces native `prompt()`), copy destination auto-tracking, disk size shown in disk selector.
 - **Active Directory / LDAP Authentication** (🟡 Beta) — connect NaSnap to an AD domain. Users authenticate with domain credentials; group membership maps to Admin or Viewer role. Local accounts always remain active as a fallback.
 
-### Unreleased
+### v1.6.2 — Released
 
 - **Disaster Recovery — single-instance redesign** — the two-instance peer/role/heartbeat/sync model is removed. One NaSnap instance now manages both the primary and DR side directly, using its own registered ONTAP and PVE credentials on both sides. DR Plan failover is consolidated onto the same reusable `recovery_engine` primitives (`_bind_nfs`, `restore_vm_configs`, `start_vms`) used by VM recovery, instead of duplicated inline logic.
 - **PVE Cluster Grouping** — Proxmox hosts are now automatically grouped into real cluster entities in Settings, detected via PVE's own `/cluster/status` API. Settings → PVE Hosts shows collapsible cluster groups instead of a flat host list.
 - **Recover VMs (Disaster Recovery tab)** — the former Datastores-tab "Import VMs" wizard moved into the DR tab as **Recover VMs**: pick a datastore snapshot, optionally discover or add a target PVE cluster, bind the storage, assign VMIDs, and optionally start the VMs immediately after recovery. Supports both a fresh cluster and an already-provisioned DR-standby cluster.
 - **Bulk Migrate** — move a set of VMs from one datastore to another directly from the Datastores tab, with a floating progress panel tracking each VM's migration and a clear completion notice (success/failure summary + explicit Close button) once all jobs finish.
+- **FlexGroup volumes (NFS)** — the Provision Wizard can create a FlexGroup volume spanning multiple aggregates instead of a single-aggregate FlexVol, for datastores that need to scale past one aggregate's capacity.
+- **SnapMirror/SnapVault replication automation** — replicate a datastore to a second registered NetApp system in one step: NaSnap automatically establishes cluster and SVM peering if not already present, then creates the SnapMirror relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available both at provisioning time and retroactively via a new **SnapMirror / Vault** action on any datastore (status, trigger update, change policy, break & remove). Deleting a replicated datastore now asks whether to keep or delete the destination volume.
 
 ### v1.7 — Planned
 
