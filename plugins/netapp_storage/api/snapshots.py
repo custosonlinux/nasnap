@@ -1037,10 +1037,12 @@ def _protection_summary():
 
     # Snapshot counts — rolling 7-day window (fast DB-only queries)
     from datetime import timedelta
+    from ..core._helpers import count_snapshots_in_range
     seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    snap_7d        = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE created_at >= ?", (seven_days_ago,)) or {}).get("c", 0)
-    snap_7d_done   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status='done' AND created_at >= ?", (seven_days_ago,)) or {}).get("c", 0)
-    snap_7d_failed = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapshots WHERE status IN ('failed','error') AND created_at >= ?", (seven_days_ago,)) or {}).get("c", 0)
+    now_iso        = datetime.now(timezone.utc).isoformat()
+    snap_7d        = count_snapshots_in_range(db, seven_days_ago, now_iso)
+    snap_7d_done   = count_snapshots_in_range(db, seven_days_ago, now_iso, status_filter='done')
+    snap_7d_failed = count_snapshots_in_range(db, seven_days_ago, now_iso, status_filter=('failed', 'error'))
 
     # SnapMirror health
     sm_total   = dict(db.query_one("SELECT COUNT(*) AS c FROM netapp_snapmirror_relationships") or {}).get("c", 0)

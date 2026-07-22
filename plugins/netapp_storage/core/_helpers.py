@@ -85,6 +85,22 @@ def get_snapshot_record(db, snapshot_id):
     return dict(row)
 
 
+def count_snapshots_in_range(db, start_iso, end_iso, status_filter=None):
+    """Count netapp_snapshots rows created in [start_iso, end_iso).
+
+    status_filter: None (all), 'done', or an iterable of statuses (e.g. ('failed','error')).
+    """
+    where = "created_at >= ? AND created_at < ?"
+    params = [start_iso, end_iso]
+    if status_filter is not None:
+        statuses = [status_filter] if isinstance(status_filter, str) else list(status_filter)
+        placeholders = ",".join("?" for _ in statuses)
+        where += f" AND status IN ({placeholders})"
+        params.extend(statuses)
+    row = db.query_one(f"SELECT COUNT(*) AS c FROM netapp_snapshots WHERE {where}", params)
+    return dict(row or {}).get("c", 0)
+
+
 def build_ontap_client(endpoint):
     from .ontap_client import OntapClient
     return OntapClient(

@@ -223,6 +223,7 @@ def register(app):
     from .api.dr import register_routes as reg_dr
     from .api.dashboard import register_routes as reg_dashboard
     from .api.migrate import register_routes as reg_migrate
+    from .api.reporting import register_routes as reg_reporting, start_report_scheduler
 
     reg_snap()
     reg_restore()
@@ -237,9 +238,11 @@ def register(app):
     reg_dashboard()
     reg_sfr()
     reg_migrate()
+    reg_reporting()
     start_scheduler()
     _maybe_startup_scan()
     start_db_backup_scheduler()
     start_sfr_cleanup()
+    start_report_scheduler()
 
     log.info(f"[PLUGINS] {PLUGIN_NAME} registriert (UI: /api/plugins/netapp_storage/api/ui)")

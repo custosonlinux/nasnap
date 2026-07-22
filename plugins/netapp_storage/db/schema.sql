@@ -136,6 +136,20 @@ CREATE TABLE IF NOT EXISTS netapp_smtp_config (
     updated_at         TEXT NOT NULL DEFAULT ''
 );
 
+-- Single-row config table for the periodic digest/report email (id is always 'default').
+CREATE TABLE IF NOT EXISTS netapp_report_config (
+    id              TEXT PRIMARY KEY DEFAULT 'default',
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    mode            TEXT NOT NULL DEFAULT 'daily',   -- daily | weekly
+    time_of_day     TEXT NOT NULL DEFAULT '07:00',   -- local HH:MM, 24h
+    day_of_week     INTEGER NOT NULL DEFAULT 0,      -- 0=Mon..6=Sun, weekly mode only
+    recipients      TEXT NOT NULL DEFAULT '',        -- comma-separated, dedicated list
+    warn_pct        INTEGER NOT NULL DEFAULT 80,
+    critical_pct    INTEGER NOT NULL DEFAULT 95,
+    last_run_at     TEXT NOT NULL DEFAULT '',
+    updated_at      TEXT NOT NULL DEFAULT ''
+);
+
 -- Provisioning: datastores managed end-to-end by this plugin.
 -- Tracks ONTAP objects + host-side state so the plugin can resize/remove cleanly.
 CREATE TABLE IF NOT EXISTS netapp_provisioned_datastores (

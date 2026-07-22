@@ -1112,6 +1112,11 @@ de:{
   btn_test_smtp:'Verbindung testen',
   msg_smtp_saved:'SMTP-Einstellungen gespeichert',msg_smtp_test_ok:'SMTP-Verbindung erfolgreich',
   hint_smtp_desc:'Wird für Benachrichtigungen über Zeitplan-Jobs verwendet. Empfänger pro Zeitplan konfigurierbar (demnächst).',
+  hint_sched_notify:'Sendet nach jedem Lauf dieses Protection Plans einen zusammengefassten Bericht (alle Datastores).',
+  sect_report:'Regelmäßiger Bericht',lbl_report_enabled:'Regelmäßigen Bericht senden',lbl_report_time:'Uhrzeit',
+  lbl_report_recipients:'Empfänger (kommagetrennt)',lbl_report_warn_pct:'Warnschwelle (%)',lbl_report_crit_pct:'Kritische Schwelle (%)',
+  hint_report_desc:'Nutzt die SMTP-Einstellungen oben. Wird an eine eigene Empfängerliste gesendet, unabhängig von den Protection-Plan-Benachrichtigungen.',
+  btn_test_report:'Testbericht jetzt senden',msg_report_saved:'Berichtseinstellungen gespeichert',msg_report_test_ok:'Testbericht gesendet',
   provision_title:'Storage Provisioning',provision_desc:'Volumes (NFS, iSCSI, NVMe-oF) anlegen und automatisch an Proxmox anbinden – inkl. Vergrößern/Verkleinern. Demnächst verfügbar.',
 },
 en:{
@@ -1232,6 +1237,11 @@ en:{
   btn_test_smtp:'Test Connection',
   msg_smtp_saved:'SMTP settings saved',msg_smtp_test_ok:'SMTP connection successful',
   hint_smtp_desc:'Used for schedule job notifications. Configure recipients per schedule (coming soon).',
+  hint_sched_notify:'Sends one consolidated report after each run of this protection plan (covers all datastores).',
+  sect_report:'Periodic Report',lbl_report_enabled:'Send periodic report',lbl_report_time:'Time of day',
+  lbl_report_recipients:'Recipients (comma-separated)',lbl_report_warn_pct:'Warning threshold (%)',lbl_report_crit_pct:'Critical threshold (%)',
+  hint_report_desc:'Uses the SMTP settings above. Sent to a dedicated recipient list, independent of protection plan notifications.',
+  btn_test_report:'Send test report now',msg_report_saved:'Report settings saved',msg_report_test_ok:'Test report sent',
   provision_title:'Storage Provisioning',provision_desc:'Create and manage NetApp volumes (NFS, iSCSI, NVMe-oF) and attach them to Proxmox automatically — including resize. Coming soon.',
 },
 fr:{
@@ -1347,6 +1357,11 @@ fr:{
   btn_test_smtp:'Tester la connexion',
   msg_smtp_saved:'Paramètres SMTP enregistrés',msg_smtp_test_ok:'Connexion SMTP réussie',
   hint_smtp_desc:'Utilisé pour les notifications des jobs planifiés. Destinataires configurables par planification (bientôt).',
+  hint_sched_notify:'Envoie un rapport consolidé après chaque exécution de ce plan de protection (tous les datastores).',
+  sect_report:'Rapport périodique',lbl_report_enabled:'Envoyer un rapport périodique',lbl_report_time:'Heure',
+  lbl_report_recipients:'Destinataires (séparés par des virgules)',lbl_report_warn_pct:"Seuil d'avertissement (%)",lbl_report_crit_pct:'Seuil critique (%)',
+  hint_report_desc:"Utilise les paramètres SMTP ci-dessus. Envoyé à une liste de destinataires dédiée, indépendante des notifications des plans de protection.",
+  btn_test_report:'Envoyer un rapport de test',msg_report_saved:'Paramètres du rapport enregistrés',msg_report_test_ok:'Rapport de test envoyé',
   provision_title:'Provisionnement du stockage',provision_desc:'Créer et gérer des volumes NetApp (NFS, iSCSI, NVMe-oF) et les attacher automatiquement à Proxmox. Bientôt disponible.',
 },
 es:{
@@ -1462,6 +1477,11 @@ es:{
   btn_test_smtp:'Probar conexión',
   msg_smtp_saved:'Configuración SMTP guardada',msg_smtp_test_ok:'Conexión SMTP exitosa',
   hint_smtp_desc:'Usado para notificaciones de trabajos programados. Destinatarios configurables por programa (próximamente).',
+  hint_sched_notify:'Envía un informe consolidado tras cada ejecución de este plan de protección (todos los datastores).',
+  sect_report:'Informe periódico',lbl_report_enabled:'Enviar informe periódico',lbl_report_time:'Hora',
+  lbl_report_recipients:'Destinatarios (separados por comas)',lbl_report_warn_pct:'Umbral de advertencia (%)',lbl_report_crit_pct:'Umbral crítico (%)',
+  hint_report_desc:'Usa la configuración SMTP anterior. Se envía a una lista de destinatarios propia, independiente de las notificaciones de los planes de protección.',
+  btn_test_report:'Enviar informe de prueba',msg_report_saved:'Configuración del informe guardada',msg_report_test_ok:'Informe de prueba enviado',
   provision_title:'Aprovisionamiento de almacenamiento',provision_desc:'Crear y gestionar volúmenes NetApp (NFS, iSCSI, NVMe-oF) y conectarlos a Proxmox automáticamente. Próximamente.',
 },
 pt:{
@@ -1577,6 +1597,11 @@ pt:{
   btn_test_smtp:'Testar conexão',
   msg_smtp_saved:'Configurações SMTP salvas',msg_smtp_test_ok:'Conexão SMTP bem-sucedida',
   hint_smtp_desc:'Usado para notificações de jobs agendados. Destinatários configuráveis por agendamento (em breve).',
+  hint_sched_notify:'Envia um relatório consolidado após cada execução deste plano de proteção (todos os datastores).',
+  sect_report:'Relatório periódico',lbl_report_enabled:'Enviar relatório periódico',lbl_report_time:'Hora',
+  lbl_report_recipients:'Destinatários (separados por vírgula)',lbl_report_warn_pct:'Limite de aviso (%)',lbl_report_crit_pct:'Limite crítico (%)',
+  hint_report_desc:'Usa as configurações SMTP acima. Enviado para uma lista de destinatários própria, independente das notificações dos planos de proteção.',
+  btn_test_report:'Enviar relatório de teste',msg_report_saved:'Configurações do relatório salvas',msg_report_test_ok:'Relatório de teste enviado',
   provision_title:'Provisionamento de armazenamento',provision_desc:'Criar e gerenciar volumes NetApp (NFS, iSCSI, NVMe-oF) e conectá-los ao Proxmox automaticamente. Em breve.',
 },
 ko:{
@@ -1692,6 +1717,11 @@ ko:{
   btn_test_smtp:'연결 테스트',
   msg_smtp_saved:'SMTP 설정이 저장되었습니다',msg_smtp_test_ok:'SMTP 연결 성공',
   hint_smtp_desc:'예약 작업 알림에 사용됩니다. 일정별 수신자 설정 (출시 예정).',
+  hint_sched_notify:'이 보호 계획이 실행될 때마다 통합 보고서를 보냅니다 (모든 데이터스토어 포함).',
+  sect_report:'정기 보고서',lbl_report_enabled:'정기 보고서 보내기',lbl_report_time:'시간',
+  lbl_report_recipients:'수신자 (쉼표로 구분)',lbl_report_warn_pct:'경고 임계값 (%)',lbl_report_crit_pct:'위험 임계값 (%)',
+  hint_report_desc:'위의 SMTP 설정을 사용합니다. 보호 계획 알림과 별개로 전용 수신자 목록으로 전송됩니다.',
+  btn_test_report:'지금 테스트 보고서 보내기',msg_report_saved:'보고서 설정이 저장되었습니다',msg_report_test_ok:'테스트 보고서를 보냈습니다',
   provision_title:'스토리지 프로비저닝',provision_desc:'NetApp 볼륨(NFS, iSCSI, NVMe-oF)을 생성하고 Proxmox에 자동으로 연결합니다. 출시 예정.',
 },
 it:{
@@ -1807,6 +1837,11 @@ it:{
   btn_test_smtp:'Testa connessione',
   msg_smtp_saved:'Impostazioni SMTP salvate',msg_smtp_test_ok:'Connessione SMTP riuscita',
   hint_smtp_desc:'Utilizzato per notifiche di job pianificati. Destinatari configurabili per pianificazione (prossimamente).',
+  hint_sched_notify:'Invia un report consolidato dopo ogni esecuzione di questo piano di protezione (tutti i datastore).',
+  sect_report:'Report periodico',lbl_report_enabled:'Invia report periodico',lbl_report_time:'Orario',
+  lbl_report_recipients:'Destinatari (separati da virgola)',lbl_report_warn_pct:'Soglia di avviso (%)',lbl_report_crit_pct:'Soglia critica (%)',
+  hint_report_desc:'Usa le impostazioni SMTP sopra. Inviato a un elenco di destinatari dedicato, indipendente dalle notifiche dei piani di protezione.',
+  btn_test_report:'Invia report di prova',msg_report_saved:'Impostazioni del report salvate',msg_report_test_ok:'Report di prova inviato',
   provision_title:'Provisioning storage',provision_desc:'Crea e gestisci volumi NetApp (NFS, iSCSI, NVMe-oF) e collegali automaticamente a Proxmox. Prossimamente.',
 },
 };
@@ -2379,6 +2414,63 @@ function applyI18n() {
         <div class="form-actions">
           <button class="btn btn-ghost" onclick="testSmtp()" data-i18n="btn_test_smtp">Test Connection</button>
           <button class="btn btn-primary" onclick="saveSmtp()" data-i18n="btn_save">Save</button>
+        </div>
+      </div>
+
+      <!-- ═══════════════ PERIODIC REPORT ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h6v6M9 7h6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg><span data-i18n="sect_report">Periodic Report</span></span>
+      </div>
+      <div class="card">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:14px">
+          <input type="checkbox" id="report_enabled" onchange="toggleReportFields()">
+          <span style="font-weight:600" data-i18n="lbl_report_enabled">Send periodic report</span>
+        </label>
+        <div id="report_fields" style="display:none;flex-direction:column;gap:14px">
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-i18n="lbl_frequency">Frequency</label>
+              <select id="report_mode" onchange="reportModeChange()">
+                <option value="daily"  data-i18n="opt_daily">Daily</option>
+                <option value="weekly" data-i18n="opt_weekly">Weekly</option>
+              </select>
+            </div>
+            <div class="form-group" id="report_dow_group" style="display:none">
+              <label data-i18n="lbl_weekday">Day of week</label>
+              <select id="report_dow">
+                <option value="0" data-i18n="day_mon">Monday</option>
+                <option value="1" data-i18n="day_tue">Tuesday</option>
+                <option value="2" data-i18n="day_wed">Wednesday</option>
+                <option value="3" data-i18n="day_thu">Thursday</option>
+                <option value="4" data-i18n="day_fri">Friday</option>
+                <option value="5" data-i18n="day_sat">Saturday</option>
+                <option value="6" data-i18n="day_sun">Sunday</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label data-i18n="lbl_report_time">Time of day</label>
+              <input id="report_time" type="time" value="07:00" style="width:120px">
+            </div>
+          </div>
+          <div class="form-group">
+            <label data-i18n="lbl_report_recipients">Recipients (comma-separated)</label>
+            <input id="report_recipients" type="text" placeholder="admin@example.com, ops@example.com">
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-i18n="lbl_report_warn_pct">Warning threshold (%)</label>
+              <input id="report_warn_pct" type="number" min="1" max="100" value="80" style="width:100px">
+            </div>
+            <div class="form-group">
+              <label data-i18n="lbl_report_crit_pct">Critical threshold (%)</label>
+              <input id="report_crit_pct" type="number" min="1" max="100" value="95" style="width:100px">
+            </div>
+          </div>
+          <p class="hint" data-i18n="hint_report_desc">Uses the SMTP settings above. Sent to a dedicated recipient list, independent of protection plan notifications.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-ghost" onclick="testReport()" data-i18n="btn_test_report">Send test report now</button>
+          <button class="btn btn-primary" onclick="saveReportConfig()" data-i18n="btn_save">Save</button>
         </div>
       </div>
 
@@ -3156,7 +3248,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
-      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); loadJobRetention(); },
+      settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadReportConfig(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); loadJobRetention(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
@@ -8707,6 +8799,58 @@ async function testSmtp() {
   try {
     var d = await apiPost('settings/smtp/test', {});
     if (d.success) toast(t('msg_smtp_test_ok'), 'success');
+    else toast(d.error || 'Test failed', 'error');
+  } catch(e) { toast(e.message, 'error', e.detail); }
+}
+
+// ═══════════════════════════ PERIODIC REPORT ═════════════════════════
+
+function toggleReportFields() {
+  var on = document.getElementById('report_enabled').checked;
+  document.getElementById('report_fields').style.display = on ? 'flex' : 'none';
+}
+
+function reportModeChange() {
+  var mode = document.getElementById('report_mode').value;
+  document.getElementById('report_dow_group').style.display = (mode === 'weekly') ? 'flex' : 'none';
+}
+
+async function loadReportConfig() {
+  try {
+    var d = await apiFetch('settings/report');
+    document.getElementById('report_enabled').checked   = !!d.enabled;
+    document.getElementById('report_mode').value         = d.mode || 'daily';
+    document.getElementById('report_dow').value          = (d.day_of_week != null) ? d.day_of_week : 0;
+    document.getElementById('report_time').value         = d.time_of_day || '07:00';
+    document.getElementById('report_recipients').value   = d.recipients || '';
+    document.getElementById('report_warn_pct').value     = d.warn_pct || 80;
+    document.getElementById('report_crit_pct').value     = d.critical_pct || 95;
+    document.getElementById('report_fields').style.display = d.enabled ? 'flex' : 'none';
+    reportModeChange();
+  } catch(e) {}
+}
+
+async function saveReportConfig() {
+  var payload = {
+    enabled:      document.getElementById('report_enabled').checked,
+    mode:         document.getElementById('report_mode').value,
+    day_of_week:  parseInt(document.getElementById('report_dow').value) || 0,
+    time_of_day:  document.getElementById('report_time').value || '07:00',
+    recipients:   document.getElementById('report_recipients').value.trim(),
+    warn_pct:     parseInt(document.getElementById('report_warn_pct').value) || 80,
+    critical_pct: parseInt(document.getElementById('report_crit_pct').value) || 95,
+  };
+  try {
+    await apiPost('settings/report/save', payload);
+    toast(t('msg_report_saved'), 'success');
+  } catch(e) { toast(e.message, 'error', e.detail); }
+}
+
+async function testReport() {
+  toast(t('msg_testing').replace('%s', 'report'));
+  try {
+    var d = await apiPost('settings/report/test', {});
+    if (d.success) toast(t('msg_report_test_ok'), 'success');
     else toast(d.error || 'Test failed', 'error');
   } catch(e) { toast(e.message, 'error', e.detail); }
 }
@@ -14575,7 +14719,7 @@ actLogPoll();
       <!-- ── Step 5: Notifications ── -->
       <div class="card setup-step-card" id="schedStep5" style="display:none">
         <div class="card-title">⑤ Email Notifications</div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Optionally send email reports after each snapshot run.</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px" data-i18n="hint_sched_notify">Sends one consolidated report after each run of this protection plan (covers all datastores).</p>
         <div style="display:flex;flex-direction:column;gap:14px">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
             <input type="checkbox" id="sched_notify_enabled" onchange="toggleNotifyFields()">

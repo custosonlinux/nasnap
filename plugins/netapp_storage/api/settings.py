@@ -8,6 +8,10 @@ Settings API — SMTP / email notification configuration + DB export/import + pl
   settings/import         POST  – restore from exported JSON (idempotent upsert)
   settings/update/info    GET   – check GitHub for latest release / branch commits
   settings/update/apply   POST  – download and apply a plugin update from GitHub
+
+  Periodic digest report config/routes live in reporting.py; send_digest_report()
+  here builds/sends the actual email (reuses _send_smtp() and the HTML conventions
+  used by send_job_notification/send_schedule_consolidated_notification below).
 """
 
 import os
@@ -156,6 +160,15 @@ def _log_severity(msg):
     if ml.startswith("warning:") or ml.startswith("warn:") or "warn" in ml[:12]:
         return "warn"
     return "info"
+
+
+def _notify_on_permits(notify_on, is_failed, is_success):
+    """Check a schedule's notify_on ('all'|'failed'|'success') filter against an outcome."""
+    if notify_on == 'failed' and not is_failed:
+        return False
+    if notify_on == 'success' and not is_success:
+        return False
+    return True
 
 
 def _format_lag(s):
@@ -350,9 +363,7 @@ def send_job_notification(schedule_name, job_status, snap_name,
     """
     if not recipients_csv or not recipients_csv.strip():
         return
-    if notify_on == 'failed' and job_status != 'failed':
-        return
-    if notify_on == 'success' and job_status != 'done':
+    if not _notify_on_permits(notify_on, job_status == 'failed', job_status == 'done'):
         return
 
     try:
@@ -424,9 +435,7 @@ def send_schedule_consolidated_notification(schedule_name, overall_status,
     """
     if not recipients_csv or not recipients_csv.strip():
         return
-    if notify_on == 'failed' and overall_status != 'failed':
-        return
-    if notify_on == 'success' and overall_status != 'done':
+    if not _notify_on_permits(notify_on, overall_status == 'failed', overall_status == 'done'):
         return
 
     try:
@@ -620,6 +629,184 @@ def send_schedule_consolidated_notification(schedule_name, overall_status,
         log.warning(f"[netapp_storage] Consolidated notification failed: {exc}")
 
 
+def send_digest_report(db, cfg, period_start_iso, period_end_iso, is_test=False):
+    """Build and send the periodic (daily/weekly) digest report email.
+
+    cfg: dict from netapp_report_config (recipients, warn_pct, critical_pct, mode, ...).
+    """
+    from .reporting import _build_digest_data
+
+    recipients_csv = cfg.get('recipients', '')
+    if not recipients_csv or not recipients_csv.strip():
+        return
+
+    try:
+        _ensure_smtp_row(db)
+        row = db.query_one("SELECT * FROM netapp_smtp_config WHERE id='default'")
+        d = dict(row)
+        if not d.get('enabled'):
+            return
+        host       = d.get('host', '').strip()
+        port       = int(d.get('port') or 587)
+        username   = d.get('username', '').strip()
+        password   = db._decrypt(d.get('password_encrypted', ''))
+        encryption = d.get('encryption', 'starttls')
+        from_addr  = d.get('from_address', '') or username
+        if not host:
+            return
+
+        warn_pct     = int(cfg.get('warn_pct') or 80)
+        critical_pct = int(cfg.get('critical_pct') or 95)
+        period_label = 'Weekly' if cfg.get('mode') == 'weekly' else 'Daily'
+
+        data = _build_digest_data(db, period_start_iso, period_end_iso, warn_pct, critical_pct)
+        plans      = data['plans']
+        capacity   = data['capacity']
+        any_fail   = any(p['fail_count'] > 0 for p in plans) or data['snap_failed'] > 0
+        any_crit   = any(c['level'] == 'critical' for c in capacity)
+        any_warn   = any(c['level'] == 'warn' for c in capacity)
+
+        if any_fail or any_crit:
+            banner_color, banner_icon, banner_label = "#dc2626", "✗", "Issues detected — action needed"
+            overall_str = "Issues Detected"
+        elif any_warn:
+            banner_color, banner_icon, banner_label = "#d97706", "⚠", "Everything OK, with warnings"
+            overall_str = "Warnings"
+        else:
+            banner_color, banner_icon, banner_label = "#16a34a", "✓", "Everything OK"
+            overall_str = "All OK"
+
+        subject = f"[NaSnap] {period_label} Report — {overall_str}"
+
+        def _esc(s):
+            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        # Datastore name lookup for friendlier capacity rows
+        ds_names = {}
+        for r in (db.query("SELECT pve_storage_id, name FROM netapp_provisioned_datastores") or []):
+            rd = dict(r)
+            ds_names[rd.get('pve_storage_id', '')] = rd.get('name') or rd.get('pve_storage_id', '')
+
+        # Plan rows
+        plan_rows_html = ""
+        plan_plain_parts = []
+        if plans:
+            for p in plans:
+                col   = "#16a34a" if p['fail_count'] == 0 else "#dc2626"
+                label = "OK" if p['fail_count'] == 0 else f"{p['fail_count']} failed"
+                plan_rows_html += (
+                    f'<tr style="border-bottom:1px solid #e5e7eb">'
+                    f'<td style="padding:7px 12px;font-size:13px">{_esc(p["schedule_name"])}</td>'
+                    f'<td style="padding:7px 12px;font-size:13px;color:#16a34a">{p["ok_count"]}</td>'
+                    f'<td style="padding:7px 12px;font-size:13px;color:{col};font-weight:700">{_esc(label)}</td>'
+                    f'</tr>'
+                )
+                plan_plain_parts.append(f"  {p['schedule_name']}: {p['ok_count']} ok, {label}")
+                for f in p.get('failures', []):
+                    err_txt = (f.get('error') or '')[:200]
+                    plan_rows_html += (
+                        f'<tr><td colspan="3" style="padding:2px 12px 8px 24px;font-size:12px;'
+                        f'color:#6b7280;font-family:monospace">{_esc(f.get("snap_name",""))} — {_esc(err_txt)}</td></tr>'
+                    )
+        else:
+            plan_rows_html = '<tr><td colspan="3" style="padding:10px 12px;color:#6b7280;font-style:italic">No protection plan runs in this period.</td></tr>'
+
+        # Capacity rows
+        cap_rows_html = ""
+        cap_plain_parts = []
+        at_risk = [c for c in capacity if c['level'] in ('warn', 'critical')]
+        if at_risk:
+            for c in at_risk:
+                col  = "#dc2626" if c['level'] == 'critical' else "#d97706"
+                name = ds_names.get(c['storage_id'], c['storage_id'])
+                cap_rows_html += (
+                    f'<tr style="border-bottom:1px solid #e5e7eb">'
+                    f'<td style="padding:7px 12px;font-size:13px">{_esc(name)}</td>'
+                    f'<td style="padding:7px 12px;font-size:13px;color:{col};font-weight:700">{c["used_pct"]:.1f}%</td>'
+                    f'<td style="padding:7px 12px;font-size:12px;color:{col};text-transform:uppercase">{c["level"]}</td>'
+                    f'</tr>'
+                )
+                cap_plain_parts.append(f"  {name}: {c['used_pct']:.1f}% ({c['level']})")
+        else:
+            cap_rows_html = '<tr><td colspan="3" style="padding:10px 12px;color:#6b7280;font-style:italic">All datastores below warning threshold.</td></tr>'
+
+        sm_line = f"{data['sm_healthy']} / {data['sm_total']} SnapMirror relationships healthy" if data['sm_total'] else "No SnapMirror relationships configured"
+
+        html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:20px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
+<div style="max-width:680px;margin:0 auto">
+
+  <div style="background:{banner_color};border-radius:8px 8px 0 0;padding:22px 28px;color:#fff">
+    <div style="font-size:22px;font-weight:700">{banner_icon}&nbsp; {period_label} Report</div>
+    <div style="font-size:13px;opacity:.85;margin-top:4px">{_esc(banner_label)} — NaSnap</div>
+  </div>
+
+  <div style="background:#fff;padding:20px 24px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
+    <p style="margin:0 0 12px;font-size:13px;color:#374151">
+      {data['snap_total']} snapshot(s) in this period — {data['snap_done']} succeeded, {data['snap_failed']} failed.
+      {_esc(sm_line)}.
+    </p>
+
+    <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px">
+      Protection Plans
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+      <tr style="background:#f9fafb">
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Plan</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Succeeded</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Status</th>
+      </tr>
+      {plan_rows_html}
+    </table>
+
+    <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:20px 0 6px">
+      Datastores at Risk
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+      <tr style="background:#f9fafb">
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Datastore</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Used</th>
+        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Level</th>
+      </tr>
+      {cap_rows_html}
+    </table>
+  </div>
+
+  <div style="text-align:center;font-size:11px;color:#9ca3af;margin:14px 0">
+    NaSnap — NetApp ONTAP Snapshot Management for Proxmox{' (test report)' if is_test else ''}
+  </div>
+</div>
+</body></html>"""
+
+        plain_body = (
+            f"NaSnap {period_label} Report — {overall_str}\n\n"
+            f"{data['snap_total']} snapshot(s) — {data['snap_done']} succeeded, {data['snap_failed']} failed.\n"
+            f"{sm_line}.\n\n"
+            f"Protection Plans:\n" + ("\n".join(plan_plain_parts) if plan_plain_parts else "  (no runs in this period)") + "\n\n"
+            f"Datastores at Risk:\n" + ("\n".join(cap_plain_parts) if cap_plain_parts else "  (none)")
+        )
+
+        recipients = [r.strip() for r in recipients_csv.split(',') if r.strip()]
+        msg = email.mime.multipart.MIMEMultipart('alternative')
+        msg['From']    = from_addr
+        msg['To']      = ', '.join(recipients)
+        msg['Subject'] = subject
+        msg.attach(email.mime.text.MIMEText(plain_body, 'plain', 'utf-8'))
+        msg.attach(email.mime.text.MIMEText(html_body,  'html',  'utf-8'))
+        _send_smtp(host, port, username, password, encryption, from_addr, recipients, msg.as_string())
+        log.info(f"[netapp_storage] {period_label} digest report sent ({overall_str}){' [test]' if is_test else ''}")
+
+        if not is_test:
+            db.execute(
+                "UPDATE netapp_report_config SET last_run_at=? WHERE id='default'",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+    except Exception as exc:
+        log.warning(f"[netapp_storage] Digest report failed: {exc}")
+
+
 def _send_smtp(host, port, username, password, encryption, from_addr, recipients, raw_message):
     ctx = ssl.create_default_context()
     if encryption == 'ssl':
@@ -707,6 +894,7 @@ _EXPORT_TABLES = [
     'netapp_endpoints',
     'netapp_pve_hosts',
     'netapp_smtp_config',
+    'netapp_report_config',
     'netapp_volume_mapping',
     'netapp_provisioned_datastores',
     'netapp_snapshot_schedules',
