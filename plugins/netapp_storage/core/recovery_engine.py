@@ -1188,6 +1188,13 @@ def _maybe_break_snapmirror(client, params, svm_name, volume_name, jlog):
         if rel:
             rel_uuid = rel.get("uuid", "")
     if rel_uuid:
+        try:
+            current = client.get_snapmirror_relationship(rel_uuid) or {}
+        except Exception:
+            current = {}
+        if current.get("state") == "broken_off":
+            jlog.log("SnapMirror already broken off — skipping (safe to re-run).")
+            return
         jlog.log("Breaking SnapMirror relationship …")
         client.snapmirror_break(rel_uuid)
         jlog.log("SnapMirror broken — volume is now RW.")

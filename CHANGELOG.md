@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **DR — boot-time job/plan reconciliation** — any `netapp_jobs` row still `running` when the NaSnap process restarts (e.g. after a crash) is now automatically marked `failed` at startup instead of hanging forever, mirroring the existing manual "cancel a job whose dead thread is detected" behavior but applied proactively for every job type. DR plans caught mid-failover/failback are additionally reconciled by querying the real SnapMirror relationship state on the DR side for each entry, instead of assuming a fixed rollback state — falls back to the previous guessed state if the DR ONTAP endpoint can't be reached. Each row is reconciled independently so one bad row can't block app startup.
+- **DR — partial failover handling** — a failed datastore bind during failover no longer aborts the whole job; each entry is bound independently and failures are aggregated. A plan where some (but not all) entries succeeded is now marked with a new `partial_failover` state, distinct from a full `failed_over`, so it's no longer indistinguishable from either a complete success or a complete failure in the DR tab.
+
+### Fixed
+
+- **DR state badge showing no color** — `standby`/`failover_running`/`failed_over`/`failback_running` badges referenced CSS classes (`badge-info`/`badge-warning`/`badge-success`) that were never defined, so the DR plan state badge rendered without any color coding. Now uses the actual defined badge classes.
+
+---
+
 ## [1.7.0] — 2026-07-15
 
 ### Added

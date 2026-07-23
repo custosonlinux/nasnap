@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS netapp_dr_plans (
     id               TEXT PRIMARY KEY,
     name             TEXT NOT NULL,
     dr_site_id       TEXT NOT NULL DEFAULT '',   -- legacy, no longer required
-    state            TEXT NOT NULL DEFAULT 'standby',  -- standby | failover_running | failed_over | failback_running
+    state            TEXT NOT NULL DEFAULT 'standby',  -- standby | failover_running | failed_over | partial_failover | failback_running
     notes            TEXT NOT NULL DEFAULT '',
     last_failover_at TEXT NOT NULL DEFAULT '',
     last_test_at     TEXT NOT NULL DEFAULT '',

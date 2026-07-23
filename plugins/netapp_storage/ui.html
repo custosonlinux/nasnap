@@ -12348,7 +12348,7 @@ function drLagBadge(lagTime, healthy) {
 }
 
 function drStateBadge(state) {
-  var map={standby:'badge-info',failover_running:'badge-warning',failed_over:'badge-success',failback_running:'badge-warning'};
+  var map={standby:'badge-blue',failover_running:'badge-orange',failed_over:'badge-green',partial_failover:'badge-red',failback_running:'badge-orange'};
   return '<span class="badge '+(map[state]||'')+'">'+esc(state||'standby')+'</span>';
 }
 

@@ -102,6 +102,89 @@ def _dr_job_finish(job_id, status, lines):
     )
 
 
+def _live_dr_plan_state(db, plan_id, fallback_state):
+    """Derives a stuck plan's real state from the DR-side SnapMirror relationships
+    of its entries, instead of guessing from the *_running value it crashed in —
+    a crashed failover may have already broken some (or all) relationships before
+    the process died. Falls back to `fallback_state` if the entries can't be
+    queried (DR ONTAP unreachable, no entries, etc.)."""
+    entries = db.query(
+        "SELECT dr_endpoint_id, snapmirror_rel_uuid FROM netapp_dr_plan_entries WHERE plan_id=?",
+        (plan_id,)
+    ) or []
+    entries = [dict(e) for e in entries if e.get("snapmirror_rel_uuid")]
+    if not entries:
+        return fallback_state
+
+    from ..core._helpers import get_endpoint, build_ontap_client
+
+    broken = 0
+    try:
+        for e in entries:
+            dr_ep = get_endpoint(db, e["dr_endpoint_id"])
+            client = build_ontap_client(dr_ep)
+            rel = client.get_snapmirror_relationship(e["snapmirror_rel_uuid"]) or {}
+            if rel.get("state") == "broken_off":
+                broken += 1
+    except Exception:
+        return fallback_state
+
+    if broken == 0:
+        return "standby"
+    if broken == len(entries):
+        return "failed_over"
+    return "partial_failover"
+
+
+def reconcile_stuck_jobs_on_boot():
+    """Called once at app startup (see plugins/netapp_storage/__init__.py::register()).
+
+    Any netapp_jobs row still 'running' at process start died with the previous
+    process — the in-memory job/thread registry is always empty right after boot,
+    so nothing is actually executing it anymore. Mirrors the existing manual
+    "cancel a job whose thread is dead" logic in api/snapshots.py, just applied
+    automatically for every job_type instead of waiting for a user click.
+
+    DR plans additionally get their own state reset, since a crashed failover/
+    failback leaves netapp_dr_plans.state stuck on a *_running value with no
+    corresponding job-table column to fix it. Each row is reconciled in its own
+    try/except so one bad row can't take down the rest of the sweep — or app
+    startup, since this runs synchronously in register().
+    """
+    db = get_db()
+    now = _now()
+
+    stuck_jobs = db.query("SELECT id, job_type, log_json FROM netapp_jobs WHERE status='running'") or []
+    for j in stuck_jobs:
+        jd = dict(j)
+        try:
+            try:
+                lines = json.loads(jd.get("log_json") or "[]")
+            except Exception:
+                lines = []
+            lines.append({"ts": now, "msg": "[ERR] Reconciled at boot — process restarted while job was running"})
+            db.execute(
+                "UPDATE netapp_jobs SET status='failed', log_json=?, completed_at=? WHERE id=?",
+                (json.dumps(lines), now, jd["id"])
+            )
+            log.warning(f"[netapp_storage] Reconciled orphaned job {jd['id']} ({jd.get('job_type','')}) at boot")
+        except Exception:
+            log.exception(f"[netapp_storage] Failed to reconcile job {jd.get('id')} at boot — leaving as-is")
+
+    stuck_plans = db.query(
+        "SELECT id, state FROM netapp_dr_plans WHERE state IN ('failover_running','failback_running')"
+    ) or []
+    for p in stuck_plans:
+        pd = dict(p)
+        try:
+            fallback_state = "standby" if pd["state"] == "failover_running" else "failed_over"
+            new_state = _live_dr_plan_state(db, pd["id"], fallback_state)
+            db.execute("UPDATE netapp_dr_plans SET state=?, updated_at=? WHERE id=?", (new_state, now, pd["id"]))
+            log.warning(f"[netapp_storage] Reset DR plan {pd['id']} from '{pd['state']}' to '{new_state}' at boot")
+        except Exception:
+            log.exception(f"[netapp_storage] Failed to reconcile DR plan {pd.get('id')} at boot — leaving as-is")
+
+
 # ── DR Plans ──────────────────────────────────────────────────────────────────
 
 def _plan_summary(row, db):
@@ -706,7 +789,11 @@ def _execute_failover(job_id, plan_id, failover_type, entry_ids=None, snap_map=N
     jlog = _LogAdapter()
 
     def _finish(state):
-        plan_state = "failed_over" if state == "success" else "standby"
+        # "partial" = some entries bound successfully (SnapMirror already broken,
+        # storage already live) while others failed — that's not reversible, so the
+        # plan genuinely IS (partially) failed over; the job is still marked failed
+        # so it surfaces in Jobs & Logs instead of looking like a silent success.
+        plan_state = "standby" if state == "failed" else ("partial_failover" if state == "partial" else "failed_over")
         status = "done" if state == "success" else "failed"
         db = get_db()
         db.execute(
@@ -731,6 +818,9 @@ def _execute_failover(job_id, plan_id, failover_type, entry_ids=None, snap_map=N
 
         _log(f"[INFO] Starting {failover_type.upper()} FAILOVER — {len(entries)} datastore(s)")
 
+        succeeded_entries = []
+        failed_entries = []
+
         for entry in entries:
             dr_ep_id   = entry.get("dr_endpoint_id", "")
             dr_svm     = entry.get("dr_svm", "")
@@ -738,6 +828,7 @@ def _execute_failover(job_id, plan_id, failover_type, entry_ids=None, snap_map=N
             rel_uuid   = entry.get("snapmirror_rel_uuid", "")
             storage_id = entry.get("dr_pve_storage_id", "")
             pve_host_ids = _json_field(entry.get("dr_pve_host_ids")) or []
+            entry_label = entry.get("source_volume", entry.get("id", "?"))
 
             _log(f"[INFO] ── {entry['source_volume']} → {dr_volume} ──")
             if not rel_uuid:
@@ -747,39 +838,40 @@ def _execute_failover(job_id, plan_id, failover_type, entry_ids=None, snap_map=N
             if not pve_host_ids:
                 _log(f"[WARN] No DR PVE host — skipping"); continue
 
+            # One entry's failure must not stop the others — each datastore is an
+            # independent bind, so keep going and report the aggregate at the end
+            # (mirrors PegaProx's per-VM continue-on-error, applied per datastore here).
             try:
                 dr_ep = get_endpoint(db, dr_ep_id)
                 dr_client = build_ontap_client(dr_ep)
-            except Exception as exc:
-                _log(f"[ERR] Cannot connect to DR ONTAP: {exc}"); _finish("failed"); return
 
-            if failover_type == "planned":
-                _log("[INFO] Triggering final SnapMirror update…")
-                try:
-                    dr_client.trigger_snapmirror_transfer(rel_uuid)
-                    time.sleep(5)
-                    _log("[INFO] Final update triggered")
-                except Exception as exc:
-                    _log(f"[WARN] Final update failed (continuing): {exc}")
+                if failover_type == "planned":
+                    _log("[INFO] Triggering final SnapMirror update…")
+                    try:
+                        dr_client.trigger_snapmirror_transfer(rel_uuid)
+                        time.sleep(5)
+                        _log("[INFO] Final update triggered")
+                    except Exception as exc:
+                        _log(f"[WARN] Final update failed (continuing): {exc}")
 
-            try:
                 vol = dr_client.get_volume_by_name(dr_svm, dr_volume)
                 vol_uuid = vol.get("uuid", "")
-            except Exception as exc:
-                _log(f"[ERR] Volume lookup failed: {exc}"); _finish("failed"); return
 
-            ds_id = _ensure_provisioned_ds(db, entry, storage_id, pve_host_ids)
-            bind_params = {
-                "endpoint_id": dr_ep_id, "svm_name": dr_svm,
-                "volume_uuid": vol_uuid, "volume_name": dr_volume,
-                "pve_storage_id": storage_id, "pve_host_ids": pve_host_ids,
-                "snapmirror_break": True,
-                "snapmirror_relationship_uuid": rel_uuid,
-            }
-            try:
+                ds_id = _ensure_provisioned_ds(db, entry, storage_id, pve_host_ids)
+                bind_params = {
+                    "endpoint_id": dr_ep_id, "svm_name": dr_svm,
+                    "volume_uuid": vol_uuid, "volume_name": dr_volume,
+                    "pve_storage_id": storage_id, "pve_host_ids": pve_host_ids,
+                    "snapmirror_break": True,
+                    "snapmirror_relationship_uuid": rel_uuid,
+                }
                 _bind_nfs(ds_id, bind_params, db, jlog)
             except Exception as exc:
-                _log(f"[ERR] Storage bind failed: {exc}"); _finish("failed"); return
+                _log(f"[ERR] {entry_label}: {exc}")
+                failed_entries.append(entry_label)
+                continue
+
+            succeeded_entries.append(entry_label)
 
             try:
                 mrow = db.query_one(
@@ -812,6 +904,12 @@ def _execute_failover(job_id, plan_id, failover_type, entry_ids=None, snap_map=N
                     _log(f"[INFO] {restored} VM config(s) restored from snapmanifest")
             except Exception as exc:
                 _log(f"[WARN] VM config restore failed: {exc}")
+
+        _log(f"[INFO] {len(succeeded_entries)}/{len(succeeded_entries) + len(failed_entries)} datastore(s) succeeded")
+        if failed_entries:
+            _log(f"[ERR] Failed: {', '.join(failed_entries)}")
+        if failed_entries and not succeeded_entries:
+            _finish("failed"); return
 
         vm_groups = db.query(
             "SELECT * FROM netapp_dr_vm_groups WHERE plan_id=? ORDER BY sort_order", (plan_id,)
@@ -847,8 +945,12 @@ def _execute_failover(job_id, plan_id, failover_type, entry_ids=None, snap_map=N
                     _log(f"[INFO]   Waiting {delay}s before next group…")
                     time.sleep(delay)
 
-        _log("[INFO] ✅ Failover complete")
-        _finish("success")
+        if failed_entries:
+            _log("[INFO] ⚠️ Failover completed with errors — see failed datastore(s) above")
+            _finish("partial")
+        else:
+            _log("[INFO] ✅ Failover complete")
+            _finish("success")
 
     except Exception as exc:
         _log(f"[ERR] Unexpected error: {exc}")

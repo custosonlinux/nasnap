@@ -538,7 +538,7 @@ All snapshot, restore, and clone operations run as background jobs visible under
 
 - **Cancel**: Running jobs can be cancelled. The job stops at the next safe checkpoint and cleans up any partial work (temporary ONTAP clones, imported VGs, reserved VMIDs).
 - **Delete**: Completed, failed, or cancelled jobs can be deleted individually or in bulk via "Cleanup".
-- **Stale jobs**: If a job is stuck at "running" after a NaSnap restart, Cancel will detect the dead thread and immediately mark the job as cancelled.
+- **Stale jobs**: Any job still "running" when NaSnap restarts (e.g. after a crash) is automatically reconciled at startup and marked failed — no manual Cancel needed. DR plans caught mid-failover get their state reconciled the same way, by checking the real SnapMirror relationship state on the DR side rather than assuming the worst.
 
 ---
 
@@ -1035,6 +1035,10 @@ DEBUG=1 .venv/bin/python app.py
 - **Bulk Migrate** — move a set of VMs from one datastore to another directly from the Datastores tab, with a floating progress panel tracking each VM's migration and a clear completion notice (success/failure summary + explicit Close button) once all jobs finish.
 - **FlexGroup volumes (NFS)** — the Provision Wizard can create a FlexGroup volume spanning multiple aggregates instead of a single-aggregate FlexVol, for datastores that need to scale past one aggregate's capacity.
 - **SnapMirror/SnapVault replication automation** — replicate a datastore to a second registered NetApp system in one step: NaSnap automatically establishes cluster and SVM peering if not already present, then creates the SnapMirror relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available both at provisioning time and retroactively via a new **SnapMirror / Vault** action on any datastore (status, trigger update, change policy, break & remove). Deleting a replicated datastore now asks whether to keep or delete the destination volume.
+
+### Unreleased
+
+- **DR failover — boot-time reconciliation & partial-failure handling** — a NaSnap restart while a failover/failback job was running no longer leaves it stuck at "running" forever: it's automatically marked failed at startup, and the DR plan's state is reconciled by checking the real SnapMirror relationship state on the DR side (not guessed from which state it crashed in). Failover no longer aborts entirely on the first failed datastore — each datastore binds independently, and a plan where only some datastores succeeded is now marked with its own **`partial_failover`** state instead of being reported as either a full failure or a full success.
 
 ### v1.8 — Planned
 
