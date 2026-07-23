@@ -206,6 +206,7 @@ After logging in, open **Settings → Initial Setup** to walk through ONTAP conn
 | `NASNAP_DATA` | `/data` | Persistent data directory (DB + AES key) |
 | `DEBUG` | — | Set to `1` for Flask debug mode and the `/dev/autologin` shortcut |
 | `SFR_COPY_LIMIT_MB` | `200` | Maximum file size (MB) that Single File Restore will copy into a VM via QGA. Larger files must be downloaded locally. See the [SFR performance note](#single-file-restore-sfr--performance--limits) below. |
+| `TZ` | `UTC` | Timezone used to interpret time-of-day settings (e.g. the digest report's send time in Settings → Email Notifications). Without it, "07:00" is evaluated as 07:00 UTC, not your local time. Set to an [IANA zone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) such as `Europe/Berlin`. |
 
 > **Port and TLS** are configured via **Settings → Server/Network** in the UI and persisted in `/data/server.json`. The container uses `network_mode: host` so port changes take effect on the next restart without modifying `docker-compose.yml`.
 
@@ -498,12 +499,14 @@ The destination section is greyed out when "Trigger SnapMirror transfer" is not 
 
 ## Email notifications
 
-Each schedule can send email notifications on snapshot job completion. Configure SMTP under **Settings → SMTP**, then enable notifications per schedule.
+Each schedule/Protection Plan can send email notifications on snapshot job completion. Configure SMTP under **Settings → SMTP**, then enable notifications per schedule. An optional periodic **digest report** (daily/weekly, Settings → Email Notifications) separately summarizes snapshot success/failure per plan and flags datastores approaching a configurable capacity threshold — its send time is interpreted in the `TZ` environment variable (defaults to `UTC`, see [Environment Variables](#environment-variables)).
 
-Notification emails include:
+All notification emails (per-run, digest, and the "Send test email" preview) share one visual design:
 - **Status banner** — full-width, colour-coded: green (success), amber (success with warnings), red (failure).
-- **Summary table** — plan name, status, and per-datastore result (Datastore | Status | Snapshot).
-- **Dark terminal log block** — job log lines per datastore with `[INFO]` / `[WARN]` / `[ERR]` severity tags. For multi-datastore plans, each datastore gets its own log section in a single consolidated email.
+- **KPI tiles** — at-a-glance counts (e.g. datastores OK, VMs protected, SnapMirror healthy) directly under the banner.
+- **Action-needed callout** — failures/at-risk items surfaced in a red box above everything else, so they never hide inside a longer list.
+- **Compact cards** — one card per datastore/plan/entry, colour-coded left border, instead of a dense table row.
+- **Dark terminal log block** — job log lines with `[INFO]` / `[WARN]` / `[ERR]` severity tags, shown for failed entries.
 - **Plain-text fallback** — included as a `text/plain` MIME part.
 
 ---
@@ -1039,6 +1042,7 @@ DEBUG=1 .venv/bin/python app.py
 ### Unreleased
 
 - **DR failover — boot-time reconciliation & partial-failure handling** — a NaSnap restart while a failover/failback job was running no longer leaves it stuck at "running" forever: it's automatically marked failed at startup, and the DR plan's state is reconciled by checking the real SnapMirror relationship state on the DR side (not guessed from which state it crashed in). Failover no longer aborts entirely on the first failed datastore — each datastore binds independently, and a plan where only some datastores succeeded is now marked with its own **`partial_failover`** state instead of being reported as either a full failure or a full success.
+- **Email notifications — unified visual design** — the Protection Plan email, digest report, single-job notification, and "Send test email" preview now share one set of building blocks (banner, KPI tiles, action-needed callout, compact cards, log terminal) instead of three drifting table-based implementations. Also fixes the digest report's send time being evaluated in UTC regardless of the deployment's actual timezone (new `TZ` environment variable).
 
 ### v1.8 — Planned
 

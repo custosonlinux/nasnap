@@ -9,8 +9,10 @@ The actual email building/sending lives in settings.py (send_digest_report), nex
 the other notification builders, to reuse _send_smtp()/the HTML color conventions.
 """
 
+import os
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
@@ -182,7 +184,11 @@ def _check_and_run_report():
         if not cfg.get('enabled') or not cfg.get('recipients'):
             return
 
-        now = datetime.now()
+        try:
+            tz = ZoneInfo(os.environ.get("TZ", "UTC"))
+        except ZoneInfoNotFoundError:
+            tz = ZoneInfo("UTC")
+        now = datetime.now(tz)
         try:
             hh, mm = (cfg.get('time_of_day') or '07:00').split(':')
             slot_today = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
@@ -193,11 +199,16 @@ def _check_and_run_report():
         if cfg.get('mode') == 'weekly' and now.weekday() != int(cfg.get('day_of_week') or 0):
             return
 
+        # last_run_at is stored as a UTC-aware timestamp (send_digest_report() in
+        # settings.py, matches how the UI labels/displays it) — must be converted
+        # into the same tz as slot_today before comparing, not string-stripped.
         last_run = cfg.get('last_run_at', '')
         if last_run:
             try:
-                last_dt = datetime.fromisoformat(last_run.rstrip('Z').split('+')[0])
-                if last_dt >= slot_today:
+                last_dt = datetime.fromisoformat(last_run.replace('Z', '+00:00'))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if last_dt.astimezone(tz) >= slot_today:
                     return  # already sent for this slot
             except Exception:
                 pass

@@ -12,6 +12,9 @@ Settings API — SMTP / email notification configuration + DB export/import + pl
   Periodic digest report config/routes live in reporting.py; send_digest_report()
   here builds/sends the actual email (reuses _send_smtp() and the HTML conventions
   used by send_job_notification/send_schedule_consolidated_notification below).
+  All three "live" email builders (_build_notification_email, send_schedule_
+  consolidated_notification, send_digest_report) plus the "Send test email"
+  button share their HTML building blocks via email_common.py.
 """
 
 import os
@@ -152,16 +155,6 @@ def _test_smtp_connection(host, port, username, password, encryption):
                 s.login(username, password)
 
 
-def _log_severity(msg):
-    """Classify a job log message as 'err', 'warn', or 'info'."""
-    ml = msg.lower()
-    if ml.startswith("error:") or ml.startswith("err:") or "error" in ml[:12]:
-        return "err"
-    if ml.startswith("warning:") or ml.startswith("warn:") or "warn" in ml[:12]:
-        return "warn"
-    return "info"
-
-
 def _notify_on_permits(notify_on, is_failed, is_success):
     """Check a schedule's notify_on ('all'|'failed'|'success') filter against an outcome."""
     if notify_on == 'failed' and not is_failed:
@@ -190,24 +183,16 @@ def _format_lag(s):
 def _build_notification_email(subject, schedule_name, snap_name, job_status, log_lines=None,
                                extra_rows=None, vm_list=None, datastore=None):
     """
-    Returns (html_body, plain_body).
-
-    Builds an HTML email with:
-    - Colour-coded status banner (green / amber / red)
-    - Summary table
-    - Dark terminal block with [INFO]/[WARN]/[ERR]-tagged log lines
+    Returns (html_body, plain_body) for a single-job notification, built from the
+    same banner -> card -> log-terminal -> footer blocks as the consolidated
+    Protection Plan and digest report emails (see email_common.py) so all three
+    "live" notification emails look like one family instead of drifting apart.
     """
-    # ── Determine overall severity ────────────────────────────────────────────
-    entries = []
-    if log_lines:
-        for entry in log_lines[-50:]:
-            ts  = entry.get('ts', '')[:19].replace('T', ' ')
-            msg = entry.get('msg', str(entry))
-            sev = _log_severity(msg)
-            entries.append((ts, sev, msg))
+    from . import email_common as ec
 
-    has_err  = any(s == "err"  for _, s, _ in entries)
-    has_warn = any(s == "warn" for _, s, _ in entries)
+    entries = ec.log_entries(log_lines or [])
+    has_err  = any(sev == "err"  for _, sev, _ in entries)
+    has_warn = any(sev == "warn" for _, sev, _ in entries)
     is_done  = job_status == 'done'
 
     if not is_done or has_err:
@@ -219,108 +204,58 @@ def _build_notification_email(subject, schedule_name, snap_name, job_status, log
 
     # ── Visual config per overall status ─────────────────────────────────────
     _cfg = {
-        "ok":   dict(banner="#16a34a", icon="✓", label="Snapshot Successful",
-                     dot_color="#16a34a", dot_label="Success"),
-        "warn": dict(banner="#d97706", icon="⚠", label="Snapshot Completed with Warnings",
-                     dot_color="#d97706", dot_label="Success (with warnings)"),
-        "err":  dict(banner="#dc2626", icon="✗", label="Snapshot Failed",
-                     dot_color="#dc2626", dot_label="Failed"),
+        "ok":   dict(banner=ec.GREEN, icon="✓", label="Snapshot Successful", dot_label="Success"),
+        "warn": dict(banner=ec.AMBER, icon="⚠", label="Snapshot Completed with Warnings",
+                     dot_label="Success (with warnings)"),
+        "err":  dict(banner=ec.RED,   icon="✗", label="Snapshot Failed", dot_label="Failed"),
     }
     cfg = _cfg[overall]
-
     status_label = "Success" if is_done else "Failed"
 
     # ── Summary rows ─────────────────────────────────────────────────────────
     summary_rows = [
-        ("Schedule",  schedule_name),
-        ("Snapshot",  snap_name),
-        ("Datastore", datastore) if datastore else None,
-        ("Status",    f'<span style="color:{cfg["dot_color"]};font-weight:700">● {cfg["dot_label"]}</span>'),
+        ("Schedule",  ec.esc(schedule_name)),
+        ("Snapshot",  ec.esc(snap_name)),
+        ("Datastore", ec.esc(datastore)) if datastore else None,
+        ("Status",    f'<span style="color:{cfg["banner"]};font-weight:700">● {cfg["dot_label"]}</span>'),
     ]
     summary_rows = [r for r in summary_rows if r is not None]
     if vm_list:
-        def _vm_badge(vm):
-            vmid = vm.get("vmid", "?")
-            name = vm.get("name", "")
-            vtype = (vm.get("vm_type") or "qemu").upper()
-            label = f"{vtype} {vmid}" + (f" — {name}" if name else "")
-            bg = "#1d4ed8" if vtype == "QEMU" else "#6d28d9"
-            return (f'<span style="display:inline-block;background:{bg};color:#fff;'
-                    f'border-radius:4px;padding:1px 6px;font-size:11px;margin:1px 2px 1px 0">'
-                    f'{label}</span>')
-        vm_html = "".join(_vm_badge(v) for v in vm_list)
-        summary_rows.append(("VMs", vm_html))
+        summary_rows.append(("VMs", ec.render_vm_cell(vm_list)))
     if extra_rows:
         summary_rows.extend(extra_rows)
 
     summary_html = "".join(
         f'<tr>'
-        f'<td style="padding:7px 12px 7px 0;color:#6b7280;white-space:nowrap;vertical-align:top">{k}</td>'
-        f'<td style="padding:7px 0;font-weight:500;word-break:break-all">{v}</td>'
+        f'<td style="padding:7px 12px 7px 0;color:#6b7280;white-space:nowrap;vertical-align:top;font-size:13px">{k}</td>'
+        f'<td style="padding:7px 0;font-weight:500;word-break:break-all;font-size:13px">{v}</td>'
         f'</tr>'
         for k, v in summary_rows
     )
 
-    # ── Log lines HTML ────────────────────────────────────────────────────────
-    _sev_color = {"err": "#f87171", "warn": "#fbbf24", "info": "#a3e4b0"}
-    _sev_tag   = {"err": "[ERR] ", "warn": "[WARN]", "info": "[INFO]"}
+    body_html = (
+        '<div style="background:#fff;padding:24px 28px;border-left:1px solid #e5e7eb;'
+        'border-right:1px solid #e5e7eb">'
+        f'<table style="width:100%;border-collapse:collapse">{summary_html}</table>'
+        '</div>'
+    )
+    logs_section_html = (
+        '<div style="background:#0f172a;border-radius:0 0 8px 8px;padding:20px 24px">'
+        '<div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.08em;'
+        'text-transform:uppercase;margin-bottom:12px">Job Log</div>'
+        '<div style="font-family:\'Courier New\',Courier,monospace;font-size:11.5px;line-height:1.65">'
+        f'{ec.render_log_html(log_lines or [])}'
+        '</div></div>'
+    )
 
-    def _esc(s):
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    log_rows_html = ""
-    if entries:
-        for ts, sev, msg in entries:
-            color = _sev_color[sev]
-            tag   = _sev_tag[sev]
-            log_rows_html += (
-                f'<div style="margin:1px 0">'
-                f'<span style="color:#6b7280;user-select:none">{_esc(ts)} </span>'
-                f'<span style="color:{color};font-weight:700;user-select:none">{tag} </span>'
-                f'<span style="color:{color if sev != "info" else "#d1fae5"}">{_esc(msg)}</span>'
-                f'</div>'
-            )
-    else:
-        log_rows_html = '<div style="color:#6b7280;font-style:italic">No log entries.</div>'
-
-    # ── Full HTML ─────────────────────────────────────────────────────────────
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:20px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:680px;margin:0 auto">
-
-  <!-- Status banner -->
-  <div style="background:{cfg['banner']};border-radius:8px 8px 0 0;padding:22px 28px;color:#fff">
-    <div style="font-size:22px;font-weight:700">{cfg['icon']}&nbsp; {cfg['label']}</div>
-    <div style="font-size:13px;opacity:.85;margin-top:4px">NaSnap — NetApp ONTAP Snapshot Management for Proxmox</div>
-  </div>
-
-  <!-- Summary card -->
-  <div style="background:#fff;padding:24px 28px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
-    <table style="width:100%;border-collapse:collapse">
-      {summary_html}
-    </table>
-  </div>
-
-  <!-- Log terminal -->
-  <div style="background:#0f172a;border-radius:0 0 8px 8px;padding:20px 24px">
-    <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px">
-      Job Log
-    </div>
-    <div style="font-family:'Courier New',Courier,monospace;font-size:11.5px;line-height:1.65">
-      {log_rows_html}
-    </div>
-  </div>
-
-  <!-- Footer -->
-  <div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:14px">
-    NaSnap — NetApp ONTAP Snapshot Management for Proxmox
-  </div>
-
-</div>
-</body>
-</html>"""
+    inner = (
+        ec.render_banner(cfg["banner"], cfg["icon"], cfg["label"],
+                          "NaSnap — NetApp ONTAP Snapshot Management for Proxmox")
+        + body_html
+        + logs_section_html
+        + ec.render_footer()
+    )
+    html = ec.wrap_shell(inner)
 
     # ── Plain-text fallback ───────────────────────────────────────────────────
     plain_lines = [
@@ -343,8 +278,7 @@ def _build_notification_email(subject, schedule_name, snap_name, job_status, log
     plain_lines.append("")
     if entries:
         plain_lines.append("--- Log ---")
-        for ts, sev, msg in entries:
-            plain_lines.append(f"{ts}  {_sev_tag[sev]}  {msg}")
+        plain_lines.append(ec.render_log_plain(log_lines or []))
 
     return html, "\n".join(plain_lines)
 
@@ -454,166 +388,131 @@ def send_schedule_consolidated_notification(schedule_name, overall_status,
         if not host:
             return
 
+        from . import email_common as ec
+
         status_str   = 'Success' if overall_status == 'done' else 'Failed'
         ds_count     = len(ds_results)
         failed_count = sum(1 for r in ds_results if r.get("status") != "done")
+        ok_count     = ds_count - failed_count
         subject = (f"[NaSnap] Protection Plan {status_str}: {schedule_name} "
                    f"— {ds_count} datastores ({failed_count} failed)")
 
-        banner_color = "#16a34a" if overall_status == "done" else "#dc2626"
+        banner_color = ec.GREEN if overall_status == "done" else ec.RED
         banner_icon  = "✓" if overall_status == "done" else "✗"
         banner_label = "All datastores protected successfully" if overall_status == "done" \
             else f"{failed_count} of {ds_count} datastore(s) failed"
 
-        _sev_color = {"err": "#f87171", "warn": "#fbbf24", "info": "#a3e4b0"}
-        _sev_tag   = {"err": "[ERR] ", "warn": "[WARN]", "info": "[INFO]"}
+        # KPI tiles: datastores OK, VMs protected, SnapMirror health (only if any SM configured)
+        vm_total = sum(len(r.get("vm_list") or []) for r in ds_results)
+        sm_results  = [r.get("snapmirror_info") for r in ds_results if (r.get("snapmirror_info") or {}).get("exists")]
+        sm_total    = len(sm_results)
+        sm_healthy  = sum(1 for sm in sm_results if sm.get("healthy"))
+        kpi_tiles = [
+            (f"{ok_count}/{ds_count}", "Datastores OK", ec.GREEN if failed_count == 0 else ec.RED),
+            (str(vm_total), "VMs protected", None),
+            (f"{sm_healthy}/{sm_total}", "SnapMirror healthy",
+             ec.GREEN if sm_healthy == sm_total else ec.AMBER) if sm_total else None,
+        ]
 
-        def _esc(s):
-            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Split results: failures surface first in an action box, successes stay compact.
+        failed_results  = [r for r in ds_results if r.get("status") != "done"]
+        success_results = [r for r in ds_results if r.get("status") == "done"]
 
-        def _render_log_block(log_lines):
-            entries = []
-            for entry in (log_lines or [])[-50:]:
-                ts  = entry.get('ts', '')[:19].replace('T', ' ')
-                msg = entry.get('msg', str(entry))
-                sev = _log_severity(msg)
-                entries.append((ts, sev, msg))
-            if not entries:
-                return '<div style="color:#6b7280;font-style:italic">No log entries.</div>'
-            rows = ""
-            for ts, sev, msg in entries:
-                col = _sev_color[sev]
-                tag = _sev_tag[sev]
-                rows += (
-                    f'<div style="margin:1px 0">'
-                    f'<span style="color:#6b7280;user-select:none">{_esc(ts)} </span>'
-                    f'<span style="color:{col};font-weight:700;user-select:none">{tag} </span>'
-                    f'<span style="color:{col if sev != "info" else "#d1fae5"}">{_esc(msg)}</span>'
-                    f'</div>'
+        action_html = ""
+        if failed_results:
+            items = ""
+            for r in failed_results:
+                ds_name = r.get("pve_storage_id") or r.get("job_id", "?")
+                snippets = ec.worst_log_snippets(r.get("log_lines", []))
+                detail = "<br>".join(ec.esc(s) for s in snippets) if snippets else ""
+                items += ec.render_action_item(
+                    f'<strong>{ec.esc(ds_name)}</strong> '
+                    f'<span style="color:#6b7280;font-family:monospace;font-size:12px">'
+                    f'{ec.esc(r.get("snap_name") or "—")}</span>',
+                    detail,
                 )
-            return rows
+            action_html = ec.render_action_box(f"Action needed — {failed_count} datastore(s) failed", items)
 
-        def _plain_log(log_lines):
-            lines = []
-            for entry in (log_lines or [])[-50:]:
-                ts  = entry.get('ts', '')[:19].replace('T', ' ')
-                msg = entry.get('msg', str(entry))
-                sev = _log_severity(msg)
-                lines.append(f"    {ts}  {_sev_tag[sev]}  {msg}")
-            return "\n".join(lines) if lines else "    (no log entries)"
-
-        # Build per-DS summary row + log block
-        ds_summary_html = ""
-        ds_detail_html  = ""
-        ds_plain_parts  = []
-
-        def _vm_badge_email(vm):
-            vmid  = vm.get("vmid", "?")
-            name  = vm.get("name", "")
-            vtype = (vm.get("vm_type") or "qemu").upper()
-            lbl   = f"{vtype} {vmid}" + (f" — {name}" if name else "")
-            bg    = "#1d4ed8" if vtype == "QEMU" else "#6d28d9"
-            return (f'<span style="display:inline-block;background:{bg};color:#fff;'
-                    f'border-radius:4px;padding:1px 6px;font-size:11px;margin:1px 2px 1px 0">'
-                    f'{_esc(str(lbl))}</span>')
-
-        for r in ds_results:
-            s       = r.get("status", "failed")
+        success_cards_html = ""
+        success_plain_parts = []
+        for r in success_results:
             ds_name = r.get("pve_storage_id") or r.get("job_id", "?")
             snap    = r.get("snap_name") or "—"
-            logs    = r.get("log_lines", [])
-            col     = "#16a34a" if s == "done" else "#dc2626"
-            label   = "Success" if s == "done" else "Failed"
-            vm_list = r.get("vm_list") or []
-            sm_info = r.get("snapmirror_info")
-
-            vm_cell = ""
-            if vm_list:
-                vm_cell = "".join(_vm_badge_email(v) for v in vm_list)
-            else:
-                vm_cell = '<span style="color:#9ca3af;font-size:11px">—</span>'
-
-            sm_cell = ""
-            if sm_info and sm_info.get("exists"):
-                sm_col   = "#16a34a" if sm_info.get("healthy") else "#dc2626"
-                sm_state = sm_info.get("state", "unknown")
-                sm_trig  = " · triggered" if sm_info.get("triggered") else ""
-                sm_cell  = f'<span style="color:{sm_col};font-size:11px">● {_esc(sm_state)}{_esc(sm_trig)}</span>'
-            elif sm_info and not sm_info.get("exists"):
-                sm_cell = '<span style="color:#9ca3af;font-size:11px">—</span>'
-
-            ds_summary_html += (
-                f'<tr style="border-bottom:1px solid #e5e7eb">'
-                f'<td style="padding:8px 12px;font-size:13px;font-family:monospace;vertical-align:top">{_esc(ds_name)}</td>'
-                f'<td style="padding:8px 12px;font-size:13px;color:{col};font-weight:700;white-space:nowrap;vertical-align:top">● {label}</td>'
-                f'<td style="padding:8px 12px;font-size:12px;font-family:monospace;color:#6b7280;vertical-align:top">{_esc(snap)}</td>'
-                f'<td style="padding:8px 12px;vertical-align:top">{vm_cell}</td>'
-                f'<td style="padding:8px 12px;vertical-align:top">{sm_cell}</td>'
-                f'</tr>'
+            header = (
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<div style="font-size:13px"><span style="color:{ec.GREEN};font-weight:700">●</span> '
+                f'<strong>{ec.esc(ds_name)}</strong> '
+                f'<span style="color:#6b7280;font-family:monospace;font-size:12px">{ec.esc(snap)}</span></div>'
+                f'</div>'
             )
-            ds_detail_html += (
+            body = (
+                f'<div style="margin-top:4px">{ec.render_vm_cell(r.get("vm_list") or [])} '
+                f'{ec.render_sm_pill(r.get("snapmirror_info"))}</div>'
+            )
+            success_cards_html += ec.render_card(ec.GREEN, header, body)
+            success_plain_parts.append(f"  [OK] {ds_name}  ({snap})")
+
+        failed_plain_parts = []
+        for r in failed_results:
+            ds_name = r.get("pve_storage_id") or r.get("job_id", "?")
+            snap    = r.get("snap_name") or "—"
+            failed_plain_parts.append(
+                f"  [FAILED] {ds_name}  ({snap})\n{ec.render_log_plain(r.get('log_lines', []))}"
+            )
+
+        # Full logs only for the failed datastores — successes stay noise-free (see dashboard for their logs).
+        failed_logs_html = ""
+        for r in failed_results:
+            ds_name = r.get("pve_storage_id") or r.get("job_id", "?")
+            failed_logs_html += (
                 f'<div style="margin-top:20px">'
                 f'  <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;'
-                f'letter-spacing:.06em;margin-bottom:6px">{_esc(ds_name)}'
-                f'  <span style="color:{col};margin-left:8px">● {label}</span></div>'
+                f'letter-spacing:.06em;margin-bottom:6px">{ec.esc(ds_name)}'
+                f'  <span style="color:#f87171;margin-left:8px">● Failed</span></div>'
                 f'  <div style="font-family:\'Courier New\',Courier,monospace;font-size:11.5px;line-height:1.65">'
-                f'    {_render_log_block(logs)}'
+                f'    {ec.render_log_html(r.get("log_lines", []))}'
                 f'  </div>'
                 f'</div>'
             )
-            ds_plain_parts.append(
-                f"  [{label.upper()}] {ds_name}  ({snap})\n{_plain_log(logs)}"
+
+        logs_section_html = ""
+        if failed_logs_html:
+            logs_section_html = (
+                f'<div style="background:#0f172a;border-radius:0 0 8px 8px;padding:20px 24px">'
+                f'<div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.08em;'
+                f'text-transform:uppercase;margin-bottom:4px">Failure Logs</div>'
+                f'{failed_logs_html}</div>'
             )
 
-        html_body = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:20px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:680px;margin:0 auto">
+        card_radius = "0 0 0 0" if logs_section_html else "0 0 8px 8px"
+        body_html = (
+            f'<div style="background:#fff;padding:20px 24px;border-left:1px solid #e5e7eb;'
+            f'border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;border-radius:{card_radius}">'
+            f'{action_html}'
+        )
+        if success_cards_html:
+            body_html += (
+                f'<div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;'
+                f'letter-spacing:.06em;margin-bottom:8px">'
+                f'{"✓ " if failed_results else ""}{ok_count} datastore(s) succeeded</div>'
+                f'{success_cards_html}'
+            )
+        body_html += '</div>'
 
-  <!-- Banner -->
-  <div style="background:{banner_color};border-radius:8px 8px 0 0;padding:22px 28px;color:#fff">
-    <div style="font-size:22px;font-weight:700">{banner_icon}&nbsp; {_esc(schedule_name)}</div>
-    <div style="font-size:13px;opacity:.85;margin-top:4px">{banner_label} — NaSnap Protection Plan</div>
-  </div>
-
-  <!-- Summary table -->
-  <div style="background:#fff;padding:20px 24px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
-    <p style="margin:0 0 12px;font-size:13px;color:#374151">
-      Protection plan <strong>{_esc(schedule_name)}</strong> ran across {ds_count} datastore(s).
-    </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
-      <tr style="background:#f9fafb">
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Datastore</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Status</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Snapshot</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">VMs</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">SnapMirror</th>
-      </tr>
-      {ds_summary_html}
-    </table>
-  </div>
-
-  <!-- Per-DS log blocks -->
-  <div style="background:#0f172a;border-radius:0 0 8px 8px;padding:20px 24px">
-    <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px">
-      Job Logs
-    </div>
-    {ds_detail_html}
-  </div>
-
-  <!-- Footer -->
-  <div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:14px">
-    NaSnap — NetApp ONTAP Snapshot Management for Proxmox
-  </div>
-</div>
-</body></html>"""
+        inner = (
+            ec.render_banner(banner_color, banner_icon, schedule_name, f"{banner_label} — NaSnap Protection Plan")
+            + ec.render_kpi_row(kpi_tiles)
+            + body_html
+            + logs_section_html
+            + ec.render_footer()
+        )
+        html_body = ec.wrap_shell(inner)
 
         plain_body = (
             f"NaSnap Protection Plan Report: {schedule_name}\n"
             f"Overall: {status_str}\n\n"
             f"Results ({ds_count} datastores):\n\n"
-            + "\n\n".join(ds_plain_parts)
+            + "\n\n".join(failed_plain_parts + success_plain_parts)
         )
 
         recipients = [r.strip() for r in recipients_csv.split(',') if r.strip()]
@@ -678,8 +577,8 @@ def send_digest_report(db, cfg, period_start_iso, period_end_iso, is_test=False)
 
         subject = f"[NaSnap] {period_label} Report — {overall_str}"
 
-        def _esc(s):
-            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        from . import email_common as ec
+        _esc = ec.esc
 
         # Datastore name lookup for friendlier capacity rows
         ds_names = {}
@@ -687,98 +586,107 @@ def send_digest_report(db, cfg, period_start_iso, period_end_iso, is_test=False)
             rd = dict(r)
             ds_names[rd.get('pve_storage_id', '')] = rd.get('name') or rd.get('pve_storage_id', '')
 
-        # Plan rows
-        plan_rows_html = ""
+        at_risk = [c for c in capacity if c['level'] in ('warn', 'critical')]
+        failing_plans = [p for p in plans if p['fail_count'] > 0]
+
+        # KPI tiles: snapshots OK, SnapMirror health (if any configured), datastores at risk
+        kpi_tiles = [
+            (f"{data['snap_done']}/{data['snap_total']}", "Snapshots OK",
+             ec.GREEN if data['snap_failed'] == 0 else ec.RED),
+            (f"{data['sm_healthy']}/{data['sm_total']}", "SnapMirror healthy",
+             ec.GREEN if data['sm_healthy'] == data['sm_total'] else ec.AMBER) if data['sm_total'] else None,
+            (str(len(at_risk)), "Datastores at risk",
+             ec.RED if any_crit else (ec.AMBER if any_warn else ec.GREEN)),
+        ]
+
+        # Action box: failing plans + critical datastores surfaced before anything else.
+        action_html = ""
+        if failing_plans or any_crit:
+            items = ""
+            for p in failing_plans:
+                first_fail = p.get('failures') or []
+                detail = _esc((first_fail[0].get('error') or '')[:200]) if first_fail else ""
+                items += ec.render_action_item(
+                    f'<strong>{_esc(p["schedule_name"])}</strong> '
+                    f'<span style="color:#6b7280">— {p["fail_count"]} failed snapshot(s)</span>',
+                    detail,
+                )
+            for c in [c for c in capacity if c['level'] == 'critical']:
+                name = ds_names.get(c['storage_id'], c['storage_id'])
+                items += ec.render_action_item(
+                    f'<strong>{_esc(name)}</strong> '
+                    f'<span style="color:#6b7280">— {c["used_pct"]:.1f}% used (critical)</span>'
+                )
+            action_html = ec.render_action_box("Action needed", items)
+
+        # Protection plan cards
+        plan_cards_html = ""
         plan_plain_parts = []
         if plans:
             for p in plans:
-                col   = "#16a34a" if p['fail_count'] == 0 else "#dc2626"
-                label = "OK" if p['fail_count'] == 0 else f"{p['fail_count']} failed"
-                plan_rows_html += (
-                    f'<tr style="border-bottom:1px solid #e5e7eb">'
-                    f'<td style="padding:7px 12px;font-size:13px">{_esc(p["schedule_name"])}</td>'
-                    f'<td style="padding:7px 12px;font-size:13px;color:#16a34a">{p["ok_count"]}</td>'
-                    f'<td style="padding:7px 12px;font-size:13px;color:{col};font-weight:700">{_esc(label)}</td>'
-                    f'</tr>'
+                ok = p['fail_count'] == 0
+                col   = ec.GREEN if ok else ec.RED
+                label = "OK" if ok else f"{p['fail_count']} failed"
+                header = (
+                    '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">'
+                    f'<span>{_esc(p["schedule_name"])}</span>'
+                    f'<span><span style="color:{ec.GREEN}">{p["ok_count"]} ok</span>'
+                    f'<span style="color:{col};font-weight:700;margin-left:8px">{_esc(label)}</span></span>'
+                    '</div>'
                 )
-                plan_plain_parts.append(f"  {p['schedule_name']}: {p['ok_count']} ok, {label}")
-                for f in p.get('failures', []):
-                    err_txt = (f.get('error') or '')[:200]
-                    plan_rows_html += (
-                        f'<tr><td colspan="3" style="padding:2px 12px 8px 24px;font-size:12px;'
-                        f'color:#6b7280;font-family:monospace">{_esc(f.get("snap_name",""))} — {_esc(err_txt)}</td></tr>'
+                body = ""
+                if p.get('failures'):
+                    rows = "".join(
+                        f'<div style="margin-top:3px">{_esc(f.get("snap_name",""))} — {_esc((f.get("error") or "")[:200])}</div>'
+                        for f in p['failures']
                     )
+                    body = f'<div style="font-family:monospace;font-size:11.5px;color:#b91c1c;margin-top:6px">{rows}</div>'
+                plan_cards_html += ec.render_card(col, header, body)
+                plan_plain_parts.append(f"  {p['schedule_name']}: {p['ok_count']} ok, {label}")
         else:
-            plan_rows_html = '<tr><td colspan="3" style="padding:10px 12px;color:#6b7280;font-style:italic">No protection plan runs in this period.</td></tr>'
+            plan_cards_html = '<div style="color:#6b7280;font-style:italic;font-size:13px">No protection plan runs in this period.</div>'
 
-        # Capacity rows
-        cap_rows_html = ""
+        # Datastore-at-risk cards with a capacity meter
+        cap_cards_html = ""
         cap_plain_parts = []
-        at_risk = [c for c in capacity if c['level'] in ('warn', 'critical')]
         if at_risk:
             for c in at_risk:
-                col  = "#dc2626" if c['level'] == 'critical' else "#d97706"
+                col  = ec.RED if c['level'] == 'critical' else ec.AMBER
                 name = ds_names.get(c['storage_id'], c['storage_id'])
-                cap_rows_html += (
-                    f'<tr style="border-bottom:1px solid #e5e7eb">'
-                    f'<td style="padding:7px 12px;font-size:13px">{_esc(name)}</td>'
-                    f'<td style="padding:7px 12px;font-size:13px;color:{col};font-weight:700">{c["used_pct"]:.1f}%</td>'
-                    f'<td style="padding:7px 12px;font-size:12px;color:{col};text-transform:uppercase">{c["level"]}</td>'
-                    f'</tr>'
+                header = (
+                    '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">'
+                    f'<span>{_esc(name)}</span>'
+                    f'<span style="color:{col};font-weight:700">{c["used_pct"]:.1f}% · {c["level"].upper()}</span>'
+                    '</div>'
                 )
+                body = ec.render_meter(c['used_pct'], col)
+                cap_cards_html += ec.render_card(col, header, body)
                 cap_plain_parts.append(f"  {name}: {c['used_pct']:.1f}% ({c['level']})")
         else:
-            cap_rows_html = '<tr><td colspan="3" style="padding:10px 12px;color:#6b7280;font-style:italic">All datastores below warning threshold.</td></tr>'
+            cap_cards_html = '<div style="color:#6b7280;font-style:italic;font-size:13px">All datastores below warning threshold.</div>'
 
         sm_line = f"{data['sm_healthy']} / {data['sm_total']} SnapMirror relationships healthy" if data['sm_total'] else "No SnapMirror relationships configured"
 
-        html_body = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:20px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:680px;margin:0 auto">
+        body_html = (
+            '<div style="background:#fff;padding:20px 24px;border-left:1px solid #e5e7eb;'
+            'border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;border-radius:0 0 8px 8px">'
+            f'{action_html}'
+            '<div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;'
+            'letter-spacing:.06em;margin-bottom:8px">Protection Plans</div>'
+            f'{plan_cards_html}'
+            '<div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;'
+            'letter-spacing:.06em;margin:20px 0 8px">Datastores at Risk</div>'
+            f'{cap_cards_html}'
+            '</div>'
+        )
 
-  <div style="background:{banner_color};border-radius:8px 8px 0 0;padding:22px 28px;color:#fff">
-    <div style="font-size:22px;font-weight:700">{banner_icon}&nbsp; {period_label} Report</div>
-    <div style="font-size:13px;opacity:.85;margin-top:4px">{_esc(banner_label)} — NaSnap</div>
-  </div>
-
-  <div style="background:#fff;padding:20px 24px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
-    <p style="margin:0 0 12px;font-size:13px;color:#374151">
-      {data['snap_total']} snapshot(s) in this period — {data['snap_done']} succeeded, {data['snap_failed']} failed.
-      {_esc(sm_line)}.
-    </p>
-
-    <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px">
-      Protection Plans
-    </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
-      <tr style="background:#f9fafb">
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Plan</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Succeeded</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Status</th>
-      </tr>
-      {plan_rows_html}
-    </table>
-
-    <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:20px 0 6px">
-      Datastores at Risk
-    </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
-      <tr style="background:#f9fafb">
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Datastore</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Used</th>
-        <th style="padding:7px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">Level</th>
-      </tr>
-      {cap_rows_html}
-    </table>
-  </div>
-
-  <div style="text-align:center;font-size:11px;color:#9ca3af;margin:14px 0">
-    NaSnap — NetApp ONTAP Snapshot Management for Proxmox{' (test report)' if is_test else ''}
-  </div>
-</div>
-</body></html>"""
+        inner = (
+            ec.render_banner(banner_color, banner_icon, f"{period_label} Report", f"{banner_label} — NaSnap")
+            + ec.render_kpi_row(kpi_tiles)
+            + body_html
+            + ec.render_footer(' (test report)' if is_test else '')
+        )
+        html_body = ec.wrap_shell(inner)
 
         plain_body = (
             f"NaSnap {period_label} Report — {overall_str}\n\n"
