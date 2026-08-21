@@ -524,9 +524,10 @@ def create_app():
 
   /* ── Theme toggle: dark → light → glass → dark ── */
   var _THEME_KEY = 'nasnap-theme';
+  var _THEME_DEFAULT = 'glass';
   /* Apply immediately (in <head>) to avoid flash on reload */
   (function(){
-    var _t = localStorage.getItem(_THEME_KEY);
+    var _t = localStorage.getItem(_THEME_KEY) || _THEME_DEFAULT;
     if (_t === 'light') document.documentElement.classList.add('light-theme-pre');
     if (_t === 'glass') document.documentElement.classList.add('glass-theme-pre');
   })();
@@ -553,7 +554,7 @@ def create_app():
     }
   }
   window.nasnapToggleTheme = function () {
-    var current = localStorage.getItem(_THEME_KEY) || 'dark';
+    var current = localStorage.getItem(_THEME_KEY) || _THEME_DEFAULT;
     var next = current === 'dark' ? 'light' : current === 'light' ? 'glass' : 'dark';
     localStorage.setItem(_THEME_KEY, next);
     _applyTheme(next);
@@ -561,7 +562,7 @@ def create_app():
 
   /* populate username in topbar; show admin link for admin role */
   document.addEventListener('DOMContentLoaded', function () {
-    _applyTheme(localStorage.getItem(_THEME_KEY) || 'dark');
+    _applyTheme(localStorage.getItem(_THEME_KEY) || _THEME_DEFAULT);
 
     fetch('/api/auth/me', { credentials: 'include' })
       .then(function (r) { return r.json(); })

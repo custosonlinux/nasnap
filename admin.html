@@ -3,9 +3,9 @@
 <head>
   <script>
     // Same 'nasnap-theme' key the main UI uses, applied before first paint
-    // to avoid a flash of the default (dark) look.
+    // to avoid a flash of the default (glass) look.
     (function(){
-      var t = localStorage.getItem('nasnap-theme');
+      var t = localStorage.getItem('nasnap-theme') || 'glass';
       if (t === 'light') document.documentElement.classList.add('light-theme-pre');
       if (t === 'glass') document.documentElement.classList.add('glass-theme-pre');
     })();
@@ -451,7 +451,7 @@ var _me = null;
 var _pwTarget = null;
 
 (function(){
-  var t = localStorage.getItem('nasnap-theme') || 'dark';
+  var t = localStorage.getItem('nasnap-theme') || 'glass';
   document.documentElement.classList.remove('light-theme-pre', 'glass-theme-pre');
   if (t === 'light') document.body.classList.add('light-theme');
   if (t === 'glass') document.body.classList.add('glass-theme');

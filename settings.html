@@ -3,10 +3,10 @@
 <head>
   <script>
     // Apply the theme immediately, before first paint, to avoid a flash of
-    // the default (dark) look — same 'nasnap-theme' key the main UI uses, so
+    // the default (glass) look — same 'nasnap-theme' key the main UI uses, so
     // whatever the user picked there is what shows up here too.
     (function(){
-      var t = localStorage.getItem('nasnap-theme');
+      var t = localStorage.getItem('nasnap-theme') || 'glass';
       if (t === 'light') document.documentElement.classList.add('light-theme-pre');
       if (t === 'glass') document.documentElement.classList.add('glass-theme-pre');
     })();
@@ -484,7 +484,7 @@ function setTheme(theme) {
   localStorage.setItem('nasnap-theme', theme);
   applyTheme(theme);
 }
-applyTheme(localStorage.getItem('nasnap-theme') || 'dark');
+applyTheme(localStorage.getItem('nasnap-theme') || 'glass');
 
 function logout() {
   fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
