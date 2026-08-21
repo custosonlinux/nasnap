@@ -836,7 +836,6 @@ def _do_fetch_capacity() -> dict:
     """Blocking fetch — never call from a request handler directly."""
     db = get_db()
     cap: dict = {}
-    vm_by_node: dict = {}
 
     host_rows = db.query("SELECT * FROM netapp_pve_hosts")
     for hr in (host_rows or []):
@@ -858,43 +857,37 @@ def _do_fetch_capacity() -> dict:
                         cap[sid]["used_bytes"] = used
                         cap[sid]["total_bytes"] = total
 
-            r2 = pve._api_get(f"{pve._base}/cluster/resources?type=vm")
-            if r2.ok:
-                for vm in r2.json().get("data", []):
-                    node = vm.get("node", "")
-                    vmid = vm.get("vmid")
-                    if node and vmid:
-                        vm_by_node.setdefault(node, set()).add(vmid)
-
         except Exception as exc:
             log.debug(f"[netapp_storage] storage/capacity host: {exc}")
 
-    known_ids = set(cap.keys())
-    if known_ids and vm_by_node:
-        for hr in (host_rows or []):
+    # VM counts come from NaSnap's own snapshot history instead of a live,
+    # per-node-per-storage PVE "storage content" scan (one API call per node
+    # × per datastore — slow, and silently left vm_count at 0 whenever any of
+    # those calls failed, which is what made the dashboard's VM column show
+    # nothing even though VMs were clearly on the datastore).
+    try:
+        rows = db.query(
+            "SELECT vm.pve_storage_id AS sid, s.vmids_json "
+            "FROM netapp_snapshots s "
+            "JOIN netapp_volume_mapping vm ON vm.id = s.mapping_id "
+            "WHERE s.status='done'"
+        )
+        vmids_by_sid: dict = {}
+        for r in (rows or []):
+            r = dict(r)
+            sid = r.get("sid") or ""
+            if not sid:
+                continue
             try:
-                from ..core._helpers import build_pve_client
-                pve = build_pve_client(db, dict(hr)["id"])
-                nodes_r = pve._api_get(f"{pve._base}/nodes")
-                if not nodes_r.ok:
-                    continue
-                for nd in nodes_r.json().get("data", []):
-                    node_name = nd.get("node")
-                    if not node_name:
-                        continue
-                    for sid in known_ids:
-                        try:
-                            rc = pve._api_get(
-                                f"{pve._base}/nodes/{node_name}/storage/{sid}/content"
-                            )
-                            if rc.ok:
-                                vmids = {e.get("vmid") for e in rc.json().get("data", []) if e.get("vmid")}
-                                cap.setdefault(sid, {"used_bytes": 0, "total_bytes": 0, "vm_count": 0})
-                                cap[sid]["vm_count"] = max(cap[sid]["vm_count"], len(vmids))
-                        except Exception:
-                            pass
+                vmids = json.loads(r.get("vmids_json") or "[]")
             except Exception:
-                pass
+                vmids = []
+            vmids_by_sid.setdefault(sid, set()).update(vmids)
+        for sid, vmids in vmids_by_sid.items():
+            cap.setdefault(sid, {"used_bytes": 0, "total_bytes": 0, "vm_count": 0})
+            cap[sid]["vm_count"] = len(vmids)
+    except Exception as exc:
+        log.debug(f"[netapp_storage] storage/capacity vm counts: {exc}")
 
     return {"stats": cap}
 
@@ -1277,6 +1270,9 @@ def _run_detect_and_scan(created_by):
         logger.log("Checking for snapshot records no longer present on ONTAP …")
         from ..core.gc import gc_stale_snapshots
         gc_result = gc_stale_snapshots(db, logger)
+
+        from ..core.instant_recovery_engine import check_stale_sessions
+        check_stale_sessions(db, logger)
 
         return {
             "mappings_found":     len(mappings),

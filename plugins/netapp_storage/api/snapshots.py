@@ -997,11 +997,15 @@ def _protection_summary():
     """Returns VM counts from PVE and schedule/datastore protection coverage."""
     db = get_db()
 
-    # Schedule coverage
-    sched_rows = db.query(
-        "SELECT DISTINCT mapping_id FROM netapp_snapshot_schedules WHERE enabled=1"
-    )
-    protected_mapping_ids = {r["mapping_id"] for r in (sched_rows or [])}
+    # Schedule coverage — must resolve the same way schedules.py actually fires
+    # jobs (a multi-datastore schedule stores its datastore list in the JSON
+    # mapping_ids column, not the legacy single mapping_id column; reading
+    # mapping_id alone under-reports coverage for any multi-datastore plan).
+    from .schedules import _resolve_mapping_ids
+    sched_rows = db.query("SELECT * FROM netapp_snapshot_schedules WHERE enabled=1")
+    protected_mapping_ids = set()
+    for r in (sched_rows or []):
+        protected_mapping_ids.update(_resolve_mapping_ids(dict(r)))
 
     total_ds_rows = db.query(
         "SELECT DISTINCT pve_storage_id FROM netapp_volume_mapping"

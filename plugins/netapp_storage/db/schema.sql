@@ -363,6 +363,32 @@ CREATE TABLE IF NOT EXISTS netapp_sfr_sessions (
     last_active  TEXT NOT NULL DEFAULT ''
 );
 
+-- ── Instant Recovery sessions ──────────────────────────────────────────────
+-- A running/testable VM booted directly off a FlexClone (no data copy). No
+-- auto-expiry unlike netapp_sfr_sessions — these are meant to persist for
+-- hours/days until the user commits (Storage Migrate) or discards it.
+CREATE TABLE IF NOT EXISTS netapp_instant_recovery_sessions (
+    id                TEXT PRIMARY KEY,
+    mapping_id        TEXT NOT NULL DEFAULT '',
+    snapshot_id       TEXT NOT NULL DEFAULT '',
+    source_vmid       INTEGER NOT NULL DEFAULT 0,
+    source_vm_name    TEXT NOT NULL DEFAULT '',
+    new_vmid          INTEGER NOT NULL DEFAULT 0,
+    vm_type           TEXT NOT NULL DEFAULT 'qemu',
+    pve_cluster_id    TEXT NOT NULL DEFAULT '',
+    node              TEXT NOT NULL DEFAULT '',
+    temp_storage_id   TEXT NOT NULL DEFAULT '',
+    clone_volume_uuid TEXT NOT NULL DEFAULT '',
+    clone_volume_name TEXT NOT NULL DEFAULT '',
+    junction_path     TEXT NOT NULL DEFAULT '',
+    ad_hoc_snapshot   INTEGER NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'running',
+    error             TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL DEFAULT '',
+    created_by        TEXT NOT NULL DEFAULT '',
+    last_reminder_at  TEXT NOT NULL DEFAULT ''
+);
+
 -- ── VM OS info cache (last known guest OS per VM, persists across restarts) ──
 -- Written whenever a live QGA probe succeeds, read as a fallback when a VM is
 -- stopped/unreachable so the UI keeps showing the last known OS instead of

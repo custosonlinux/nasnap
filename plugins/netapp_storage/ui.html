@@ -409,6 +409,7 @@
 
   /* ── Tables ──────────────────────────────────────────────────── */
   .table-scroll { overflow-x: auto; }
+  .db-card-scroll { max-height: 340px; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; }
   th {
     text-align: left;
@@ -645,7 +646,7 @@
   }
   .db-two-col {
     display: grid;
-    grid-template-columns: 1.6fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 14px;
     align-items: start;
   }
@@ -1892,7 +1893,7 @@ function applyI18n() {
       <div class="subtab" data-tab="snapshots"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_snapshots">Snapshots</span></div>
 
       <div class="sidebar-group" id="sidebarGroupProtection">
-        <div class="sidebar-group-hd" onclick="sidebarToggleGroup()">
+        <div class="sidebar-group-hd" onclick="sidebarToggleGroup('Protection')">
           <svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           <span>Protection</span>
           <svg class="sidebar-chevron" width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="6 9 12 15 18 9"/></svg>
@@ -1903,7 +1904,18 @@ function applyI18n() {
         </div>
       </div>
 
-      <div class="subtab" data-tab="restore"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span data-i18n="tab_restore">VMs</span></div>
+      <div class="sidebar-group" id="sidebarGroupVMs">
+        <div class="sidebar-group-hd" onclick="sidebarToggleGroup('VMs')">
+          <svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          <span>VMs</span>
+          <svg class="sidebar-chevron" width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="sidebar-group-body" id="sidebarGroupBodyVMs">
+          <div class="subtab" data-tab="restore"><span data-i18n="tab_restore">Restore &amp; Clone</span></div>
+          <div class="subtab" data-tab="instant-recovery"><span>Instant Recovery</span></div>
+        </div>
+      </div>
+
       <div class="subtab" data-tab="storage"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg><span data-i18n="tab_storage">Datastores</span></div>
       <div class="subtab" data-tab="jobs"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><span data-i18n="tab_jobs">Jobs &amp; Logs</span></div>
       <div class="subtab" data-tab="settings"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg><span data-i18n="tab_settings">Settings</span></div>
@@ -1968,7 +1980,7 @@ function applyI18n() {
         <div id="db_job_timeline" style="padding:0 8px 10px;min-height:56px;box-sizing:border-box"></div>
       </div>
 
-      <!-- Two-column content -->
+      <!-- Two-column content: Storage Overview + Environment, side by side, equal width -->
       <div class="db-two-col">
 
         <!-- Storage overview -->
@@ -1981,7 +1993,7 @@ function applyI18n() {
               <a href="#" onclick="document.querySelector('[data-tab=\'storage\']').click();return false" style="font-size:11px;color:var(--primary)">→ Datastores</a>
             </div>
           </div>
-          <div class="table-scroll">
+          <div class="table-scroll db-card-scroll">
             <table>
               <thead><tr>
                 <th>Name</th>
@@ -1997,46 +2009,43 @@ function applyI18n() {
           </div>
         </div>
 
-        <!-- Right column: Recent Jobs + Storage Systems stacked -->
-        <div style="display:flex;flex-direction:column;gap:14px">
-
-          <!-- Recent jobs -->
-          <div class="card" style="padding:0">
-            <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
-              <span data-i18n="db_recent_jobs">Recent Jobs</span>
-              <a href="#" onclick="document.querySelector('[data-tab=\'jobs\']').click();return false" style="font-size:11px;color:var(--primary)">→ All Jobs</a>
+        <!-- Environment -->
+        <div class="card" style="padding:0">
+          <div class="card-title" style="padding:12px 16px" data-i18n="db_systems">Environment</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
+            <div class="db-card-scroll" style="max-height:280px;padding:4px 16px 16px;border-right:1px solid var(--border)">
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">NetApp ONTAP</div>
+              <div id="dbSystemsNetapp"><span class="spinner" style="margin-top:8px;display:block"></span></div>
             </div>
-            <div class="table-scroll">
-              <table>
-                <thead><tr>
-                  <th>Job</th>
-                  <th>Status</th>
-                  <th>Time</th>
-                </tr></thead>
-                <tbody id="dbJobsTbody">
-                  <tr><td colspan="3" class="empty"><span class="spinner"></span></td></tr>
-                </tbody>
-              </table>
+            <div class="db-card-scroll" style="max-height:280px;padding:4px 16px 16px">
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">Proxmox VE</div>
+              <div id="dbSystemsPve"><span class="spinner" style="margin-top:8px;display:block"></span></div>
             </div>
           </div>
+        </div>
 
-          <!-- Storage Systems -->
-          <div class="card" style="padding:0">
-            <div class="card-title" style="padding:12px 16px" data-i18n="db_systems">Environment</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
-              <div style="padding:4px 16px 16px;border-right:1px solid var(--border)">
-                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">NetApp ONTAP</div>
-                <div id="dbSystemsNetapp"><span class="spinner" style="margin-top:8px;display:block"></span></div>
-              </div>
-              <div style="padding:4px 16px 16px">
-                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">Proxmox VE</div>
-                <div id="dbSystemsPve"><span class="spinner" style="margin-top:8px;display:block"></span></div>
-              </div>
-            </div>
-          </div>
+      </div>
 
-        </div><!-- /right column -->
-
+      <!-- Recent Jobs — full width, with a log excerpt per job so you can see
+           what actually happened without opening the full log. -->
+      <div class="card" style="padding:0;margin-top:14px">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
+          <span data-i18n="db_recent_jobs">Recent Jobs</span>
+          <a href="#" onclick="document.querySelector('[data-tab=\'jobs\']').click();return false" style="font-size:11px;color:var(--primary)">→ All Jobs</a>
+        </div>
+        <div class="table-scroll db-card-scroll">
+          <table>
+            <thead><tr>
+              <th>Job</th>
+              <th>Status</th>
+              <th>Time</th>
+              <th>Details</th>
+            </tr></thead>
+            <tbody id="dbJobsTbody">
+              <tr><td colspan="4" class="empty"><span class="spinner"></span></td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
     </div>
@@ -2227,6 +2236,29 @@ function applyI18n() {
         <p style="font-size:11px;color:var(--muted);padding:6px 14px 8px;margin:0">All VMs that have ever been snapshotted — including VMs no longer in the cluster — appear here.</p>
       </div>
 
+    </div>
+
+    <!-- ══════════════════ INSTANT RECOVERY ══════════════════ -->
+    <div id="tab-instant-recovery" class="tab-panel" style="display:none">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink:0;color:var(--accent)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span style="font-weight:700;font-size:15px">Instant Recovery</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="loadInstantRecoverySessions()">
+          <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh
+        </button>
+      </div>
+      <p class="hint" style="margin-bottom:10px">Boot a VM directly from a NetApp FlexClone — no data is copied until you commit it. Start one from a VM's action menu in
+        <a href="#" onclick="document.querySelector('[data-tab=\'restore\']').click();return false">Restore &amp; Clone</a>.</p>
+      <div class="card table-scroll">
+        <table style="min-width:700px">
+          <thead><tr>
+            <th>VM</th><th>Source</th><th>Started</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="irSessionsTbody">
+            <tr><td colspan="5" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- tab-clone: nav pill removed, panel kept as empty placeholder for compat -->
@@ -3236,6 +3268,8 @@ document.addEventListener('keydown', function(ev) {
     { id: 'deleteConfirmModal', fn: function(){ var b=document.querySelector('#deleteConfirmModal ._cancel-btn'); if(b) b.click(); } },
     { id: 'rwModal', fn: function(){ closeRestoreWizard(); } },
     { id: 'cwModal',  fn: function(){ closeCloneWizard(); } },
+    { id: 'irStartModal', fn: function(){ closeIrStartModal(); } },
+    { id: 'irMigrateModal', fn: function(){ closeIrMigrateModal(); } },
     { id: 'vmInfoModal', fn: function(){ closeVmInfoModal(); } },
     { id: 'bulkMigrateModal', fn: function(){ closeBulkMigrateWizard(); } },
     { id: 'smConfigModal', fn: function(){ hideSmConfigModal(); } },
@@ -3269,12 +3303,17 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       var _pg = document.getElementById('sidebarGroupProtection');
       if (_pg) _pg.classList.add('open');
     }
+    if (t.dataset.tab === 'restore' || t.dataset.tab === 'instant-recovery') {
+      var _vg = document.getElementById('sidebarGroupVMs');
+      if (_vg) _vg.classList.add('open');
+    }
     document.getElementById('tab-'+t.dataset.tab).style.display = 'block';
     var loaders = {
       dashboard: loadDashboard,
       snapshots: loadSnapshots,
       schedules: loadSchedules,
       restore:   function(){ loadRcVmList(); },
+      'instant-recovery': loadInstantRecoverySessions,
       storage:   loadStorageUnified,
       jobs:      loadAllJobs,
       settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadReportConfig(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); loadJobRetention(); },
@@ -3284,8 +3323,8 @@ document.querySelectorAll('.subtab').forEach(function(t) {
   });
 });
 
-function sidebarToggleGroup() {
-  var grp = document.getElementById('sidebarGroupProtection');
+function sidebarToggleGroup(name) {
+  var grp = document.getElementById('sidebarGroup' + (name || 'Protection'));
   if (grp) grp.classList.toggle('open');
 }
 
@@ -4640,6 +4679,9 @@ var _actJobLabels  = {
   'snapmirror_scan':       'SnapMirror Scan',
   'discover_scan':         'Detect & Scan',
   'migrate_vm':            'Migrate VM',
+  'instant_recovery_start':    'Instant Recovery',
+  'instant_recovery_migrate':  'Instant Recovery: Storage Migrate',
+  'instant_recovery_discard':  'Instant Recovery: Discard',
 };
 
 function actLogToggle() {
@@ -5018,10 +5060,15 @@ function rcOpenActionsMenu(evt, vmid, name, dsName, mappingId) {
   menu.style.cssText = 'position:fixed;z-index:9200;background:var(--card);color:var(--text);'
     + 'border:1px solid var(--border);border-radius:8px;padding:4px;min-width:180px;'
     + 'box-shadow:0 8px 24px rgba(0,0,0,.35);left:-9999px;top:-9999px';
+  var vmRow = _rcVms.find(function(v){ return v.vmid===vmid && v.dsName===dsName; }) || {};
+  var irBlocked = !!vmRow.isSan;
   menu.innerHTML =
       _rcMenuItem('Info', _ico('info',14), 'rcCloseActionsMenu();openVmInfoModal('+vmid+',\''+esc(dsName)+'\',\''+esc(mappingId)+'\')')
     + _rcMenuItem(t('act_restore'), _ico('restore',14), 'rcCloseActionsMenu();openRestoreWizard('+vmid+',null,\''+esc(dsName)+'\')')
     + _rcMenuItem(t('act_clone'),   _ico('clone',14),   'rcCloseActionsMenu();openCloneWizard('+vmid+',null,\''+esc(dsName)+'\')')
+    + _rcMenuItem('Instant Recovery', _ico('play',14),
+        'rcCloseActionsMenu();openInstantRecoveryModal('+vmid+',\''+esc(name)+'\',\''+esc(dsName)+'\',\''+esc(mappingId)+'\')',
+        irBlocked, irBlocked ? 'NFS datastores only' : '')
     + _rcMenuItem('Single File Restore', _ico('files',14),
         'rcCloseActionsMenu();openSfrModal('+vmid+',\''+esc(name)+'\',\''+esc(mappingId)+'\')',
         !sfrInfo.qga_ok, sfrInfo.qga_ok ? '' : 'Guest Agent not running — Single File Restore unavailable');
@@ -5080,6 +5127,200 @@ async function openVmInfoModal(vmid, dsName, mappingId) {
 function closeVmInfoModal() {
   document.getElementById('vmInfoModal').style.display = 'none';
   document.body.style.overflow = '';
+}
+
+// ── Instant Recovery ─────────────────────────────────────────────────────────
+var _irState = { vmid:null, name:'', dsName:'', mappingId:'', pveClusterId:'', snap:null };
+
+function openInstantRecoveryModal(vmid, name, dsName, mappingId) {
+  var vm = _rcVms.find(function(v){ return v.vmid===vmid && v.dsName===dsName; }) || {};
+  if (vm.isSan) { toast('Instant Recovery currently supports NFS datastores only', 'error'); return; }
+  _irState = { vmid:vmid, name:name||vm.name||'', dsName:dsName, mappingId:mappingId,
+               pveClusterId:vm.pveClusterId||'', snap:null };
+  document.getElementById('ir_vm_hdr').textContent = (_irState.name||'VM')+' (ID: '+vmid+')';
+  document.getElementById('ir_new_name').value = 'ir-' + (_irState.name || vmid);
+  document.getElementById('ir_new_vmid').value = '';
+  document.getElementById('ir_network_isolated').checked = true;
+  var snapRadio = document.querySelector('input[name="ir_source"][value="snapshot"]');
+  if (snapRadio) snapRadio.checked = true;
+  irSourceChanged();
+  irPopulateSnaps();
+  irLoadNextId();
+  var modal = document.getElementById('irStartModal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  setTimeout(function(){ trapFocus(modal); }, 80);
+}
+
+function closeIrStartModal() {
+  document.getElementById('irStartModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function irSourceChanged() {
+  var live = (document.querySelector('input[name="ir_source"]:checked')||{}).value === 'live';
+  document.getElementById('ir_snap_group').style.display = live ? 'none' : '';
+}
+
+function irPopulateSnaps() {
+  var sel = document.getElementById('ir_snap');
+  var done = _allSnapshots.filter(function(s){
+    if (s.status !== 'done') return false;
+    if (s.pve_storage_id !== _irState.dsName) return false;
+    var vmids = s.vmids || [];
+    if (!vmids.length) return true;
+    return vmids.indexOf(_irState.vmid) >= 0 || vmids.indexOf(String(_irState.vmid)) >= 0;
+  });
+  sel.innerHTML = done.length
+    ? done.map(function(s){ return '<option value="'+s.id+'">'+esc(s.snap_name)+' ('+fmtDate(s.created_at)+')</option>'; }).join('')
+    : '<option value="">— no snapshots —</option>';
+  renderSnapPickerTimeline('ir_snap_picker', done, function(snap){ sel.value=String(snap.id); irSnapChanged(); });
+  irSnapChanged();
+}
+
+function irSnapChanged() {
+  var sid = document.getElementById('ir_snap').value;
+  _irState.snap = _allSnapshots.find(function(s){ return String(s.id)===sid; }) || null;
+}
+
+async function irLoadNextId() {
+  if (!_irState.pveClusterId) return;
+  try {
+    var d = await apiFetch('clone/nextid?pve_cluster_id='+encodeURIComponent(_irState.pveClusterId));
+    if (d.vmid) document.getElementById('ir_new_vmid').value = d.vmid;
+  } catch(e) {}
+}
+
+async function submitInstantRecovery() {
+  var live    = (document.querySelector('input[name="ir_source"]:checked')||{}).value === 'live';
+  var newVmid = parseInt(document.getElementById('ir_new_vmid').value, 10);
+  var newName = document.getElementById('ir_new_name').value.trim();
+  var netIso  = document.getElementById('ir_network_isolated').checked;
+  if (!newVmid) { toast('Enter a new VMID', 'error'); return; }
+  if (!live && !_irState.snap) { toast('Select a snapshot', 'error'); return; }
+
+  var btn = document.getElementById('irStartSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    var endpoint, payload;
+    if (live) {
+      endpoint = 'instant-recovery/start-live';
+      payload = { mapping_id:_irState.mappingId, src_vmid:_irState.vmid, new_vmid:newVmid,
+                  new_name:newName, network_isolated:netIso };
+    } else {
+      endpoint = 'instant-recovery/start';
+      payload = { snapshot_id:_irState.snap.id, src_vmid:_irState.vmid, new_vmid:newVmid,
+                  new_name:newName, network_isolated:netIso };
+    }
+    var r = await apiPost(endpoint, payload);
+    toast('Instant Recovery starting …', 'success');
+    if (r.job_id) trackJob(r.job_id, 'Instant Recovery: ' + newName);
+    closeIrStartModal();
+    document.querySelector('[data-tab="instant-recovery"]').click();
+    setTimeout(loadInstantRecoverySessions, 1500);
+  } catch(e) {
+    toast(e.message, 'error', e.detail);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Start Instant Recovery';
+  }
+}
+
+var _irStatusLabels = {
+  running:    '<span class="corp-badge corp-badge-online">Running</span>',
+  migrating:  '<span class="corp-badge corp-badge-running">Migrating…</span>',
+  discarding: '<span class="corp-badge corp-badge-running">Discarding…</span>',
+  done:       '<span class="corp-badge corp-badge-online">Migrated</span>',
+};
+
+async function loadInstantRecoverySessions() {
+  var tbody = document.getElementById('irSessionsTbody');
+  if (!tbody) return;
+  try {
+    var rows = await apiFetch('instant-recovery/sessions');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No active Instant Recovery sessions.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function(s){
+      var busy = (s.status === 'migrating' || s.status === 'discarding');
+      var stale = s.last_reminder_at
+        ? ' <span title="Running a while — consider committing or discarding" style="color:var(--warning)">⚠</span>' : '';
+      return '<tr>'
+        + '<td>'+esc(String(s.new_vmid))+(s.source_vm_name?' – '+esc(s.source_vm_name):'')+'</td>'
+        + '<td>VM '+esc(String(s.source_vmid))+'</td>'
+        + '<td>'+fmtDateRel(s.created_at)+stale+'</td>'
+        + '<td>'+(_irStatusLabels[s.status]||esc(s.status))+(s.error?' <span title="'+esc(s.error)+'" style="color:var(--error)">⚠</span>':'')+'</td>'
+        + '<td>'
+          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="openIrMigrateModal(\''+s.id+'\')">Storage Migrate</button> '
+          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>'
+          + '</td>'
+        + '</tr>';
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty" style="color:var(--error)">'+esc(e.message)+'</td></tr>';
+  }
+}
+
+async function discardInstantRecovery(sessionId, vmidLabel) {
+  var ok = await uiConfirm(
+    'Discard Instant Recovery for VM '+vmidLabel+'?\n\nThe temporary VM will be deleted and the FlexClone removed. This cannot be undone.',
+    'Discard', 'btn-danger');
+  if (!ok) return;
+  try {
+    var r = await apiPost('instant-recovery/discard', { session_id: sessionId });
+    toast('Discarding …', 'success');
+    if (r.job_id) trackJob(r.job_id, 'Instant Recovery discard');
+    setTimeout(loadInstantRecoverySessions, 1500);
+  } catch(e) { toast(e.message, 'error', e.detail); }
+}
+
+var _irMigrateSessionId = null;
+
+async function openIrMigrateModal(sessionId) {
+  _irMigrateSessionId = sessionId;
+  var sel = document.getElementById('ir_migrate_target');
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  var modal = document.getElementById('irMigrateModal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  try {
+    var sessions = await apiFetch('instant-recovery/sessions');
+    var sess = sessions.find(function(s){ return s.id === sessionId; });
+    var maps = await apiFetch('volume-mappings');
+    var opts = (maps||[]).filter(function(m){
+      return m.storage_protocol === 'nfs' && (!sess || m.pve_cluster_id === sess.pve_cluster_id);
+    });
+    sel.innerHTML = opts.length
+      ? opts.map(function(m){ return '<option value="'+esc(m.id)+'">'+esc(m.pve_storage_id)+'</option>'; }).join('')
+      : '<option value="">— no eligible datastore found —</option>';
+  } catch(e) {
+    sel.innerHTML = '<option value="">— error loading —</option>';
+  }
+}
+
+function closeIrMigrateModal() {
+  document.getElementById('irMigrateModal').style.display = 'none';
+  document.body.style.overflow = '';
+  _irMigrateSessionId = null;
+}
+
+async function submitIrMigrate() {
+  var target = document.getElementById('ir_migrate_target').value;
+  if (!target) { toast('Select a target datastore', 'error'); return; }
+  var btn = document.getElementById('irMigrateSubmitBtn');
+  btn.disabled = true;
+  try {
+    var r = await apiPost('instant-recovery/migrate',
+      { session_id:_irMigrateSessionId, target_mapping_id:target });
+    toast('Storage Migrate started', 'success');
+    if (r.job_id) trackJob(r.job_id, 'Instant Recovery migrate');
+    closeIrMigrateModal();
+    setTimeout(loadInstantRecoverySessions, 1500);
+  } catch(e) {
+    toast(e.message, 'error', e.detail);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function _renderVmInfoOverview(info, qga) {
@@ -9765,7 +10006,7 @@ function _dbRenderJobs(jobsData, stale) {
   var jbody = document.getElementById('dbJobsTbody');
   jbody.classList.toggle('db-stale', !!stale);
   if (!jobs.length) {
-    jbody.innerHTML = '<tr><td colspan="3" class="empty">'+t('db_no_jobs')+'</td></tr>';
+    jbody.innerHTML = '<tr><td colspan="4" class="empty">'+t('db_no_jobs')+'</td></tr>';
   } else {
     var jsCfg = {
       done:      ['rgba(63,185,80,.15)',  '#56d364'],
@@ -9782,11 +10023,26 @@ function _dbRenderJobs(jobsData, stale) {
     jbody.innerHTML = jobs.map(function(j) {
       var sc = jsCfg[j.status] || ['rgba(139,148,158,.12)', 'var(--muted)'];
       var lbl = jsLabels[j.status] || esc(j.status || '–');
+      var lines = j.log || [];
+      // Prefer the last ERROR/WARN line if there is one — that's what you
+      // actually want to see at a glance, not just whatever logged last.
+      var pick = null;
+      for (var i = lines.length - 1; i >= 0; i--) {
+        var lm = (lines[i].msg || '').toUpperCase();
+        if (lm.indexOf('ERROR') >= 0 || lm.indexOf('[ERR]') >= 0 || lm.indexOf('WARN') >= 0) { pick = lines[i]; break; }
+      }
+      if (!pick && lines.length) pick = lines[lines.length - 1];
+      var detail = pick
+        ? '<a href="#" onclick="showJobLog(\''+esc(j.id)+'\');return false" '
+          + 'style="color:inherit;text-decoration:none" title="Click to view full log">'
+          + _colorizeLog(esc(pick.msg || '')) + '</a>'
+        : '<span style="color:var(--muted)">—</span>';
       return '<tr>'
         + '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
           + esc(j.label || j.job_type || '–') + '</td>'
         + '<td>'+_dbPill(lbl, sc[0], sc[1])+'</td>'
-        + '<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+esc(fmtDate(j.created_at||''))+'</td>'
+        + '<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+fmtDateRel(j.created_at||'')+'</td>'
+        + '<td style="font-size:11px;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+detail+'</td>'
         + '</tr>';
     }).join('');
   }
@@ -15681,6 +15937,82 @@ actLogPoll();
 
     <div style="display:flex;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary" onclick="closeVmInfoModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ INSTANT RECOVERY: START MODAL ══════════════ -->
+<div id="irStartModal" role="dialog" aria-modal="true" aria-label="Instant Recovery"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9150;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
+  <div style="max-width:620px;width:100%;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span style="font-size:15px;font-weight:700">Instant Recovery</span>
+        <span id="ir_vm_hdr" style="font-size:13px;color:var(--muted);margin-left:4px"></span>
+      </div>
+      <button onclick="closeIrStartModal()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
+    </div>
+    <div style="padding:20px">
+      <div class="form-group">
+        <label class="form-label">Source</label>
+        <div style="display:flex;gap:16px;margin-top:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;cursor:pointer">
+            <input type="radio" name="ir_source" value="snapshot" checked onchange="irSourceChanged()"> From a snapshot
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;cursor:pointer">
+            <input type="radio" name="ir_source" value="live" onchange="irSourceChanged()"> From current (live) state
+          </label>
+        </div>
+      </div>
+      <div class="form-group" id="ir_snap_group" style="margin-top:14px">
+        <label class="form-label">Snapshot</label>
+        <div id="ir_snap_picker" style="min-height:105px"></div>
+        <select id="ir_snap" class="form-control" onchange="irSnapChanged()" style="width:100%;margin-top:6px"></select>
+      </div>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="form-group">
+          <label class="form-label">New VMID</label>
+          <input id="ir_new_vmid" class="form-control" type="number" style="width:140px">
+        </div>
+        <div class="form-group">
+          <label class="form-label">New Name</label>
+          <input id="ir_new_name" class="form-control" style="width:100%">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="ir_network_isolated" checked style="width:15px;height:15px">
+          Start disconnected from network (avoids IP/MAC conflicts with the original)
+        </label>
+      </div>
+      <p class="hint" style="margin-top:10px">Boots the VM directly from a NetApp FlexClone — no data is copied yet. Test it, then either commit with <strong>Storage Migrate</strong> or <strong>Discard</strong> to remove the clone entirely, from the Instant Recovery tab.</p>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg)">
+      <button class="btn btn-ghost" onclick="closeIrStartModal()">Cancel</button>
+      <button class="btn btn-primary" id="irStartSubmitBtn" onclick="submitInstantRecovery()">Start Instant Recovery</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ INSTANT RECOVERY: MIGRATE MODAL ══════════════ -->
+<div id="irMigrateModal" role="dialog" aria-modal="true" aria-label="Storage Migrate"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9160;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
+  <div style="max-width:480px;width:100%;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <span style="font-size:15px;font-weight:700">Storage Migrate</span>
+      <button onclick="closeIrMigrateModal()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
+    </div>
+    <div style="padding:20px">
+      <div class="form-group">
+        <label class="form-label">Target Datastore</label>
+        <select id="ir_migrate_target" class="form-control" style="width:100%"></select>
+      </div>
+      <p class="hint" style="margin-top:10px">Moves the VM's disks from the temporary clone onto this datastore while it keeps running — only now is data actually copied. The FlexClone is removed automatically once the migration finishes.</p>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg)">
+      <button class="btn btn-ghost" onclick="closeIrMigrateModal()">Cancel</button>
+      <button class="btn btn-primary" id="irMigrateSubmitBtn" onclick="submitIrMigrate()">Start Migration</button>
     </div>
   </div>
 </div>

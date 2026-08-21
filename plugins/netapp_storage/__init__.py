@@ -224,6 +224,7 @@ def register(app):
     from .api.dashboard import register_routes as reg_dashboard
     from .api.migrate import register_routes as reg_migrate
     from .api.reporting import register_routes as reg_reporting, start_report_scheduler
+    from .api.instant_recovery import register_routes as reg_instant_recovery
 
     reg_snap()
     reg_restore()
@@ -239,6 +240,7 @@ def register(app):
     reg_sfr()
     reg_migrate()
     reg_reporting()
+    reg_instant_recovery()
     reconcile_stuck_jobs_on_boot()
     start_scheduler()
     _maybe_startup_scan()
