@@ -6,7 +6,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.7.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.8.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -206,7 +206,7 @@ After logging in, open **Settings → Initial Setup** to walk through ONTAP conn
 | `NASNAP_DATA` | `/data` | Persistent data directory (DB + AES key) |
 | `DEBUG` | — | Set to `1` for Flask debug mode and the `/dev/autologin` shortcut |
 | `SFR_COPY_LIMIT_MB` | `200` | Maximum file size (MB) that Single File Restore will copy into a VM via QGA. Larger files must be downloaded locally. See the [SFR performance note](#single-file-restore-sfr--performance--limits) below. |
-| `TZ` | `UTC` | Timezone used to interpret time-of-day settings (e.g. the digest report's send time in Settings → Email Notifications). Without it, "07:00" is evaluated as 07:00 UTC, not your local time. Set to an [IANA zone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) such as `Europe/Berlin`. |
+| `TZ` | `UTC` | Fallback global timezone for time-of-day settings (e.g. the digest report's send time) and server-rendered email timestamps, used only until a global timezone is set in **Settings → System Timezone** (which then takes over without needing a restart). Interactive UI timestamps use each user's own timezone (**Settings → Profile**) instead, independent of this variable. Set to an [IANA zone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) such as `Europe/Berlin`. |
 
 > **Port and TLS** are configured via **Settings → Server/Network** in the UI and persisted in `/data/server.json`. The container uses `network_mode: host` so port changes take effect on the next restart without modifying `docker-compose.yml`.
 
@@ -499,7 +499,7 @@ The destination section is greyed out when "Trigger SnapMirror transfer" is not 
 
 ## Email notifications
 
-Each schedule/Protection Plan can send email notifications on snapshot job completion. Configure SMTP under **Settings → SMTP**, then enable notifications per schedule. An optional periodic **digest report** (daily/weekly, Settings → Email Notifications) separately summarizes snapshot success/failure per plan and flags datastores approaching a configurable capacity threshold — its send time is interpreted in the `TZ` environment variable (defaults to `UTC`, see [Environment Variables](#environment-variables)).
+Each schedule/Protection Plan can send email notifications on snapshot job completion. Configure SMTP under **Settings → SMTP**, then enable notifications per schedule. An optional periodic **digest report** (daily/weekly, Settings → Email Notifications) separately summarizes snapshot success/failure per plan and flags datastores approaching a configurable capacity threshold — its send time is interpreted in the global timezone (**Settings → System Timezone**, falls back to the `TZ` environment variable, see [Environment Variables](#environment-variables)).
 
 All notification emails (per-run, digest, and the "Send test email" preview) share one visual design:
 - **Status banner** — full-width, colour-coded: green (success), amber (success with warnings), red (failure).
@@ -1039,16 +1039,24 @@ DEBUG=1 .venv/bin/python app.py
 - **FlexGroup volumes (NFS)** — the Provision Wizard can create a FlexGroup volume spanning multiple aggregates instead of a single-aggregate FlexVol, for datastores that need to scale past one aggregate's capacity.
 - **SnapMirror/SnapVault replication automation** — replicate a datastore to a second registered NetApp system in one step: NaSnap automatically establishes cluster and SVM peering if not already present, then creates the SnapMirror relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available both at provisioning time and retroactively via a new **SnapMirror / Vault** action on any datastore (status, trigger update, change policy, break & remove). Deleting a replicated datastore now asks whether to keep or delete the destination volume.
 
-### Unreleased
+### v1.7.x — Released (folded into v1.8)
 
 - **DR failover — boot-time reconciliation & partial-failure handling** — a NaSnap restart while a failover/failback job was running no longer leaves it stuck at "running" forever: it's automatically marked failed at startup, and the DR plan's state is reconciled by checking the real SnapMirror relationship state on the DR side (not guessed from which state it crashed in). Failover no longer aborts entirely on the first failed datastore — each datastore binds independently, and a plan where only some datastores succeeded is now marked with its own **`partial_failover`** state instead of being reported as either a full failure or a full success.
-- **Email notifications — unified visual design** — the Protection Plan email, digest report, single-job notification, and "Send test email" preview now share one set of building blocks (banner, KPI tiles, action-needed callout, compact cards, log terminal) instead of three drifting table-based implementations. Also fixes the digest report's send time being evaluated in UTC regardless of the deployment's actual timezone (new `TZ` environment variable).
+- **Email notifications — unified visual design** — the Protection Plan email, digest report, single-job notification, and "Send test email" preview now share one set of building blocks (banner, KPI tiles, action-needed callout, compact cards, log terminal) instead of three drifting table-based implementations. Also fixes the digest report's send time being evaluated in UTC regardless of the deployment's actual timezone.
 
-### v1.8 — Planned
+### v1.8 — Released
+
+- **Per-user + global timezone** — every timestamp in the UI shows in the viewer's own local time (set per-account in Settings → Profile, works for LDAP too), instead of raw/browser-guessed time. A separate admin-set global timezone covers server-rendered email reports and cron evaluation, replacing the `TZ` environment variable for that purpose.
+- **Restore wizard — NFS Volume Revert + explicit VM-vs-Volume choice** — NFS restores now offer a true whole-volume revert (parity with SAN). Step 1 always asks "This VM" vs "Entire volume" up front, with a live-updating affected-VM list, instead of silently picking a VM and only revealing the real blast radius at confirmation. Restoring an entire volume no longer requires picking any individual VM.
+- **Automatic hourly Detect & Scan** — datastore discovery, SnapMirror scan, and index reconciliation now also run automatically every hour, fully logged in the Activity Log (previously manual-button-only, and unlogged).
+- **Snapshot Garbage Collection** — automatically removes database records for snapshots ONTAP has already rotated out, fixing snapshot counts that could balloon into the thousands despite ONTAP's 1024-per-volume cap.
+- **Provisioning — reuse an existing NFS export policy** — Advanced option in the New Datastore wizard to select an existing SVM export policy instead of always creating a dedicated one.
+- **VM Restore & Clone — instant cached list** with background refresh instead of blocking on load every time.
+
+### v1.9 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
-- **VM Garbage Collection** — daily background scan comparing the NaSnap database against live ONTAP snapshots; removes DB entries for snapshots that no longer exist on ONTAP, keeping the Restore & Clone view clean after manual ONTAP-side deletions.
 - **Login rate limiting** — brute-force protection for the `/api/auth/login` endpoint.
 - **Health endpoint** — `/api/health` for external monitoring and load balancer probes.
 - **Audit log export** — CSV/JSON download of the audit log.

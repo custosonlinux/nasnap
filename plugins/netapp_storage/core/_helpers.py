@@ -410,3 +410,60 @@ class JobLogger:
             )
         except Exception as e:
             log.warning(f"[netapp_storage] JobLogger write failed: {e}")
+
+
+def get_global_timezone_name() -> str:
+    """Global fallback timezone (IANA name): the DB setting set in Settings
+    overrides the TZ env var, which overrides UTC. Used wherever a per-user
+    timezone can't apply — email report rendering (recipients are free-text
+    addresses, not NaSnap logins) and cron schedule evaluation."""
+    try:
+        from nasnap_core.core.db import get_db
+        row = get_db().query_one("SELECT value FROM np_settings WHERE key='global_timezone'")
+        if row and row["value"]:
+            return row["value"]
+    except Exception:
+        pass
+    return os.environ.get("TZ", "UTC")
+
+
+def get_global_timezone():
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        return ZoneInfo(get_global_timezone_name())
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def run_as_job(db, job_type, created_by, fn):
+    """Wraps a background action in a netapp_jobs row so it shows up in the UI
+    Activity Log instead of only in the server log file.
+
+    fn receives a JobLogger and returns a dict of result fields (or None);
+    that dict is returned to the caller alongside the job_id. On exception the
+    job is marked 'failed' (with the error appended to its log) and the
+    exception re-raised for the caller to handle.
+    """
+    import uuid
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "INSERT INTO netapp_jobs (id, job_type, vmid, node, status, created_by, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (job_id, job_type, None, "", "running", created_by, now),
+    )
+    logger = JobLogger(job_id, db)
+    try:
+        result = fn(logger) or {}
+        db.execute(
+            "UPDATE netapp_jobs SET status='done', completed_at=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), job_id),
+        )
+        return job_id, result
+    except Exception as exc:
+        logger.log(f"ERROR: {exc}")
+        db.execute(
+            "UPDATE netapp_jobs SET status='failed', completed_at=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), job_id),
+        )
+        raise

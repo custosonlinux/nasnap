@@ -35,8 +35,8 @@ def _start_restore():
     data = request.get_json() or {}
 
     method = data.get("method", "sfsr")
-    if method not in ("sfsr", "flexclone", "san", "san_single"):
-        return {"error": "method must be 'sfsr', 'flexclone', 'san', or 'san_single'"}, 400
+    if method not in ("sfsr", "flexclone", "san", "san_single", "nfs_revert"):
+        return {"error": "method must be 'sfsr', 'flexclone', 'san', 'san_single', or 'nfs_revert'"}, 400
 
     db = get_db()
     username = request.session.get("user", "system")

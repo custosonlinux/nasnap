@@ -15,6 +15,7 @@ from auth import (
     ensure_default_admin, get_session, ROLE_ADMIN, SESSION_HOURS,
     list_users, create_user, delete_user, change_password,
     require_admin, require_auth, ldap_authenticate,
+    get_user_timezone, set_user_timezone,
 )
 
 logging.basicConfig(
@@ -180,6 +181,22 @@ def create_app():
         change_password(sess['username'], new_pw)
         return jsonify({'ok': True})
 
+    # ── Change own timezone preference ──────────────────────────────────
+    @app.route('/api/auth/me/timezone', methods=['POST'])
+    @require_auth
+    def _me_set_timezone():
+        sess = getattr(g, '_nasnap_session', {})
+        data = request.get_json() or {}
+        tz   = (data.get('timezone') or '').strip()
+        if tz:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            try:
+                ZoneInfo(tz)
+            except ZoneInfoNotFoundError:
+                return jsonify({'error': f'Unknown timezone: {tz}'}), 400
+        set_user_timezone(sess['username'], tz)
+        return jsonify({'ok': True, 'timezone': tz})
+
     # ── System info ───────────────────────────────────────────────────
     @app.route('/api/system/info')
     @require_auth
@@ -190,13 +207,19 @@ def create_app():
         urow  = get_db().query_one(
             "SELECT role, created_at FROM np_users WHERE username=?", (sess['username'],)
         )
+        # Role must come from the session, not np_users: LDAP-authenticated
+        # users never get a np_users row (role is resolved from their AD/LDAP
+        # group at login, see auth.ldap_authenticate/create_session) — using
+        # np_users here silently downgraded every LDAP admin to 'viewer'.
+        role = sess.get('role', 'viewer')
         info = {
             'version':    NASNAP_VERSION,
             'username':   sess.get('username'),
-            'role':       urow['role']       if urow else 'viewer',
+            'role':       role,
             'created_at': urow['created_at'] if urow else '',
+            'timezone':   get_user_timezone(sess['username']),
         }
-        if urow and urow['role'] == ROLE_ADMIN:
+        if role == ROLE_ADMIN:
             uptime_s = int((datetime.now(timezone.utc) - _START_TIME).total_seconds())
             h, rem   = divmod(uptime_s, 3600)
             m        = rem // 60
@@ -256,7 +279,8 @@ def create_app():
     def _ns_ui_settings_get():
         rows = {r['key']: r['value'] for r in get_db().query("SELECT key, value FROM np_settings")}
         return jsonify({
-            'dr_enabled': rows.get('dr_enabled', '1') != '0',
+            'dr_enabled':      rows.get('dr_enabled', '1') != '0',
+            'global_timezone': rows.get('global_timezone', '') or os.environ.get('TZ', 'UTC'),
         })
 
     @app.route('/api/ui-settings', methods=['POST'])
@@ -268,6 +292,18 @@ def create_app():
             db.execute(
                 "INSERT OR REPLACE INTO np_settings (key, value) VALUES ('dr_enabled', ?)",
                 ('0' if not data['dr_enabled'] else '1',),
+            )
+        if 'global_timezone' in data:
+            tz = (data['global_timezone'] or '').strip()
+            if tz:
+                from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+                try:
+                    ZoneInfo(tz)
+                except ZoneInfoNotFoundError:
+                    return jsonify({'error': f'Unknown timezone: {tz}'}), 400
+            db.execute(
+                "INSERT OR REPLACE INTO np_settings (key, value) VALUES ('global_timezone', ?)",
+                (tz,),
             )
         return jsonify({'ok': True})
 

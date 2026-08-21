@@ -123,6 +123,24 @@ def change_password(username: str, new_password: str) -> None:
     )
 
 
+def get_user_timezone(username: str) -> str:
+    """Personal timezone preference for the interactive UI. Keyed by username
+    rather than a np_users foreign key since LDAP-authenticated users never get
+    a np_users row (see ldap_authenticate) — np_user_prefs works for both."""
+    from db import get_db
+    row = get_db().query_one("SELECT timezone FROM np_user_prefs WHERE username=?", (username,))
+    return row['timezone'] if row else ''
+
+
+def set_user_timezone(username: str, tz: str) -> None:
+    from db import get_db
+    get_db().execute(
+        "INSERT INTO np_user_prefs (username, timezone) VALUES (?,?) "
+        "ON CONFLICT(username) DO UPDATE SET timezone=excluded.timezone",
+        (username, tz)
+    )
+
+
 def get_ldap_config() -> dict | None:
     from db import get_db
     db = get_db()

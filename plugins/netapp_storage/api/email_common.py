@@ -8,6 +8,8 @@ tiles / summary -> action-needed callout (only when something's wrong) ->
 compact cards -> footer.
 """
 
+from datetime import datetime, timezone
+
 GREEN = "#16a34a"
 AMBER = "#d97706"
 RED   = "#dc2626"
@@ -37,10 +39,28 @@ def log_severity(msg):
     return "info"
 
 
+def fmt_ts(iso, fmt='%Y-%m-%d %H:%M:%S'):
+    """Converts a stored UTC ISO timestamp to the configured global timezone.
+    Server-rendered emails have no browser to do this client-side (unlike the
+    UI's Activity Log), so this is the one place that needs an explicit
+    conversion instead of relying on toLocaleString()."""
+    from ..core._helpers import get_global_timezone
+    if not iso:
+        return ''
+    try:
+        dt = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(get_global_timezone()).strftime(fmt)
+    except Exception:
+        return iso[:19].replace('T', ' ')
+
+
 def log_entries(log_lines, limit=50):
+    """job log entries are stored as UTC ISO timestamps — see fmt_ts()."""
     entries = []
     for entry in (log_lines or [])[-limit:]:
-        ts  = entry.get('ts', '')[:19].replace('T', ' ')
+        ts  = fmt_ts(entry.get('ts', ''))
         msg = entry.get('msg', str(entry))
         entries.append((ts, log_severity(msg), msg))
     return entries
@@ -186,9 +206,11 @@ def render_meter(pct, color):
 
 
 def render_footer(note=""):
+    from ..core._helpers import get_global_timezone_name
+    tz_note = f' · Times shown in {esc(get_global_timezone_name())}'
     return (
         '<div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:14px">'
-        f'NaSnap — NetApp ONTAP Snapshot Management for Proxmox{esc(note)}'
+        f'NaSnap — NetApp ONTAP Snapshot Management for Proxmox{esc(note)}{tz_note}'
         '</div>'
     )
 

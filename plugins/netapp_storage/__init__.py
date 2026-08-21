@@ -217,7 +217,7 @@ def register(app):
     from .api.snapmirror import register_routes as reg_snapmirror
     from .api.settings import register_routes as reg_settings, start_db_backup_scheduler
     from .api.file_restore import register_routes as reg_sfr, start_sfr_cleanup
-    from .api.provisioning import register_routes as reg_provisioning
+    from .api.provisioning import register_routes as reg_provisioning, start_datastore_scan_scheduler
     from .api.recovery import register_routes as reg_recovery
     from .api.setup import register_routes as reg_setup
     from .api.dr import register_routes as reg_dr, reconcile_stuck_jobs_on_boot
@@ -242,6 +242,7 @@ def register(app):
     reconcile_stuck_jobs_on_boot()
     start_scheduler()
     _maybe_startup_scan()
+    start_datastore_scan_scheduler()
     start_db_backup_scheduler()
     start_sfr_cleanup()
     start_report_scheduler()

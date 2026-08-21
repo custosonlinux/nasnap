@@ -9,10 +9,8 @@ The actual email building/sending lives in settings.py (send_digest_report), nex
 the other notification builders, to reuse _send_smtp()/the HTML color conventions.
 """
 
-import os
 import logging
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
@@ -184,10 +182,8 @@ def _check_and_run_report():
         if not cfg.get('enabled') or not cfg.get('recipients'):
             return
 
-        try:
-            tz = ZoneInfo(os.environ.get("TZ", "UTC"))
-        except ZoneInfoNotFoundError:
-            tz = ZoneInfo("UTC")
+        from ..core._helpers import get_global_timezone
+        tz  = get_global_timezone()
         now = datetime.now(tz)
         try:
             hh, mm = (cfg.get('time_of_day') or '07:00').split(':')

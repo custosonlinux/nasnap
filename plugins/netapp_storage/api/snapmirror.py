@@ -28,10 +28,25 @@ def _scan_relationships():
     err = _require_admin()
     if err:
         return err
-    from ..core.snapmirror import scan_relationships
     db = get_db()
-    found, errors = scan_relationships(db)
-    return {"success": True, "found": found, "errors": errors}
+    username = request.session.get("user", "system")
+
+    def _do(logger):
+        from ..core.snapmirror import scan_relationships
+        logger.log("Scanning SnapMirror relationships …")
+        found, errors = scan_relationships(db)
+        logger.log(f"SnapMirror scan: {found} relationship(s) found")
+        for err_msg in (errors or [])[:10]:
+            logger.log(f"SnapMirror scan error: {err_msg}")
+        return {"success": True, "found": found, "errors": errors}
+
+    try:
+        from ..core._helpers import run_as_job
+        job_id, result = run_as_job(db, "snapmirror_scan", username, _do)
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+    result["job_id"] = job_id
+    return result
 
 
 def _list_relationships():

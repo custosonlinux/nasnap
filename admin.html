@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    // Same 'nasnap-theme' key the main UI uses, applied before first paint
+    // to avoid a flash of the default (dark) look.
+    (function(){
+      var t = localStorage.getItem('nasnap-theme');
+      if (t === 'light') document.documentElement.classList.add('light-theme-pre');
+      if (t === 'glass') document.documentElement.classList.add('glass-theme-pre');
+    })();
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NaSnap — User Management</title>
@@ -11,6 +20,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     html.glass-theme-pre { background: #0a1628; }
+    html.light-theme-pre { background: #F0F4F8; }
 
     :root {
       --bg:      #2C3E50;
@@ -201,6 +211,17 @@
     #toast.show { opacity:1;transform:translateY(0); }
     #toast.success { background:var(--success);color:#fff; }
     #toast.error   { background:var(--error);color:#fff; }
+
+    /* ── Light Theme ── */
+    body.light-theme {
+      --bg:     #F0F4F8;
+      --card:   #FFFFFF;
+      --border: #CBD5E0;
+      --hover:  #E2EAF3;
+      --text:   #1A2536;
+      --muted:  #64748B;
+    }
+    body.light-theme input, body.light-theme select, body.light-theme textarea { color: var(--text); }
 
     /* ── Glass Theme ── */
     body.glass-theme {
@@ -428,6 +449,13 @@ var _sortCol = 'username';
 var _sortDir = 'asc';
 var _me = null;
 var _pwTarget = null;
+
+(function(){
+  var t = localStorage.getItem('nasnap-theme') || 'dark';
+  document.documentElement.classList.remove('light-theme-pre', 'glass-theme-pre');
+  if (t === 'light') document.body.classList.add('light-theme');
+  if (t === 'glass') document.body.classList.add('glass-theme');
+})();
 
 function logout() {
   fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })

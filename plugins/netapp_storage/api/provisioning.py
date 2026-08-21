@@ -397,10 +397,18 @@ def _prov_ontap_resources():
     except Exception as exc:
         log.warning(f"[netapp_storage] prov ontap-resources nfs_lifs: {exc}")
 
+    export_policies = []
+    try:
+        if svm_name:
+            for p in client.list_export_policies(svm_name=svm_name):
+                export_policies.append({"id": p.get("id", ""), "name": p.get("name", "")})
+    except Exception as exc:
+        log.warning(f"[netapp_storage] prov ontap-resources export_policies: {exc}")
+
     return {
         "volumes": volumes, "luns": luns, "igroups": igroups,
         "nvme_subsystems": nvme_subsystems, "nvme_namespaces": nvme_namespaces,
-        "aggregates": aggregates, "nfs_lifs": nfs_lifs,
+        "aggregates": aggregates, "nfs_lifs": nfs_lifs, "export_policies": export_policies,
     }
 
 
@@ -1081,31 +1089,48 @@ def _prov_ds_scan():
             return {"error": "No VG name for SAN mapping"}, 400
         if not mapping.get("snapinfo_initialized"):
             return {"error": "snapmanifest LV not initialized — run Setup snapmanifest first"}, 400
-        from ..core.san_helpers import snapmanifest_read_index
-        index = snapmanifest_read_index(ph, pu, pp, pk, vg)
-        if index is None:
-            return {"imported": 0, "skipped": 0, "vms_found": 0,
-                    "index_exists": False, "discovered_vms": []}
-    else:
-        if not mapping.get("nfs_mount_path"):
-            return {"error": "No NFS mount path for mapping"}, 400
-        from ..core.datastore_index import DatastoreIndex
-        ds_idx = DatastoreIndex(ph, pu, pp, pk)
-        mount = mapping["nfs_mount_path"]
-        index = ds_idx.read(mount)
-        if index is None:
-            vms = ds_idx.discover_vms(mount)
-            return {"imported": 0, "skipped": 0, "vms_found": len(vms),
-                    "index_exists": False, "discovered_vms": vms}
+    elif not mapping.get("nfs_mount_path"):
+        return {"error": "No NFS mount path for mapping"}, 400
 
-    imported, skipped, vm_count = _reconcile_index_into_db(db, mapping_id, mapping, index)
-    return {
-        "imported": imported,
-        "skipped": skipped,
-        "vms_found": vm_count,
-        "index_exists": True,
-        "snapshots_in_index": len(index.get("snapshots") or []),
-    }
+    from ..core._helpers import run_as_job
+    username = request.session.get("user", "system")
+
+    def _do_scan(logger):
+        logger.log(f"Scanning index for '{mapping.get('pve_storage_id','')}' ({protocol})")
+        if protocol in ("iscsi", "nvme"):
+            from ..core.san_helpers import snapmanifest_read_index
+            index = snapmanifest_read_index(ph, pu, pp, pk, mapping["lvm_vg_name"])
+            if index is None:
+                logger.log("No snapmanifest index found on the datastore")
+                return {"imported": 0, "skipped": 0, "vms_found": 0,
+                        "index_exists": False, "discovered_vms": []}
+        else:
+            from ..core.datastore_index import DatastoreIndex
+            ds_idx = DatastoreIndex(ph, pu, pp, pk)
+            mount = mapping["nfs_mount_path"]
+            index = ds_idx.read(mount)
+            if index is None:
+                vms = ds_idx.discover_vms(mount)
+                logger.log(f"No .nasnap/index.json found — {len(vms)} VM config file(s) discovered via filesystem scan")
+                return {"imported": 0, "skipped": 0, "vms_found": len(vms),
+                        "index_exists": False, "discovered_vms": vms}
+
+        imported, skipped, vm_count = _reconcile_index_into_db(db, mapping_id, mapping, index)
+        logger.log(f"Imported {imported} snapshot(s), {skipped} already known, {vm_count} VM(s) found")
+        return {
+            "imported": imported,
+            "skipped": skipped,
+            "vms_found": vm_count,
+            "index_exists": True,
+            "snapshots_in_index": len(index.get("snapshots") or []),
+        }
+
+    try:
+        job_id, result = run_as_job(db, "scan_index", username, _do_scan)
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+    result["job_id"] = job_id
+    return result
 
 
 def _prov_ds_scan_all():
@@ -1114,6 +1139,22 @@ def _prov_ds_scan_all():
     if err:
         return err
     db = get_db()
+    from ..core._helpers import run_as_job
+    username = request.session.get("user", "system")
+
+    def _do(logger):
+        return _scan_all_datastores(db, logger)
+
+    job_id, result = run_as_job(db, "scan_index", username, _do)
+    result["job_id"] = job_id
+    return result
+
+
+def _scan_all_datastores(db, logger=None):
+    """Core of scan-all: reconciles every NFS/SAN datastore's index into the DB.
+    Shared by the manual 'scan-all' route, the boot-time auto-scan, and the
+    hourly datastore-scan job — logger is optional so callers without a job
+    context (e.g. boot) can pass None."""
     nfs_rows = db.query(
         "SELECT * FROM netapp_volume_mapping "
         "WHERE storage_protocol='nfs' AND nfs_mount_path != ''") or []
@@ -1139,10 +1180,12 @@ def _prov_ds_scan_all():
             else:
                 index = DatastoreIndex(ph, pu, pp, pk).read(m["nfs_mount_path"])
             if index is None:
+                if logger: logger.log(f"'{sid}': no index found")
                 results.append({"mapping_id": mid, "pve_storage_id": sid,
                                  "protocol": protocol, "index_exists": False, "imported": 0})
                 continue
             imported, skipped, vm_count = _reconcile_index_into_db(db, mid, m, index)
+            if logger: logger.log(f"'{sid}': imported {imported}, {skipped} already known, {vm_count} VM(s)")
             results.append({
                 "mapping_id": mid,
                 "pve_storage_id": sid,
@@ -1153,6 +1196,7 @@ def _prov_ds_scan_all():
                 "vms_found": vm_count,
             })
         except Exception as exc:
+            if logger: logger.log(f"'{sid}': ERROR {exc}")
             results.append({"mapping_id": mid, "pve_storage_id": sid,
                              "protocol": protocol, "error": str(exc)})
     return {"results": results, "total_datastores": len(results)}
@@ -1181,41 +1225,98 @@ def _prov_plugin_settings():
     return {"auto_scan_on_startup": bool(val)}
 
 
-def _run_startup_scan():
+def _run_startup_scan(created_by="startup"):
     """Scan all NFS and SAN datastores for index and reconcile DB. Runs in background."""
+    from ..core._helpers import run_as_job
     db = get_db()
-    nfs_rows = db.query(
-        "SELECT * FROM netapp_volume_mapping "
-        "WHERE storage_protocol='nfs' AND nfs_mount_path != ''") or []
-    san_rows = db.query(
-        "SELECT * FROM netapp_volume_mapping "
-        "WHERE storage_protocol IN ('iscsi','nvme') AND snapinfo_initialized=1 AND lvm_vg_name != ''") or []
-    from ..core.datastore_index import DatastoreIndex
-    from ..core.san_helpers import snapmanifest_read_index
-    n_total = n_imported = 0
-    seen: set = set()
-    for row in list(nfs_rows) + list(san_rows):
-        m = dict(row)
-        sid = m.get("pve_storage_id", "")
-        if sid in seen:
-            continue
-        seen.add(sid)
-        n_total += 1
-        protocol = m.get("storage_protocol", "nfs")
-        try:
-            ph, pu, pp, pk = _ds_scan_creds(db, m)
-            if protocol in ("iscsi", "nvme"):
-                index = snapmanifest_read_index(ph, pu, pp, pk, m["lvm_vg_name"])
-            else:
-                index = DatastoreIndex(ph, pu, pp, pk).read(m["nfs_mount_path"])
-            if index:
-                imported, _, _ = _reconcile_index_into_db(db, m["id"], m, index)
-                n_imported += imported
-        except Exception as exc:
-            log.warning(f"[netapp_storage] startup scan {sid or m['id']}: {exc}")
-    log.info(
-        f"[netapp_storage] Startup auto-scan complete: "
-        f"{n_total} datastore(s) scanned, {n_imported} snapshot(s) imported")
+
+    def _do(logger):
+        logger.log("Startup auto-scan: reconciling all datastore indexes …")
+        result = _scan_all_datastores(db, logger)
+        n_imported = sum(r.get("imported", 0) for r in result["results"])
+        logger.log(f"Startup auto-scan complete: {result['total_datastores']} datastore(s) scanned, "
+                    f"{n_imported} snapshot(s) imported")
+        return result
+
+    try:
+        run_as_job(db, "scan_index", created_by, _do)
+    except Exception as exc:
+        log.warning(f"[netapp_storage] Startup auto-scan failed: {exc}")
+
+
+def _run_detect_and_scan(created_by):
+    """Combines the three actions the 'Detect & Scan' button used to fire off
+    separately (discovery, SnapMirror scan, index reconciliation) into one
+    logged job, so the user can see exactly what happened in the Activity Log
+    instead of only in the server log file. Shared by the manual button and
+    the hourly scan scheduler."""
+    from ..core._helpers import run_as_job
+    from ..core.discovery import run_discovery
+    from ..core.snapmirror import scan_relationships
+    db = get_db()
+
+    def _do(logger):
+        logger.log("Running datastore discovery …")
+        mappings, debug_info = run_discovery()
+        logger.log(f"Discovery: {len(mappings)} mapping(s) found")
+        for reason in (debug_info.get("no_match_reasons") or [])[:10]:
+            logger.log(f"Discovery note: {reason}")
+
+        logger.log("Scanning SnapMirror relationships …")
+        found, errors = scan_relationships(db)
+        logger.log(f"SnapMirror scan: {found} relationship(s) found")
+        for err in (errors or [])[:10]:
+            logger.log(f"SnapMirror scan error: {err}")
+
+        logger.log("Reconciling datastore indexes (ONTAP-native snapshots) …")
+        scan_result = _scan_all_datastores(db, logger)
+        n_imported = sum(r.get("imported", 0) for r in scan_result["results"])
+        logger.log(f"Index reconciliation: {scan_result['total_datastores']} datastore(s) scanned, "
+                    f"{n_imported} snapshot(s) imported")
+
+        logger.log("Checking for snapshot records no longer present on ONTAP …")
+        from ..core.gc import gc_stale_snapshots
+        gc_result = gc_stale_snapshots(db, logger)
+
+        return {
+            "mappings_found":     len(mappings),
+            "snapmirror_found":   found,
+            "datastores_scanned": scan_result["total_datastores"],
+            "snapshots_imported": n_imported,
+            "snapshots_removed":  gc_result["removed"],
+        }
+
+    return run_as_job(db, "discover_scan", created_by, _do)
+
+
+def _prov_detect_and_scan():
+    """POST: runs discovery + SnapMirror scan + index reconciliation as one logged job."""
+    from flask import request
+    err = _require_admin()
+    if err:
+        return err
+    username = request.session.get("user", "system")
+    try:
+        job_id, result = _run_detect_and_scan(username)
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+    result["job_id"] = job_id
+    return result
+
+
+def start_datastore_scan_scheduler():
+    """Runs the same actions as 'Detect & Scan' once an hour in the background,
+    so ONTAP-side changes (volumes, snapshots taken outside NaSnap) are picked
+    up without a manual click."""
+    def _loop():
+        while True:
+            try:
+                _run_detect_and_scan("scheduler")
+            except Exception as exc:
+                log.warning(f"[netapp_storage] Hourly datastore scan failed: {exc}")
+            time.sleep(3600)
+    threading.Thread(target=_loop, daemon=True, name="nasnap-ds-scan").start()
+    log.info("[netapp_storage] Hourly datastore scan scheduler started")
 
 
 def _prov_ds_reindex():
@@ -1460,6 +1561,7 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan",       _prov_ds_scan)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/scan-all",   _prov_ds_scan_all)
     register_plugin_route(PLUGIN_ID, "provisioning/datastores/reindex",    _prov_ds_reindex)
+    register_plugin_route(PLUGIN_ID, "discover-and-scan",                  _prov_detect_and_scan)
     register_plugin_route(PLUGIN_ID, "provisioning/plugin-settings",       _prov_plugin_settings)
     register_plugin_route(PLUGIN_ID, "provisioning/replication/peering-status", _prov_replication_peering_status)
     register_plugin_route(PLUGIN_ID, "provisioning/replication/policies",       _prov_replication_policies)
@@ -3379,15 +3481,24 @@ def _provision_nfs(ds_id, params, db, jlog):
             ag_info = " (auto-placement)"
         jlog.log(f"Creating NFS volume '{volume_name}' ({size_bytes} bytes)"
                  f" junction='{junction_path}'{ag_info} …")
-        # Create a dedicated export policy for this datastore
-        policy_name = f"nasnap-pol-{name.replace(' ', '-').lower()}"[:64]
-        try:
-            policy_id = client.create_export_policy(svm_name, policy_name)
-            jlog.log(f"Export policy '{policy_name}' created (id={policy_id}).")
-        except Exception as exc:
-            jlog.log(f"WARNING: could not create export policy, using default: {exc}")
-            policy_name = "default"
-            policy_id   = None
+        # Advanced option: reuse an existing export policy instead of creating a
+        # dedicated one — e.g. an admin-curated policy already scoped to the
+        # right clients. Falls through to the create-new path when unset (the
+        # default, unchanged behavior).
+        existing_policy_name = (params.get("export_policy_name") or "").strip()
+        if existing_policy_name:
+            policy_name = existing_policy_name
+            policy_id   = params.get("export_policy_id") or None
+            jlog.log(f"Using existing export policy '{policy_name}' (id={policy_id}).")
+        else:
+            policy_name = f"nasnap-pol-{name.replace(' ', '-').lower()}"[:64]
+            try:
+                policy_id = client.create_export_policy(svm_name, policy_name)
+                jlog.log(f"Export policy '{policy_name}' created (id={policy_id}).")
+            except Exception as exc:
+                jlog.log(f"WARNING: could not create export policy, using default: {exc}")
+                policy_name = "default"
+                policy_id   = None
 
         # Add rw export rules using the configured NFS VLAN IP of each PVE host.
         # pve.nfs_ip must be set to the dedicated NFS network interface IP — using

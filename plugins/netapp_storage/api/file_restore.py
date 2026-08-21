@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from flask import Response, request
 from nasnap_core.api.plugins import register_plugin_route
@@ -827,6 +828,15 @@ def _copy_cancel():
     return {"ok": True}
 
 
+def _content_disposition(filename: str) -> str:
+    """Builds a Content-Disposition header that survives non-ASCII filenames
+    (e.g. German umlauts) — a plain f-string header crashes Werkzeug with a
+    UnicodeEncodeError (headers must be latin-1) as soon as the filename
+    contains characters outside that range."""
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii").replace('"', "").strip() or "download"
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
 def _download_file():
     err = _require_admin()
     if err:
@@ -849,7 +859,7 @@ def _download_file():
         return Response(
             raw,
             mimetype="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": _content_disposition(filename)},
         )
     except Exception as e:
         return {"error": str(e)}, 500
@@ -877,7 +887,7 @@ def _download_tar():
         return Response(
             raw,
             mimetype="application/gzip",
-            headers={"Content-Disposition": f'attachment; filename="{name}.tar.gz"'},
+            headers={"Content-Disposition": _content_disposition(f"{name}.tar.gz")},
         )
     except Exception as e:
         return {"error": str(e)}, 500

@@ -2195,13 +2195,10 @@ function applyI18n() {
           <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">SnapMirror Secondary</button>
         </div>
         <input id="rcSearch" type="text" placeholder="Filter by VM name, ID or datastore…" oninput="rcFilterChanged()" style="flex:1;min-width:140px;max-width:220px;margin-left:4px">
-        <div style="display:flex;gap:4px">
-          <button id="rcImportAll" class="btn btn-ghost btn-sm" onclick="rcSetImportFilter('all')" title="Show all snapshots" style="font-size:11px">All</button>
-          <button id="rcImportOnly" class="btn btn-ghost btn-sm" onclick="rcSetImportFilter('imported')" title="Show only VMs with index-imported snapshots" style="font-size:11px">Imported</button>
-        </div>
         <button id="rcRefreshBtn" class="btn btn-ghost btn-sm" onclick="_rcSource==='secondary'?rcDrRelChanged():loadRcVmList()">
           <svg id="rcRefreshIcon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh
         </button>
+        <span id="rcStaleNote" style="font-size:10px;color:var(--muted);display:none"></span>
       </div>
       <!-- DR relationship selector (hidden for primary) -->
       <div id="rcDrRow" style="display:none;margin-bottom:10px;gap:8px;align-items:center">
@@ -2414,6 +2411,21 @@ function applyI18n() {
         <div class="form-actions">
           <button class="btn btn-ghost" onclick="testSmtp()" data-i18n="btn_test_smtp">Test Connection</button>
           <button class="btn btn-primary" onclick="saveSmtp()" data-i18n="btn_save">Save</button>
+        </div>
+      </div>
+
+      <!-- ═══════════════ GLOBAL TIMEZONE ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>System Timezone</span></span>
+      </div>
+      <div class="card">
+        <div class="form-group" style="max-width:360px">
+          <label>Timezone</label>
+          <select id="global_timezone"></select>
+          <p class="hint">Used for the periodic report's send time and for anything server-rendered that a browser can't localize itself (report timestamps). Your own screen already shows times in your <a href="/settings" target="_blank">personal timezone</a> (or your browser's, if unset) — this setting only affects the parts NaSnap renders itself.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" onclick="saveGlobalTimezone()" data-i18n="btn_save">Save</button>
         </div>
       </div>
 
@@ -3007,6 +3019,23 @@ var _vsRowH           = 46;
 var _vsScrollAttached = false;
 var _vsSelectedKeys   = new Set();
 let _selectedRestoreSnap = null;  // active snapshot in the restore form
+
+// ── Personal timezone (Settings → Profile) ───────────────────────────────
+// Empty = fall back to the browser's own timezone (today's implicit behavior).
+// All timestamps in the DB/API are UTC ISO strings; toLocaleString() etc.
+// need this injected as {timeZone: ...} to show the viewer's own local time
+// instead of whatever the server host happens to be set to.
+var _nsUserTz = '';
+function _nsOpts(o) {
+  o = o || {};
+  return _nsUserTz ? Object.assign({}, o, {timeZone: _nsUserTz}) : o;
+}
+function loadUserTimezone() {
+  fetch('/api/system/info', {credentials:'include'})
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){ if (d) _nsUserTz = d.timezone || ''; })
+    .catch(function(){});
+}
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 let _toastTimer;
@@ -4245,7 +4274,7 @@ function _snapLockHtml(lockIso) {
   if (isNaN(exp)) return '<span style="color:var(--muted)">–</span>';
   var diff = exp - now;
   var active = diff > 0;
-  var absDate = new Date(exp).toISOString().replace('T',' ').slice(0,16)+' UTC';
+  var absDate = new Date(exp).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
   var remaining = '';
   if (active) {
     var days = Math.floor(diff / 86400000);
@@ -4590,8 +4619,10 @@ var _actLogPrevActiveIds = new Set();
 var _actJobLabels  = {
   'snapshot':              'Snapshot',
   'restore_sfsr':          'Restore (SFSR)',
-  'restore_revert':        'Restore (Vol Revert)',
-  'restore_lv':            'Restore (LV Copy)',
+  'restore_flexclone':     'Restore (FlexClone)',
+  'restore_san':           'Restore (SAN Vol Revert)',
+  'restore_san_single':    'Restore (SAN LV Copy)',
+  'restore_nfs_revert':    'Restore (NFS Vol Revert)',
   'restore_dr':            'DR Restore',
   'clone':                 'Clone',
   'clone_live':            'Clone (Live VM)',
@@ -4605,6 +4636,9 @@ var _actJobLabels  = {
   'dr_planned_failover':   'DR Planned Failover',
   'dr_emergency_failover': 'DR Emergency Failover',
   'scan_index':            'Scan Index',
+  'discover':              'Datastore Discovery',
+  'snapmirror_scan':       'SnapMirror Scan',
+  'discover_scan':         'Detect & Scan',
   'migrate_vm':            'Migrate VM',
 };
 
@@ -4723,17 +4757,6 @@ var _rcSortDir   = -1;
 var _rcSource    = 'primary';
 var _rcDrRelId   = '';
 var _rcDrMappingId = '';
-var _rcImportFilter = 'all';
-
-function rcSetImportFilter(f) {
-  _rcImportFilter = f;
-  var all = document.getElementById('rcImportAll');
-  var imp = document.getElementById('rcImportOnly');
-  if (all) { all.className = f === 'all' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; all.style.fontSize='11px'; }
-  if (imp) { imp.className = f === 'imported' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; imp.style.fontSize='11px'; }
-  _renderRcRows();
-}
-
 async function dsScanIndex(mappingId, name) {
   var modal = document.getElementById('dsScanIndexModal');
   var title = document.getElementById('dsScanIndexTitle');
@@ -4774,18 +4797,52 @@ async function dsScanIndex(mappingId, name) {
   }
 }
 
+var _RC_CACHE_KEY = 'nasnap-rc-vms-cache';
+
+function _rcSetStale(stale, ts) {
+  var note = document.getElementById('rcStaleNote');
+  if (!note) return;
+  if (!stale) { note.style.display = 'none'; return; }
+  var when = ts ? new Date(ts).toLocaleTimeString([], _nsOpts({hour:'2-digit',minute:'2-digit'})) : '';
+  note.textContent = 'Cached' + (when ? ' from ' + when : '') + ' — refreshing…';
+  note.style.display = '';
+}
+
 async function loadRcVmList() {
   var btn  = document.getElementById('rcRefreshBtn');
   var icon = document.getElementById('rcRefreshIcon');
+
+  // Render instantly from whatever we already have — memory if this session
+  // already loaded it, otherwise the last successful load persisted to
+  // localStorage — instead of leaving the tab on a blank "loading" state.
+  // The fetch below then always runs anyway to bring it up to date.
+  if (_rcVms.length) {
+    _renderRcRows();
+  } else {
+    try {
+      var cached = JSON.parse(localStorage.getItem(_RC_CACHE_KEY) || 'null');
+      if (cached && cached.vms && cached.vms.length) {
+        _rcVms = cached.vms;
+        _renderRcRows();
+        _rcSetStale(true, cached.ts);
+      }
+    } catch(_) {}
+  }
+
   if (btn)  btn.disabled = true;
   if (icon) icon.style.animation = 'spin .7s linear infinite';
   try {
     var snaps = await apiFetch('snapshots');
     _allSnapshots = snaps;
     _rcLiveStatusCache = {};
+    _sfrOsCache = {};
     renderRcVmList();
+    _rcSetStale(false);
+    try { localStorage.setItem(_RC_CACHE_KEY, JSON.stringify({vms:_rcVms, ts:Date.now()})); } catch(_) {}
   } catch(e) {
     toast(e.message, 'error');
+    var note = document.getElementById('rcStaleNote');
+    if (note && note.style.display !== 'none') note.textContent = 'Showing cached data — refresh failed';
   } finally {
     if (icon) icon.style.animation = '';
     if (btn)  btn.disabled = false;
@@ -4810,10 +4867,9 @@ function renderRcVmList() {
           dsName: dsk,
           protocol: _snapProtoLabel(s), isSan: _snapIsSan(s),
           sanOpt: !!s.san_optimized, pveClusterId: s.pve_cluster_id || '',
-          snapCount: 0, lastSnap: null, lastSnapId: null, hasImported: false,
+          snapCount: 0, lastSnap: null, lastSnapId: null,
         };
       }
-      if (s.source === 'index_import') vmMap[key].hasImported = true;
       vmMap[key].snapCount++;
       if (!vmMap[key].lastSnap || (s.created_at||'') > vmMap[key].lastSnap) {
         vmMap[key].lastSnap   = s.created_at;
@@ -4855,7 +4911,6 @@ function _renderRcRows() {
   if (!tbody) return;
   var q = (_rcSearch||'').toLowerCase();
   var rows = _rcVms.filter(function(v){
-    if (_rcImportFilter === 'imported' && !v.hasImported) return false;
     if (!q) return true;
     return String(v.vmid).indexOf(q)>=0
       || (v.name||'').toLowerCase().indexOf(q)>=0
@@ -4873,7 +4928,6 @@ function _renderRcRows() {
   tbody.innerHTML = rows.map(function(v){
     var cnt = v.snapCount===1 ? '1 snapshot' : v.snapCount+' snapshots';
     var drBadge = v.isDR ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(88,166,255,.15);color:#58A6FF;border:1px solid rgba(88,166,255,.3);margin-right:4px">DR</span>' : '';
-    var importBadge = v.hasImported ? '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border);margin-right:4px" title="At least one snapshot was imported from datastore index">Imported</span>' : '';
     var liveBadgeId = 'livebadge_' + v.vmid + '_' + v.mappingId;
     var liveBadge = '<span id="'+liveBadgeId+'">'+(v.liveStatus==='gone' ? _rcSnapOnlyBadgeHtml() : '')+'</span>';
     var protoBg = _rcProtoBg[v.protocol] || '#888';
@@ -4886,7 +4940,7 @@ function _renderRcRows() {
       + _icoKebab() + '</button>';
     return '<tr>'+
       '<td><code style="font-size:12px">'+v.vmid+'</code></td>'+
-      '<td>'+drBadge+importBadge+liveBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
+      '<td>'+drBadge+liveBadge+(v.name ? esc(v.name) : '<span style="opacity:.4">—</span>')+'</td>'+
       '<td><code style="font-size:11px">'+esc(v.dsName)+'</code></td>'+
       '<td>'+protoBadge+'</td>'+
       '<td style="color:var(--muted)">'+cnt+'</td>'+
@@ -5199,7 +5253,7 @@ function renderSnapPickerTimeline(containerId, snaps, onPick, selectedId) {
   for (var i = 0; i <= tickCount; i++) {
     var tk = tStart + (rangeMs * i / tickCount);
     var tx = toX(tk).toFixed(1);
-    var lbl = new Date(tk).toLocaleDateString([], {month:'short', day:'numeric'});
+    var lbl = new Date(tk).toLocaleDateString([], _nsOpts({month:'short', day:'numeric'}));
     svgParts.push('<line x1="'+tx+'" y1="'+axisY+'" x2="'+tx+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
     svgParts.push('<text x="'+tx+'" y="'+(axisY+14)+'" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="sans-serif">'+esc(lbl)+'</text>');
   }
@@ -5274,8 +5328,8 @@ function _spHoverBucket(containerId, bk, evt) {
   } else {
     var bkMs = bucket._bucketMs;
     var centerTs = parseInt(bk) * bkMs;
-    var t1 = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'});
-    var t2 = new Date(centerTs + bkMs).toLocaleTimeString([],{hour:'2-digit'});
+    var t1 = new Date(centerTs).toLocaleString([],_nsOpts({month:'short',day:'numeric',hour:'2-digit'}));
+    var t2 = new Date(centerTs + bkMs).toLocaleTimeString([],_nsOpts({hour:'2-digit'}));
     tt.innerHTML = '<div style="font-weight:600;font-size:12px">'+bucket.snaps.length+' Snapshots</div>'
       + '<div style="color:#64748b;font-size:10px;margin-top:1px">'+esc(t1+'–'+t2)+'</div>'
       + '<div style="margin-top:6px;font-size:10px;color:#475569">Click to see list</div>';
@@ -5354,7 +5408,7 @@ function _spClosePopup() {
 
 // ── Restore Wizard ────────────────────────────────────────────────────────
 
-var _rwState = { vmid:null, name:'', mappingId:'', relId:'', isDR:false, isSan:false, sanOpt:false, pveClusterId:'', snap:null, snapName:'', step:1 };
+var _rwState = { vmid:null, name:'', mappingId:'', relId:'', isDR:false, isSan:false, sanOpt:false, pveClusterId:'', snap:null, snapName:'', step:1, scope:'vm' };
 
 function openRestoreWizard(vmid, preSnapId, dsName) {
   var vm = _rcVms.find(function(v){ return v.vmid===vmid && (!dsName || v.dsName===dsName); });
@@ -5362,9 +5416,37 @@ function openRestoreWizard(vmid, preSnapId, dsName) {
   if (!vm) { toast('VM not found in snapshot history','error'); return; }
   _rwState = { vmid:vmid, name:vm.name, mappingId:vm.mappingId, dsName:vm.dsName||'',
                relId:vm.relId||'', isDR:!!vm.isDR,
-               isSan:vm.isSan, sanOpt:vm.sanOpt||false, pveClusterId:vm.pveClusterId, snap:null, snapName:'', step:1 };
+               isSan:vm.isSan, sanOpt:vm.sanOpt||false, pveClusterId:vm.pveClusterId, snap:null, snapName:'', step:1,
+               scope:'vm' };
   document.getElementById('rw_vm_hdr').textContent = (vm.name||'VM')+' (ID: '+vmid+(vm.isDR?' · DR Secondary':'')+ ')';
   rwPopulateSnaps(preSnapId);
+  rwUpdateStep(1);
+  var modal = document.getElementById('rwModal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  setTimeout(function(){ trapFocus(modal); }, 80);
+}
+
+// Snapshot-first entry (the "Restore" row action in the Snapshots tab). Unlike
+// openRestoreWizard() above — which starts from a specific VM the user clicked
+// on — this doesn't need _rcVms (the VM Restore & Clone list) at all: every
+// field it needs is already on the snapshot object itself. That also means
+// restoring the entire volume never requires picking, or even loading, a VM
+// list — the original ask behind this whole redesign.
+function openRestoreWizardForSnapshot(snap) {
+  if (!snap) { toast('Snapshot not found','error'); return; }
+  var vmids = snap.vmids || [];
+  var singleVm = vmids.length === 1;
+  _rwState = {
+    vmid: singleVm ? vmids[0] : null,
+    name: singleVm ? ((snap.vm_names && snap.vm_names[String(vmids[0])]) || '') : '',
+    mappingId: snap.mapping_id, dsName: snap.pve_storage_id || '',
+    relId: '', isDR: false,
+    isSan: _snapIsSan(snap), sanOpt: !!snap.san_optimized, pveClusterId: snap.pve_cluster_id || '',
+    snap: null, snapName: '', step: 1,
+    scope: 'vm',
+  };
+  rwPopulateSnaps(snap.id);
   rwUpdateStep(1);
   var modal = document.getElementById('rwModal');
   modal.style.display = 'flex';
@@ -5408,6 +5490,10 @@ async function rwPopulateSnaps(preSnapId) {
       ? s.pve_storage_id === _rwState.dsName
       : s.mapping_id === _rwState.mappingId;
     if (!sameDs) return false;
+    // Entered straight from a snapshot (Snapshots tab "Restore") without a
+    // specific VM pinned yet — show every snapshot on this datastore, VM
+    // filtering happens later once/if the user picks "This VM only".
+    if (_rwState.vmid == null) return true;
     var hasVmids = s.vmids && s.vmids.length > 0;
     if (!hasVmids) return true;                          // "all VMs" snap — always include
     return s.vmids.indexOf(_rwState.vmid) >= 0
@@ -5443,19 +5529,137 @@ function rwSnapChanged() {
 }
 
 function rwRebuildMethod() {
+  var scopeGroup = document.getElementById('rw_scope_group');
+  var methodRow  = document.getElementById('rw_method_row');
   var sel = document.getElementById('rw_method');
   if (_rwState.isDR) {
+    scopeGroup.style.display = 'none';
+    document.getElementById('rw_vmpick_group').style.display = 'none';
+    methodRow.style.display  = '';
     sel.innerHTML = '<option value="dr_restore">DR Restore (from SnapMirror® secondary)</option>';
     document.getElementById('rw_method_hint').textContent = 'Restores the VM using the SnapMirror® secondary snapshot. Primary volume is not affected.';
     return;
   }
-  if (_rwState.isSan) {
-    sel.innerHTML =
-      '<option value="san_single">Single VM restore (LV-copy — target VM only)</option>'+
-      '<option value="san">Volume Revert — ALL VMs on datastore ⚠ destructive</option>';
-  } else {
-    sel.innerHTML = '<option value="sfsr">SFSR — in-place, fast (NFS)</option>';
+  scopeGroup.style.display = '';
+  methodRow.style.display  = '';
+  rwResolveVmPick();
+  rwUpdateScopeCards();
+  rwApplyResolvedMethod();
+}
+
+// Resolves the single valid method for the current protocol + scope choice.
+// There is exactly one method per (isSan, scope) combination — no free dropdown needed.
+function _rwResolveMethod() {
+  if (_rwState.isDR) return 'dr_restore';
+  if (_rwState.scope === 'volume') return _rwState.isSan ? 'san' : 'nfs_revert';
+  return _rwState.isSan ? 'san_single' : 'sfsr';
+}
+
+function rwScopeChanged(scope) {
+  _rwState.scope = scope;
+  rwResolveVmPick();
+  rwUpdateScopeCards();
+  rwApplyResolvedMethod();
+}
+
+// Entering the wizard from a snapshot row (Snapshots tab) doesn't pin a VM up
+// front — only from a specific VM's own row does. When scope is "This VM
+// only" and the snapshot covers more than one VM, that choice has to be made
+// explicitly instead of silently grabbing the first one (the original
+// Fehler-3 complaint). Volume scope never needs a specific VM at all.
+function rwResolveVmPick() {
+  var group = document.getElementById('rw_vmpick_group');
+  var sel   = document.getElementById('rw_vmpick');
+  var vmids = (_rwState.snap && _rwState.snap.vmids) || [];
+  var names = (_rwState.snap && _rwState.snap.vm_names) || {};
+
+  if (_rwState.scope !== 'vm' || vmids.length <= 1) {
+    group.style.display = 'none';
+    if (vmids.length === 1 && _rwState.vmid == null) {
+      _rwState.vmid = vmids[0];
+      _rwState.name = names[String(vmids[0])] || '';
+    }
+    return;
   }
+
+  group.style.display = '';
+  sel.innerHTML = '<option value="">— choose a VM —</option>' + vmids.map(function(v){
+    var nm = names[String(v)];
+    return '<option value="'+v+'">'+esc(String(v))+(nm?' – '+esc(nm):'')+'</option>';
+  }).join('');
+  if (vmids.indexOf(_rwState.vmid) < 0) {
+    _rwState.vmid = null;
+    _rwState.name = '';
+  }
+  sel.value = _rwState.vmid == null ? '' : String(_rwState.vmid);
+}
+
+function rwVmPickChanged() {
+  var sel   = document.getElementById('rw_vmpick');
+  var names = (_rwState.snap && _rwState.snap.vm_names) || {};
+  var v = sel.value ? parseInt(sel.value, 10) : null;
+  _rwState.vmid = v;
+  _rwState.name = v != null ? (names[String(v)] || '') : '';
+  rwUpdateScopeCards();
+  rwApplyResolvedMethod();
+}
+
+function rwUpdateScopeCards() {
+  var vmCard  = document.getElementById('rw_scope_card_vm');
+  var volCard = document.getElementById('rw_scope_card_volume');
+  vmCard.style.borderColor  = _rwState.scope==='vm'     ? 'var(--primary)' : 'var(--border)';
+  vmCard.style.background   = _rwState.scope==='vm'     ? 'var(--hover)'   : '';
+  volCard.style.borderColor = _rwState.scope==='volume' ? '#d9534f' : 'var(--border)';
+  volCard.style.background  = _rwState.scope==='volume' ? 'rgba(217,83,79,.06)' : '';
+
+  var snapVmids  = (_rwState.snap && _rwState.snap.vmids) || [];
+  var snapNames  = (_rwState.snap && _rwState.snap.vm_names) || {};
+  var blastEl    = document.getElementById('rw_scope_blast');
+  if (_rwState.scope === 'volume' && snapVmids.length > 1) {
+    blastEl.innerHTML = '<strong style="color:#d9534f">Affects ALL ' + snapVmids.length + ' VMs on this datastore:</strong> '
+      + _blastRadiusHtml(snapVmids, snapNames);
+  } else if (_rwState.scope === 'volume' && snapVmids.length === 1) {
+    var ownName1 = {}; ownName1[String(snapVmids[0])] = snapNames[String(snapVmids[0])] || '';
+    blastEl.innerHTML = '<strong style="color:#d9534f">Affects:</strong> ' + _blastRadiusHtml(snapVmids, ownName1)
+      + ' <span style="opacity:.7">(only VM in this snapshot)</span>';
+  } else if (_rwState.vmid != null) {
+    var ownName2 = {}; ownName2[String(_rwState.vmid)] = _rwState.name;
+    blastEl.innerHTML = '<strong>Affects only:</strong> ' + _blastRadiusHtml([_rwState.vmid], ownName2);
+  } else {
+    blastEl.innerHTML = '<span style="opacity:.7">Choose which VM below.</span>';
+  }
+  rwUpdateHeader(snapVmids);
+}
+
+// Keeps the "Restore VM <name>" header truthful as the scope choice changes —
+// it used to always show the arbitrary first VM, even after switching to
+// "Entire volume", which is exactly the confusion this wizard is meant to
+// resolve.
+function rwUpdateHeader(snapVmids) {
+  var hdr = document.getElementById('rw_vm_hdr');
+  if (!hdr) return;
+  if (_rwState.isDR) {
+    hdr.textContent = (_rwState.name||'VM')+' (ID: '+_rwState.vmid+') · DR Secondary';
+  } else if (_rwState.scope === 'volume' && snapVmids && snapVmids.length > 1) {
+    hdr.textContent = 'Entire volume — ' + snapVmids.length + ' VMs';
+  } else if (_rwState.vmid != null) {
+    hdr.textContent = (_rwState.name||'VM')+' (ID: '+_rwState.vmid+')';
+  } else {
+    hdr.textContent = 'choose a VM';
+  }
+}
+
+function rwApplyResolvedMethod() {
+  var method = _rwResolveMethod();
+  var labels = {
+    sfsr:       'SFSR — in-place, fast (NFS)',
+    nfs_revert: 'NFS Volume Revert (ONTAP)',
+    san_single: 'Single VM restore (LV-copy)',
+    san:        'SAN Volume Revert (ONTAP)',
+  };
+  var sel = document.getElementById('rw_method');
+  sel.innerHTML = '<option value="'+method+'">'+(labels[method]||method)+'</option>';
+  sel.value = method;
   rwMethodChanged();
 }
 
@@ -5465,11 +5669,12 @@ function rwMethodChanged() {
   var msgs = {
     sfsr:       'Individual disk files restored in-place. VM is stopped during restore.',
     san_single: 'Only the target VM\'s LVs are overwritten. Other VMs on this datastore keep running.',
-    san:        '⚠ Volume Revert: all VMs on this datastore are rolled back. All data written after the snapshot is permanently lost.',
+    san:        '⚠ Volume Revert: the whole ONTAP volume is reverted — all VMs on this datastore are rolled back. All data written after the snapshot is permanently lost.',
+    nfs_revert: '⚠ Volume Revert: the whole ONTAP volume is reverted — all VMs on this datastore are rolled back. All data written after the snapshot is permanently lost.',
     dr_restore: 'Restores the VM using the SnapMirror® secondary snapshot.',
   };
   hint.textContent = msgs[method]||'';
-  hint.style.color = method==='san' ? 'var(--error)' : '';
+  hint.style.color = (method==='san'||method==='nfs_revert') ? 'var(--error)' : '';
 }
 
 function rwUpdateStep(n) {
@@ -5507,8 +5712,12 @@ function rwBuildSummary() {
   var method = document.getElementById('rw_method').value;
   var node   = _rwState.isDR ? 'DR (automatic)' : (document.getElementById('rw_target_node').value||'auto');
   var startA = document.getElementById('rw_start_after').checked;
+  var isVolumeRevert = (method === 'san' || method === 'nfs_revert');
+  var snapVmidsForHdr = _rwState.snap ? (_rwState.snap.vmids||[]) : [];
   document.getElementById('rw_sum_snap').textContent    = snapDisplay;
-  document.getElementById('rw_sum_vmid').textContent    = _rwState.vmid+(_rwState.name?' – '+_rwState.name:'');
+  document.getElementById('rw_sum_vmid').textContent    = (isVolumeRevert && snapVmidsForHdr.length > 1)
+    ? ('Entire volume — ' + snapVmidsForHdr.length + ' VMs')
+    : (_rwState.vmid != null ? (_rwState.vmid+(_rwState.name?' – '+_rwState.name:'')) : '—');
   document.getElementById('rw_sum_method').textContent  = method;
   document.getElementById('rw_sum_node').textContent    = node;
   document.getElementById('rw_sum_start').textContent   = startA ? 'Yes' : 'No';
@@ -5517,33 +5726,82 @@ function rwBuildSummary() {
   document.getElementById('rwSubmitBtn').disabled       = true;
   var blastRow    = document.getElementById('rw_blast_row');
   var safetyRow   = document.getElementById('rw_sum_safety_row');
+  var ackRow      = document.getElementById('rw_sum_ack_row');
   if (blastRow)  blastRow.style.display  = _rwState.isDR ? 'none' : '';
   if (safetyRow) safetyRow.style.display = _rwState.isDR ? 'none' : '';
+  var affectedVmids = _rwState.vmid != null ? [_rwState.vmid] : [];
   if (!_rwState.isDR) {
     document.getElementById('rw_sum_safety').checked = document.getElementById('rw_safety').checked;
-    if (_rwState.snap) document.getElementById('rw_sum_blast').innerHTML = _blastRadiusHtml(_rwState.snap.vmids||[], _rwState.snap.vm_names||{});
+    var snapVmids = _rwState.snap ? (_rwState.snap.vmids||[]) : [];
+    affectedVmids = (isVolumeRevert && snapVmids.length) ? snapVmids : affectedVmids;
+    var vmNamesMap = _rwState.snap ? (_rwState.snap.vm_names||{}) : {};
+    document.getElementById('rw_sum_blast').innerHTML = _blastRadiusHtml(affectedVmids, vmNamesMap);
   }
+  if (ackRow) {
+    ackRow.style.display = (isVolumeRevert && !_rwState.isDR) ? '' : 'none';
+    var ackBox = document.getElementById('rw_sum_ack');
+    if (ackBox) ackBox.checked = false;
+    var ackLabel = document.getElementById('rw_sum_ack_label');
+    if (ackLabel) {
+      ackLabel.textContent = affectedVmids.length > 1
+        ? 'I understand ALL ' + affectedVmids.length + ' VMs on this volume will be stopped and reset to the snapshot state'
+        : 'I understand this VM will be stopped and reset to the snapshot state';
+    }
+  }
+  rwCheckConfirm();
 }
 
 function rwCheckConfirm() {
   var exp = document.getElementById('rw_sum_expected').textContent;
-  document.getElementById('rwSubmitBtn').disabled = (document.getElementById('rw_confirm_input').value !== exp);
+  var method = document.getElementById('rw_method').value;
+  var isVolumeRevert = (method === 'san' || method === 'nfs_revert') && !_rwState.isDR;
+  var ackBox = document.getElementById('rw_sum_ack');
+  var ackOk = !isVolumeRevert || (ackBox && ackBox.checked);
+  document.getElementById('rwSubmitBtn').disabled =
+    (document.getElementById('rw_confirm_input').value !== exp) || !ackOk;
 }
 
 function rwNext() {
   if (_rwState.step===1) {
     if (_rwState.isDR && !_rwState.snapName) { toast('Please select a snapshot','error'); return; }
     if (!_rwState.isDR && !_rwState.snap)    { toast('Please select a snapshot','error'); return; }
+    if (!_rwState.isDR && _rwState.scope==='vm' && _rwState.vmid==null) {
+      var snapVmidCount = (_rwState.snap && _rwState.snap.vmids) ? _rwState.snap.vmids.length : 0;
+      toast(snapVmidCount
+        ? 'Please choose which VM to restore'
+        : 'This snapshot has no VM information — only "Entire volume" restore is possible', 'error');
+      return;
+    }
   }
   if (_rwState.step<3) rwUpdateStep(_rwState.step+1);
 }
 function rwBack() { if (_rwState.step>1) rwUpdateStep(_rwState.step-1); }
+function rwGoStep(n) {
+  // Backward navigation is always free; forward jumps are capped at the
+  // furthest step already validated via rwNext() — skipping ahead would
+  // bypass the snapshot/method validation done there.
+  if (n > _rwState.step) return;
+  rwUpdateStep(n);
+}
 
 async function doRestore() {
-  var vmid   = _rwState.vmid;
+  var vmid = _rwState.vmid;
+  // Volume-revert restores every VM in the snapshot's manifest — vmid is only
+  // ever used backend-side as a fallback if that manifest is somehow empty —
+  // so a snapshot-first entry with no single VM ever chosen still has a
+  // harmless value to send instead of silently refusing to submit.
+  if (vmid == null && !_rwState.isDR && _rwState.snap && _rwState.snap.vmids && _rwState.snap.vmids.length) {
+    vmid = _rwState.snap.vmids[0];
+  }
   var node   = document.getElementById('rw_target_node').value;
   var startA = document.getElementById('rw_start_after').checked;
-  if (!vmid) return;
+  if (!vmid) {
+    // Only reachable for a snapshot with no VM information at all (e.g. an
+    // untracked ONTAP-native snapshot) — NaSnap has no vmid to send at all,
+    // for either scope, so this can't proceed rather than fail silently.
+    toast('This snapshot has no VM information — restore is not possible', 'error');
+    return;
+  }
   var btn = document.getElementById('rwSubmitBtn');
   btn.disabled=true; btn.textContent='Running…';
 
@@ -5752,6 +6010,10 @@ function cwNext() {
   if (_cwState.step<3) cwUpdateStep(_cwState.step+1);
 }
 function cwBack() { if (_cwState.step>1) cwUpdateStep(_cwState.step-1); }
+function cwGoStep(n) {
+  if (n > _cwState.step) return;
+  cwUpdateStep(n);
+}
 
 async function doClone() {
   var srcVmid = _cwState.vmid;
@@ -6216,7 +6478,7 @@ function showDeleteConfirm(id, name, isNative, ontap_snap_uuid, mapping_id) {
 
   var lockWarn = document.getElementById('dcm_lock_warn');
   if (isLocked) {
-    var absDate = new Date(Date.parse(lockExp)).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    var absDate = new Date(Date.parse(lockExp)).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
     document.getElementById('dcm_lock_msg').textContent =
       'This snapshot is tamperproof-locked until ' + absDate + '. Deletion is not permitted while the lock is active.';
     lockWarn.style.display = '';
@@ -6798,7 +7060,7 @@ function schedUpdateNextRuns() {
   var runs = _schedNextRuns(10);
   if (!runs.length) { panel.innerHTML = '<span style="opacity:.5">—</span>'; return; }
   panel.innerHTML = runs.map(function(d, i) {
-    var fmt = d.toLocaleString([], { weekday:'short', year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    var fmt = d.toLocaleString([], _nsOpts({ weekday:'short', year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }));
     return '<div style="display:flex;align-items:center;gap:10px;padding:4px 8px;border-bottom:1px solid var(--border)'
       + (i === 0 ? ';background:rgba(var(--accent-rgb,200,120,40),.06)' : '') + '">'
       + '<span style="font-family:monospace;font-size:11px;min-width:18px;text-align:right;opacity:.35">' + (i+1) + '</span>'
@@ -7054,10 +7316,10 @@ function renderTimeline(filtered) {
     var useTime = (_tlZoom === 'hour' || _tlZoom === 'day')
       || ((_tlZoom === 'all' || _tlZoom === 'custom') && tickStep < 864e5);
     var lbl = useTime
-      ? td.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+      ? td.toLocaleTimeString([], _nsOpts({hour:'2-digit', minute:'2-digit'}))
       : (tickStep >= 30*864e5
-          ? td.toLocaleDateString([], {month:'short', year:'2-digit'})
-          : td.toLocaleDateString([], {month:'short', day:'numeric'}));
+          ? td.toLocaleDateString([], _nsOpts({month:'short', year:'2-digit'}))
+          : td.toLocaleDateString([], _nsOpts({month:'short', day:'numeric'})));
     svgParts.push('<line x1="'+txS+'" y1="'+axisY+'" x2="'+txS+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
     svgParts.push('<text x="'+txS+'" y="'+(axisY+14)+'" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="sans-serif">'+esc(lbl)+'</text>');
   }
@@ -7103,7 +7365,7 @@ function renderTimeline(filtered) {
         var fx = toX(fts);
         if (fx < padL || fx > padL + plotW) return;
         var fxS = fx.toFixed(1), fy = axisY - 12, s = 5;
-        var fmtFd = fd.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+        var fmtFd = fd.toLocaleString([], _nsOpts({month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}));
         svgParts.push('<polygon points="'+fxS+','+(fy-s)+' '+(fx-s).toFixed(1)+','+(fy+s)+' '+(fx+s).toFixed(1)+','+(fy+s)+'" fill="none" stroke="var(--accent,#e07800)" stroke-width="1.5" opacity="0.5"/>');
         svgParts.push('<rect x="'+(fx-8).toFixed(1)+'" y="'+(fy-s-2)+'" width="16" height="'+(s*2+4)+'" fill="transparent" onmouseenter="tlHoverFuture(\''+esc(fmtFd)+'\',event)" onmouseleave="tlUnhover()" style="cursor:default"/>');
       });
@@ -7277,8 +7539,8 @@ function _tlHoverBucket(bk, evt) {
     // Cluster — summary (identical pattern to dashboard cluster hover)
     var bkMs     = bucket._bucketMs || 6*3600e3;
     var centerTs = parseInt(bk) * bkMs;
-    var t1 = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'});
-    var t2 = new Date(centerTs + bkMs).toLocaleTimeString([],{hour:'2-digit'});
+    var t1 = new Date(centerTs).toLocaleString([],_nsOpts({month:'short',day:'numeric',hour:'2-digit'}));
+    var t2 = new Date(centerTs + bkMs).toLocaleTimeString([],_nsOpts({hour:'2-digit'}));
     var nDone   = bucket.snaps.filter(function(i){ return i.s.status==='done'; }).length;
     var nFailed = bucket.snaps.filter(function(i){ return i.s.status==='failed'; }).length;
     var nNative = bucket.snaps.filter(function(i){ return i.s.source==='ontap_native'; }).length;
@@ -8407,22 +8669,20 @@ function copyJobLog() {
 
 function prepareRestore(snapId) {
   var snap = _allSnapshots.find(function(s){ return String(s.id)===String(snapId); });
-  var vmid = snap && snap.vmids && snap.vmids.length ? snap.vmids[0] : null;
-  var dsName = snap ? (snap.pve_storage_id || '') : '';
+  if (!snap) { toast('Snapshot not found','error'); return; }
   document.querySelectorAll('.subtab').forEach(function(x){ x.classList.remove('active'); });
   document.querySelectorAll('.tab-panel').forEach(function(x){ x.style.display='none'; });
   document.querySelector('[data-tab="restore"]').classList.add('active');
   document.getElementById('tab-restore').style.display = 'block';
-  if (!vmid) { toast('Snapshot has no VM entries','error'); return; }
-  if (!_rcVms.length) {
-    loadRcVmList();
-    setTimeout(function(){ openRestoreWizard(vmid, snapId, dsName); }, 600);
-  } else {
-    openRestoreWizard(vmid, snapId, dsName);
-  }
+  // Snapshot-first: no VM needs to be picked (or even the VM list loaded) to
+  // get into the wizard — restoring the entire volume never requires one.
+  // If the snapshot covers exactly one VM, "This VM only" resolves to it
+  // automatically; for more than one, the wizard's own VM picker asks
+  // explicitly instead of silently grabbing the first one.
+  openRestoreWizardForSnapshot(snap);
 }
 
-function prepareClone(snapId) {
+async function prepareClone(snapId) {
   var snap = _allSnapshots.find(function(s){ return String(s.id)===String(snapId); });
   var vmid = snap && snap.vmids && snap.vmids.length ? snap.vmids[0] : null;
   var dsName = snap ? (snap.pve_storage_id || '') : '';
@@ -8431,12 +8691,8 @@ function prepareClone(snapId) {
   document.querySelector('[data-tab="restore"]').classList.add('active');
   document.getElementById('tab-restore').style.display = 'block';
   if (!vmid) { toast('Snapshot has no VM entries','error'); return; }
-  if (!_rcVms.length) {
-    loadRcVmList();
-    setTimeout(function(){ openCloneWizard(vmid, snapId, dsName); }, 600);
-  } else {
-    openCloneWizard(vmid, snapId, dsName);
-  }
+  if (!_rcVms.length) await loadRcVmList();
+  openCloneWizard(vmid, snapId, dsName);
 }
 
 // ─── Native ONTAP snapshot clone ─────────────────────────────────────────────
@@ -8622,7 +8878,7 @@ function fmtDate(iso) {
     var locales = {de:'de-DE',en:'en-US',fr:'fr-FR',es:'es-ES',pt:'pt-BR',ko:'ko-KR',it:'it-IT'};
     var loc = locales[_LANG] || 'de-DE';
     var d = new Date(iso);
-    return d.toLocaleDateString(loc) + ' ' + d.toLocaleTimeString(loc,{hour:'2-digit',minute:'2-digit'});
+    return d.toLocaleDateString(loc, _nsOpts()) + ' ' + d.toLocaleTimeString(loc,_nsOpts({hour:'2-digit',minute:'2-digit'}));
   } catch(e) { return iso; }
 }
 
@@ -8657,9 +8913,13 @@ function fmtRelative(iso) {
 }
 
 function fmtDateRel(iso) {
+  // Precise timestamp is the visible text — with many entries landing in the
+  // same relative bucket ("3d ago" for a whole day of hourly snapshots),
+  // relative time alone can't tell them apart. Relative time is still useful
+  // context, so it moves to the hover tooltip instead of disappearing.
   if (!iso) return '–';
-  return '<span title="' + esc(fmtDate(iso)) + '" style="cursor:default;border-bottom:1px dotted var(--muted)">'
-    + esc(fmtRelative(iso)) + '</span>';
+  return '<span title="' + esc(fmtRelative(iso)) + '" style="cursor:default;border-bottom:1px dotted var(--muted)">'
+    + esc(fmtDate(iso)) + '</span>';
 }
 
 function statusBadge(s) {
@@ -8695,7 +8955,7 @@ function schedSmBadge(sm) {
   var lag  = formatLag(sm.lag_time);
   var tip  = 'State: ' + esc(sm.state || '?') + ' | Lag: ' + lag;
   if (sm.last_transfer_time) {
-    tip += ' | Last: ' + esc((sm.last_transfer_time||'').slice(0,16).replace('T',' '));
+    tip += ' | Last: ' + esc(new Date(sm.last_transfer_time).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})));
   }
   var color, icon;
   if (!sm.healthy || sm.state === 'broken_off' || sm.state === 'broken-off') {
@@ -8719,21 +8979,21 @@ async function runDetectAndScan() {
   var sp = document.getElementById('discoverSpinner');
   if (sp) sp.style.display = 'inline-block';
   try {
-    var [disc, sm] = await Promise.allSettled([
-      apiPost('discover', {}),
-      apiPost('snapmirror/scan', {}),
-    ]);
-    var msgs = [];
-    if (disc.status === 'fulfilled') {
-      var n = Object.keys((disc.value.mappings||[]).reduce(function(a,m){ a[m.volume_uuid||m.id]=1; return a; }, {})).length || disc.value.count || 0;
-      msgs.push(n + ' datastore(s) found');
-    } else { msgs.push('Detect: ' + disc.reason.message); }
-    if (sm.status === 'fulfilled') {
-      msgs.push(sm.value.found + ' SnapMirror relationship(s)');
-    } else { msgs.push('SnapMirror: ' + sm.reason.message); }
-    var hasError = disc.status === 'rejected' || sm.status === 'rejected';
-    toast(msgs.join(' · '), hasError ? 'error' : 'success');
+    // Runs discovery + SnapMirror scan + index reconciliation + orphan
+    // cleanup as one logged job (job_type 'discover_scan') — see it step by
+    // step in the Activity Log.
+    var r = await apiPost('discover-and-scan', {});
+    if (r.error) {
+      toast('Detect & Scan: ' + r.error, 'error');
+    } else {
+      var msg = r.mappings_found + ' datastore(s) · ' + r.snapmirror_found + ' SnapMirror relationship(s) · '
+          + r.snapshots_imported + ' snapshot(s) imported';
+      if (r.snapshots_removed) msg += ' · ' + r.snapshots_removed + ' orphaned record(s) removed';
+      toast(msg, 'success');
+    }
     loadStorageUnified();
+  } catch(e) {
+    toast('Detect & Scan: ' + e.message, 'error');
   } finally {
     if (sp) sp.style.display = 'none';
   }
@@ -9591,7 +9851,7 @@ function _dbRenderJobTimeline(jobsData) {
   for (var tk = firstTick; tk <= tEnd; tk += dayMs) {
     var tx = toX(tk).toFixed(1);
     var td = new Date(tk);
-    var lbl = td.toLocaleDateString([], {month:'short', day:'numeric'});
+    var lbl = td.toLocaleDateString([], _nsOpts({month:'short', day:'numeric'}));
     svgParts.push('<line x1="'+tx+'" y1="'+axisY+'" x2="'+tx+'" y2="'+(axisY+4)+'" stroke="var(--border)" stroke-width="1"/>');
     svgParts.push('<text x="'+tx+'" y="'+(axisY+13)+'" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="sans-serif">'+esc(lbl)+'</text>');
   }
@@ -9655,7 +9915,7 @@ function _jtLogSnippet(j) {
   return '<div style="margin-top:7px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px">'
     + entries.map(function(l) {
         var msg = l.msg || l;
-        var ts  = l.ts ? new Date(l.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+        var ts  = l.ts ? new Date(l.ts).toLocaleTimeString([],_nsOpts({hour:'2-digit',minute:'2-digit',second:'2-digit'})) : '';
         return '<div style="display:flex;gap:5px;font-size:10px;line-height:1.4">'
           + (ts ? '<span style="color:#475569;flex-shrink:0">'+esc(ts)+'</span>' : '')
           + '<span style="color:#94a3b8">'+esc(msg)+'</span></div>';
@@ -9689,8 +9949,8 @@ function _jtHoverBucket(bk, evt) {
   } else {
     // Cluster summary
     var centerTs = parseInt(bk) * 6*3600e3;
-    var window6h = new Date(centerTs).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit'})
-                 + '–' + new Date(centerTs + 6*3600e3).toLocaleTimeString([],{hour:'2-digit'});
+    var window6h = new Date(centerTs).toLocaleString([],_nsOpts({month:'short',day:'numeric',hour:'2-digit'}))
+                 + '–' + new Date(centerTs + 6*3600e3).toLocaleTimeString([],_nsOpts({hour:'2-digit'}));
     var bubbleColor = _jtBucketColor(bucket);
     var failColor   = bubbleColor === '#f0a040' ? '#f0a040' : '#f08080';
     var nCancelled  = bucket.jobs.filter(function(j){ return j.status==='cancelled'; }).length;
@@ -9902,9 +10162,9 @@ function _dbSetTimestamp(ts, stale) {
   if (!el) return;
   if (!ts) { el.textContent = ''; return; }
   var d = new Date(ts);
-  var hhmm = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  var hhmm = d.toLocaleTimeString([], _nsOpts({hour:'2-digit', minute:'2-digit'}));
   el.textContent = stale ? ('Stand: ' + hhmm) : ('aktuell ' + hhmm);
-  el.title = stale ? 'Gecachte Daten – wird aktualisiert…' : 'Zuletzt aktualisiert: ' + d.toLocaleTimeString();
+  el.title = stale ? 'Gecachte Daten – wird aktualisiert…' : 'Zuletzt aktualisiert: ' + d.toLocaleTimeString([], _nsOpts());
 }
 
 var _dbLoading = false;
@@ -9970,6 +10230,8 @@ function showProvWizard() {
   var nsz=document.getElementById('provWizNsSize');  if(nsz) nsz.value='100';
   var fsz=document.getElementById('provWizNfsSize');  if(fsz) fsz.value='500';
   var nc=document.getElementById('provWizNfsNconnect'); if(nc) nc.value='';
+  var advChk=document.getElementById('provWizNfsAdvanced'); if(advChk) advChk.checked=false;
+  var polRow=document.getElementById('provWizExportPolicyRow'); if(polRow) polRow.style.display='none';
   _provJunctionAutoFill = '';
   ['images','rootdir'].forEach(function(t){ var cb=document.getElementById('pvct_'+t); if(cb) cb.checked=true; });
   ['iso','vztmpl','backup','snippets'].forEach(function(t){ var cb=document.getElementById('pvct_'+t); if(cb) cb.checked=false; });
@@ -10121,6 +10383,11 @@ function renderProvOntapRes() {
     } else {
       lifSel.innerHTML='<option value="">— no NFS LIFs found —</option>';
     }
+    var polSel=document.getElementById('provWizExportPolicy');
+    polSel.innerHTML='<option value="__new__">— create new (recommended) —</option>'+
+      (_provOntapRes.export_policies||[]).map(function(p){
+        return '<option value="'+esc(p.id)+'" data-name="'+esc(p.name)+'">'+esc(p.name)+'</option>';
+      }).join('');
   }
   provWizVolumeChange();
 }
@@ -10287,6 +10554,11 @@ function provWizToggleFlexGroup() {
   document.getElementById('provWizAggregate').style.display=on?'none':'';
   document.getElementById('provWizAggregateMulti').style.display=on?'':'none';
   document.getElementById('provWizFlexGroupHint').style.display=on?'':'none';
+}
+
+function provWizToggleNfsAdvanced() {
+  var on=document.getElementById('provWizNfsAdvanced').checked;
+  document.getElementById('provWizExportPolicyRow').style.display=on?'':'none';
 }
 
 function provWizVolumeChange() {
@@ -10606,6 +10878,16 @@ async function submitProvWizard() {
     var pveContent=contentTypes.length?contentTypes.join(','):'images,rootdir';
     Object.assign(body,{ nfs_junction_path:junction, nfs_lif_ip:nfsLifIp, size_bytes:sizeBytes,
       nfs_nconnect:nconnectVal, pve_content:pveContent });
+    var advChk=document.getElementById('provWizNfsAdvanced');
+    if(volId==='__new__'&&advChk&&advChk.checked) {
+      var polSel=document.getElementById('provWizExportPolicy');
+      if(polSel.value&&polSel.value!=='__new__') {
+        Object.assign(body,{
+          export_policy_id: polSel.value,
+          export_policy_name: polSel.selectedOptions[0].getAttribute('data-name')||'',
+        });
+      }
+    }
     var fgChk=document.getElementById('provWizFlexGroup');
     if(volId==='__new__'&&fgChk&&fgChk.checked) {
       var aggNames=Array.from(document.getElementById('provWizAggregateMulti').selectedOptions).map(function(o){ return o.value; });
@@ -11214,7 +11496,7 @@ async function impOnDsChange() {
         snapSel.innerHTML = idxSnaps.map(function(s) {
           var label = s.ontap_snapshot_name
             + (s.schedule_name ? ' – ' + s.schedule_name : '')
-            + (s.taken_at ? ' (' + s.taken_at.replace('T',' ').replace('Z','') + ')' : '');
+            + (s.taken_at ? ' (' + new Date(s.taken_at).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})) + ')' : '');
           return '<option value="'+esc(s.ontap_snapshot_name)+'">'+esc(label)+'</option>';
         }).join('');
         if (infoEl) infoEl.innerHTML =
@@ -12363,7 +12645,7 @@ async function drLoadPlans() {
         +'<div style="flex:1"><div style="font-weight:600">📋 '+esc(p.name)+' '+drStateBadge(p.state)+'</div>'
         +'<div style="font-size:.78rem;color:var(--muted);margin-top:.2rem">'
         +p.entry_count+' datastore(s) · '+p.group_count+' group(s)'
-        +(p.last_failover_at?'<span class="muted-hint"> · Last failover: '+p.last_failover_at.slice(0,16).replace('T',' ')+'</span>':'')
+        +(p.last_failover_at?'<span class="muted-hint"> · Last failover: '+new Date(p.last_failover_at).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}))+'</span>':'')
         +'</div></div>'
         +'<div style="display:flex;gap:.4rem" onclick="event.stopPropagation()">'
         +'<button class="btn btn-ghost btn-xs" onclick="drOpenPlanDetail(\''+esc(p.id)+'\')">Open</button>'
@@ -12414,7 +12696,7 @@ async function drRefreshPlanDetail() {
     document.getElementById('drPlanDetailTitle').textContent='📋 '+plan.name;
     var status=await apiFetch('dr/plans/status?plan_id='+_drCurrentPlanId);
     var healthy=status.overall_healthy;
-    var syncInfo=plan.last_failover_at?'Last failover: '+plan.last_failover_at.slice(0,16).replace('T',' '):'No failover yet';
+    var syncInfo=plan.last_failover_at?'Last failover: '+new Date(plan.last_failover_at).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})):'No failover yet';
     document.getElementById('drPlanStatusBar').className='alert '+(healthy?'alert-success':'alert-warning');
     document.getElementById('drPlanStatusBar').innerHTML=drStateBadge(plan.state)+'&nbsp;'
       +(healthy?'✅ SnapMirror healthy':'⚠️ SnapMirror issues')
@@ -12750,7 +13032,7 @@ function drRenderFailoverEntries() {
     var snaps=_drFailoverSnapshots[e.id]||[];
     var snapSel='<select id="drSnap-'+esc(e.id)+'" style="font-size:.75rem;margin-left:.5rem;max-width:180px">'
       +'<option value="">— latest —</option>'
-      +snaps.map(function(s){ return '<option value="'+esc(s.name)+'">'+esc(s.name)+(s.created?' ('+s.created.slice(0,10)+')':'')+'</option>'; }).join('')
+      +snaps.map(function(s){ return '<option value="'+esc(s.name)+'">'+esc(s.name)+(s.created?' ('+new Date(s.created).toLocaleDateString([], _nsOpts())+')':'')+'</option>'; }).join('')
       +'</select>';
     return '<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem .4rem;background:var(--bg);border-radius:4px;margin-bottom:2px">'
       +'<input type="checkbox" id="drChk-'+esc(e.id)+'" value="'+esc(e.id)+'" onchange="drUpdateFailoverBtn()" style="accent-color:var(--primary);flex-shrink:0">'
@@ -12834,11 +13116,61 @@ async function saveServerSettings() {
   }
 }
 
+// ── Timezone select population (shared by global + personal pickers) ────────
+var _NS_TZ_FALLBACK = [
+  'UTC','Europe/Berlin','Europe/London','Europe/Paris','Europe/Madrid','Europe/Rome',
+  'Europe/Amsterdam','Europe/Zurich','Europe/Vienna','Europe/Warsaw','Europe/Moscow',
+  'America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Sao_Paulo',
+  'Asia/Tokyo','Asia/Shanghai','Asia/Singapore','Asia/Kolkata','Asia/Dubai',
+  'Australia/Sydney','Pacific/Auckland',
+];
+function _nsTzList() {
+  try {
+    if (Intl.supportedValuesOf) return Intl.supportedValuesOf('timeZone');
+  } catch(e) {}
+  return _NS_TZ_FALLBACK;
+}
+function _nsPopulateTzSelect(sel, currentValue, autoLabel) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (autoLabel) {
+    var optAuto = document.createElement('option');
+    optAuto.value = ''; optAuto.textContent = autoLabel;
+    sel.appendChild(optAuto);
+  }
+  _nsTzList().forEach(function(tz) {
+    var o = document.createElement('option');
+    o.value = tz; o.textContent = tz;
+    sel.appendChild(o);
+  });
+  sel.value = currentValue || '';
+  if (sel.value !== (currentValue || '')) {
+    // currentValue not in the list (e.g. legacy TZ env value) — add it so it's not silently dropped
+    var o = document.createElement('option');
+    o.value = currentValue; o.textContent = currentValue + ' (current)';
+    sel.appendChild(o);
+    sel.value = currentValue;
+  }
+}
+async function saveGlobalTimezone() {
+  var tz = document.getElementById('global_timezone').value;
+  try {
+    await fetch('/api/ui-settings', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ global_timezone: tz }),
+    });
+    toast('Timezone saved', 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 // ── UI Settings (DR tab toggle etc.) ─────────────────────────────────────
 var _uiSettings = { dr_enabled: true };
 
 function _applyUiSettings(s) {
   _uiSettings = s;
+  var tzSel = document.getElementById('global_timezone');
+  if (tzSel) _nsPopulateTzSelect(tzSel, s.global_timezone, null);
   var drBtn   = document.querySelector('.subtab[data-tab="dr"]');
   var drPanel = document.getElementById('tab-dr');
   if (drBtn)   drBtn.style.display   = s.dr_enabled ? '' : 'none';
@@ -12968,7 +13300,7 @@ async function loadDbBackupConfig() {
       if (d.last_run_at) {
         var icon = d.last_run_status === 'success' ? '✓' : (d.last_run_status === 'failed' ? '✗' : '–');
         var col  = d.last_run_status === 'success' ? 'var(--success)' : (d.last_run_status === 'failed' ? 'var(--danger)' : 'var(--muted)');
-        var ts   = d.last_run_at.replace('T', ' ').substring(0, 16) + ' UTC';
+        var ts   = new Date(d.last_run_at).toLocaleString([], _nsOpts({year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
         statusEl.innerHTML = 'Last backup: <span style="color:' + col + ';font-weight:600">' + icon + '</span> ' + esc(ts) +
           (d.last_run_error ? ' — <span style="color:var(--danger);font-size:11px">' + esc(d.last_run_error.substring(0, 80)) + '</span>' : '');
       } else {
@@ -13467,6 +13799,7 @@ function _renderJobTrackers() {
 
 // Initial load
 applyI18n();
+loadUserTimezone();
 loadUiSettings();
 loadDashboard();
 // Activity log: self-scheduling poll — 3s while jobs run, 15s idle
@@ -13899,6 +14232,19 @@ actLogPoll();
               <label>nconnect <span style="font-weight:400;color:var(--muted)">(parallel TCP, 1–16 — leave blank to skip)</span></label>
               <input class="form-control" id="provWizNfsNconnect" type="number" min="1" max="16" placeholder="off" style="width:90px">
             </div>
+          </div>
+          <div class="form-group" id="provWizNfsAdvRow" style="margin-bottom:6px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;font-weight:400">
+              <input type="checkbox" id="provWizNfsAdvanced" onchange="provWizToggleNfsAdvanced()"> Advanced
+              <span style="font-weight:400;color:var(--muted);font-size:11px">(reuse an existing export policy instead of creating a new one)</span>
+            </label>
+          </div>
+          <div class="form-group" id="provWizExportPolicyRow" style="display:none;margin-bottom:14px">
+            <label>Export Policy</label>
+            <select class="form-control" id="provWizExportPolicy">
+              <option value="__new__">— create new (recommended) —</option>
+            </select>
+            <div class="hint">Reuses an existing NFS export policy from this SVM instead of a dedicated <code>nasnap-pol-*</code> one. NaSnap still adds read-write rules for the selected PVE hosts to it.</div>
           </div>
         </div>
 
@@ -15348,7 +15694,7 @@ actLogPoll();
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
       <div style="display:flex;align-items:center;gap:8px">
         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        <span style="font-size:15px;font-weight:700">Restore VM</span>
+        <span style="font-size:15px;font-weight:700">Restore</span>
         <span id="rw_vm_hdr" style="font-size:13px;color:var(--muted);margin-left:4px"></span>
       </div>
       <button onclick="closeRestoreWizard()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
@@ -15357,9 +15703,9 @@ actLogPoll();
     <!-- Step pills -->
     <div style="padding:16px 20px 0">
       <div style="display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--border)">
-        <div id="rwPill1" class="setup-step-pill active">① Snapshot &amp; Method</div>
-        <div id="rwPill2" class="setup-step-pill">② Options</div>
-        <div id="rwPill3" class="setup-step-pill">③ Confirm</div>
+        <div id="rwPill1" class="setup-step-pill active" onclick="rwGoStep(1)">① Snapshot &amp; Method</div>
+        <div id="rwPill2" class="setup-step-pill" onclick="rwGoStep(2)">② Options</div>
+        <div id="rwPill3" class="setup-step-pill" onclick="rwGoStep(3)">③ Confirm</div>
       </div>
     </div>
 
@@ -15371,9 +15717,29 @@ actLogPoll();
         <select id="rw_snap" class="form-control" onchange="rwSnapChanged()" style="width:100%;margin-top:6px"></select>
         <div id="rw_snap_info" class="hint"></div>
       </div>
-      <div class="form-group" style="margin-top:14px">
+      <div class="form-group" id="rw_scope_group" style="margin-top:16px">
+        <label class="form-label">What do you want to restore?</label>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <label id="rw_scope_card_vm" onclick="rwScopeChanged('vm')"
+                 style="flex:1;cursor:pointer;padding:12px 14px;border:2px solid var(--border);border-radius:8px;display:block">
+            <div style="font-weight:700;font-size:13px">This VM only</div>
+            <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Only this VM's disks are restored. Other VMs on the same datastore are untouched and keep running.</div>
+          </label>
+          <label id="rw_scope_card_volume" onclick="rwScopeChanged('volume')"
+                 style="flex:1;cursor:pointer;padding:12px 14px;border:2px solid var(--border);border-radius:8px;display:block">
+            <div style="font-weight:700;font-size:13px;color:#d9534f">⚠ Entire volume</div>
+            <div style="font-size:11.5px;color:var(--muted);margin-top:3px">The whole ONTAP volume is reverted to the snapshot. <strong>Every</strong> VM on this datastore is stopped and rolled back.</div>
+          </label>
+        </div>
+        <div id="rw_scope_blast" class="hint" style="margin-top:8px"></div>
+      </div>
+      <div class="form-group" id="rw_vmpick_group" style="margin-top:14px;display:none">
+        <label class="form-label">Which VM?</label>
+        <select id="rw_vmpick" class="form-control" style="width:100%" onchange="rwVmPickChanged()"></select>
+      </div>
+      <div class="form-group" id="rw_method_row" style="margin-top:14px;display:none">
         <label class="form-label">Restore Method</label>
-        <select id="rw_method" class="form-control" onchange="rwMethodChanged()" style="width:100%"></select>
+        <select id="rw_method" class="form-control" style="width:100%" disabled></select>
         <div id="rw_method_hint" class="hint"></div>
       </div>
     </div>
@@ -15427,6 +15793,12 @@ actLogPoll();
               Create safety snapshot first
             </label>
           </div>
+          <div id="rw_sum_ack_row" style="display:none;margin-top:10px">
+            <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;padding:10px 14px;border:1px solid rgba(217,83,79,.4);border-radius:6px;background:rgba(217,83,79,.06)">
+              <input type="checkbox" id="rw_sum_ack" onchange="rwCheckConfirm()" style="width:15px;height:15px;margin-top:2px;flex-shrink:0">
+              <span id="rw_sum_ack_label" style="font-weight:600;color:#d9534f"></span>
+            </label>
+          </div>
         </div>
       </div>
       <div class="form-group">
@@ -15468,9 +15840,9 @@ actLogPoll();
     <!-- Step pills -->
     <div style="padding:16px 20px 0">
       <div style="display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--border)">
-        <div id="cwPill1" class="setup-step-pill active">① Snapshot</div>
-        <div id="cwPill2" class="setup-step-pill">② Options</div>
-        <div id="cwPill3" class="setup-step-pill">③ Summary</div>
+        <div id="cwPill1" class="setup-step-pill active" onclick="cwGoStep(1)">① Snapshot</div>
+        <div id="cwPill2" class="setup-step-pill" onclick="cwGoStep(2)">② Options</div>
+        <div id="cwPill3" class="setup-step-pill" onclick="cwGoStep(3)">③ Summary</div>
       </div>
     </div>
 
@@ -16476,14 +16848,22 @@ function _sfrUpdateActions() {
   var selCount = selVals.length;
   var hasSingleFile = selCount === 1 && _sfr.snapSel && _sfr.snapSel.type === 'f';
   var hasAny        = selCount > 0 && !!_sfr.snapSel;
+  // Backend (sfr_engine.copy_tar_to_vm) refuses multi-file/directory copy for
+  // Windows guests — block it in the UI too instead of letting the click
+  // through and surfacing a raw error.
+  var isMultiOrDir = selCount > 1 || (selCount === 1 && selVals[0].type === 'd');
+  var blockedByOs  = _sfr.guestOs === 'windows' && isMultiOrDir;
 
   document.getElementById('sfrDlBtn').disabled    = !hasSingleFile;
   document.getElementById('sfrDlTarBtn').disabled = !hasAny;
-  document.getElementById('sfrCopyBtn').disabled  = !selCount;
   document.getElementById('sfrVmDelBtn').disabled = !_sfr.vmSel;
 
   // Update copy button label to hint at count / dir mode
   var copyBtn = document.getElementById('sfrCopyBtn');
+  copyBtn.disabled = !selCount || blockedByOs;
+  copyBtn.title = blockedByOs
+    ? 'Multi-file / directory copy is not supported for Windows VMs — select a single file instead'
+    : 'Copy selected files/dirs to VM (requires QGA; Linux VMs only for multi/dir)';
   if (selCount > 1) {
     copyBtn.textContent = 'F5 Copy ' + selCount + ' → VM';
   } else if (selCount === 1 && selVals[0].type === 'd') {
@@ -16878,7 +17258,7 @@ var _helpData = {
       + '<li><strong>SnapMirror Secondary</strong> — Snapshots on a DR replica. Select the SnapMirror relationship from the dropdown that appears.</li>'
       + '</ul>'
       + '<h3>VM table</h3>'
-      + '<p>Lists all VMs that have at least one snapshot. Columns: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (count), <strong>Last Snapshot</strong>, <strong>OS</strong> (detected via QEMU Guest Agent, cached in the database and refreshed in the background so it stays visible even when the VM is off). Click any column header to sort. Use the search box to filter by VMID, name, or datastore. The <strong>Imported</strong> filter shows only VMs with index-imported snapshots.</p>'
+      + '<p>Lists all VMs that have at least one snapshot. Columns: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (count), <strong>Last Snapshot</strong>, <strong>OS</strong> (detected via QEMU Guest Agent, cached in the database and refreshed in the background so it stays visible even when the VM is off). Click any column header to sort. Use the search box to filter by VMID, name, or datastore.</p>'
       + '<h3>Row actions (⋮ menu)</h3>'
       + '<p>Click the ⋮ button on any row to open its actions menu:</p><ul>'
       + '<li>'+_hi('info')+'<strong>Info</strong> — Opens the VM Info panel: overview, disk layout, datastores in use, and snapshot history for this VM.</li>'
@@ -16897,7 +17277,7 @@ var _helpData = {
       + '<li><strong>SnapMirror Secondary</strong> — Snapshots auf einem DR-Replikat. Die SnapMirror-Beziehung aus dem Dropdown auswählen.</li>'
       + '</ul>'
       + '<h3>VM-Tabelle</h3>'
-      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (Anzahl), <strong>Last Snapshot</strong>, <strong>OS</strong> (per QEMU Guest Agent erkannt, in der Datenbank zwischengespeichert und im Hintergrund aktualisiert — bleibt so auch bei ausgeschalteter VM sichtbar). Spaltenköpfe klicken zum Sortieren. Suchfeld filtert nach VMID, Name oder Datastore. Filter <strong>Imported</strong> zeigt nur VMs mit per Datastore-Index importierten Snapshots.</p>'
+      + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (Anzahl), <strong>Last Snapshot</strong>, <strong>OS</strong> (per QEMU Guest Agent erkannt, in der Datenbank zwischengespeichert und im Hintergrund aktualisiert — bleibt so auch bei ausgeschalteter VM sichtbar). Spaltenköpfe klicken zum Sortieren. Suchfeld filtert nach VMID, Name oder Datastore.</p>'
       + '<h3>Zeilen-Aktionen (⋮-Menü)</h3>'
       + '<p>Klick auf ⋮ in einer Zeile öffnet das Aktionsmenü:</p><ul>'
       + '<li>'+_hi('info')+'<strong>Info</strong> — Öffnet das VM-Info-Panel: Übersicht, Datenträger-Layout, verwendete Datastores und Snapshot-Historie dieser VM.</li>'

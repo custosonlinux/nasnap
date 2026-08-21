@@ -39,6 +39,8 @@ def start_restore_job(job_id, params, username):
         target = _run_restore_san
     elif method == "san_single":
         target = _run_restore_san_single
+    elif method == "nfs_revert":
+        target = _run_restore_nfs_revert
     else:
         target = _run_restore_flexclone
     t = threading.Thread(target=target, args=(job_id, params, username), daemon=True)
@@ -405,6 +407,146 @@ def _run_restore_san(job_id, params, username):
         return
     except Exception as exc:
         log.error(f"[netapp_storage] SAN restore job {job_id} failed: {exc}")
+        _fail_job(db, job_id)
+        jlog.log(f"ERROR: {exc}")
+        _reg_unregister(job_id)
+        return
+
+    _reg_unregister(job_id)
+    _finish_job(db, job_id)
+    jlog.log(f"Volume revert completed — {len(stopped_vms)} VM(s) restarted.")
+
+
+# ── NFS Volume Revert ──────────────────────────────────────────────────────────
+
+def _run_restore_nfs_revert(job_id, params, username):
+    """NFS restore via ONTAP volume snapshot revert — parity with SAN's volume
+    revert (_run_restore_san). Stops ALL VMs in the volume, reverts the ONTAP
+    volume, then restarts them.
+
+    Unlike SAN there is no LVM VG to deactivate/reactivate (NFS is just files
+    under a mount, not a block device) — instead, since the mountpoint stays
+    live on every PVE host throughout the revert, a `pvesm status` rescan is
+    run on each affected host afterwards so PVE's directory cache can't show
+    stale entries from before the revert.
+
+    1. Stop all VMs in the volume (from snapshot manifest)
+    2. Revert ONTAP volume to snapshot
+    3. Rescan the NFS storage on all PVE hosts that have it mounted
+    4. Restore PVE configs for all reverted VMs
+    5. Start all VMs that were running before
+    """
+    db = get_db()
+    jlog = JobLogger(job_id, db)
+
+    snapshot_id = params["snapshot_id"]
+    vmid = int(params["vmid"])  # selected VM — used as fallback if manifest is empty
+
+    try:
+        snap = get_snapshot_record(db, snapshot_id)
+        mapping = get_mapping(db, snap["mapping_id"])
+        endpoint = get_endpoint(db, mapping["endpoint_id"])
+        client = build_ontap_client(endpoint)
+
+        mgr = build_pve_client(db, snap["pve_cluster_id"])
+        pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
+
+        vm_types_map = json.loads(snap.get("vm_types_json") or "{}")
+        snap_name = snap["snap_name"]
+        pve_storage_id = mapping.get("pve_storage_id", "")
+
+        # Collect all VMIDs in this volume; fall back to just the selected VM
+        all_vmids = json.loads(snap.get("vmids_json") or "[]")
+        if not all_vmids:
+            all_vmids = [vmid]
+
+        # ── 1. Stop all VMs in the volume ────────────────────────────
+        port = getattr(mgr, "port", 8006)
+        stopped_vms = []   # (vmid, vm_type, node) — will be restarted after revert
+        for vid in all_vmids:
+            vtype = vm_types_map.get(str(vid), "qemu")
+            vt = "qemu" if vtype == "qemu" else "lxc"
+            try:
+                vnode = mgr.find_vm_node(vid) or ""
+                if not vnode:
+                    jlog.log(f"WARNING: cannot locate VM {vid} — skipping")
+                    continue
+                r = mgr._api_get(
+                    f"https://{mgr.host}:{port}/api2/json/nodes/{vnode}/{vt}/{vid}/status/current"
+                )
+                if not r.ok:
+                    continue
+                status = r.json().get("data", {}).get("status", "stopped")
+                if status != "stopped":
+                    jlog.log(f"Stopping {vtype.upper()} {vid} …")
+                    _vm_stop(mgr, vnode, vid, vtype)
+                stopped_vms.append((vid, vtype, vnode))
+            except Exception as exc:
+                jlog.log(f"WARNING: could not stop VM {vid}: {exc}")
+        _set_progress(db, job_id, 25)
+
+        # ── 2. ONTAP Volume Revert ────────────────────────────────────
+        jlog.log(f"Reverting ONTAP volume to snapshot '{snap_name}' …")
+        job_uuid = client.restore_volume_snapshot_san(mapping["volume_uuid"], snap_name)
+        if job_uuid:
+            poll_cfg = load_plugin_config()
+            client.poll_job(
+                job_uuid,
+                interval_s=poll_cfg.get("job_poll_interval_s", 3),
+                timeout_s=poll_cfg.get("job_poll_timeout_s", 300),
+            )
+        jlog.log("Volume revert completed.")
+        _set_progress(db, job_id, 55)
+
+        # ── 3. Rescan NFS storage on all PVE hosts ───────────────────
+        pve_host_ids = []
+        try:
+            ds_row = db.query_one(
+                "SELECT pve_host_ids FROM netapp_provisioned_datastores WHERE volume_uuid=?",
+                (mapping["volume_uuid"],)
+            )
+            if ds_row:
+                pve_host_ids = json.loads(ds_row.get("pve_host_ids") or "[]")
+        except Exception:
+            pass
+        if not pve_host_ids:
+            pve_host_ids = [snap["pve_cluster_id"]]
+
+        for hid in pve_host_ids:
+            try:
+                h = build_pve_client(db, hid)
+                hu, hp, hk = get_ssh_creds(h)
+                jlog.log(f"[{h.host}] Rescanning NFS storage '{pve_storage_id}' …")
+                ssh_run(h.host, hu, hp,
+                       f"pvesm status {shlex.quote(pve_storage_id)} 2>/dev/null || true",
+                       key_material=hk, timeout=30)
+            except Exception as exc:
+                jlog.log(f"WARNING: storage rescan on host {hid}: {exc}")
+        _set_progress(db, job_id, 75)
+
+        # ── 4. Restore PVE configs for all VMs ───────────────────────
+        for (vid, vtype, vnode) in stopped_vms:
+            try:
+                vhost = _resolve_node_host(mgr, vnode)
+                _restore_config(snap, mapping, vid, vtype, vnode, mgr,
+                                vhost, pve_user, pve_pass, pve_key)
+                jlog.log(f"Config restored for {vtype.upper()} {vid}.")
+            except Exception as exc:
+                jlog.log(f"WARNING: config restore for VM {vid}: {exc}")
+        _set_progress(db, job_id, 88)
+
+        # ── 5. Start all VMs ─────────────────────────────────────────
+        for (vid, vtype, vnode) in stopped_vms:
+            jlog.log(f"Starting {vtype.upper()} {vid} …")
+            _vm_start(mgr, vnode, vid, vtype)
+
+    except JobCancelledError:
+        jlog.log("Job cancelled by user")
+        _cancel_job(db, job_id)
+        _reg_unregister(job_id)
+        return
+    except Exception as exc:
+        log.error(f"[netapp_storage] NFS volume revert job {job_id} failed: {exc}")
         _fail_job(db, job_id)
         jlog.log(f"ERROR: {exc}")
         _reg_unregister(job_id)

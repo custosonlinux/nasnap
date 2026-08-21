@@ -490,13 +490,25 @@ def _run_discovery():
         return err
     data = request.get_json() or {}
     endpoint_id = data.get("endpoint_id")
-    try:
+    db = get_db()
+    username = request.session.get("user", "system")
+
+    def _do(logger):
         from ..core.discovery import run_discovery
+        logger.log("Running datastore discovery …")
         mappings, debug_info = run_discovery(endpoint_id=endpoint_id)
-        return {"success": True, "mappings": mappings, "count": len(mappings),
-                "debug": debug_info}
+        logger.log(f"Discovery: {len(mappings)} mapping(s) found")
+        for reason in (debug_info.get("no_match_reasons") or [])[:10]:
+            logger.log(f"Discovery note: {reason}")
+        return {"success": True, "mappings": mappings, "count": len(mappings), "debug": debug_info}
+
+    try:
+        from ..core._helpers import run_as_job
+        job_id, result = run_as_job(db, "discover", username, _do)
     except Exception as exc:
         return {"error": str(exc)}, 500
+    result["job_id"] = job_id
+    return result
 
 
 def _delete_mapping():
@@ -532,7 +544,7 @@ def _list_snapshots():
         "FROM netapp_snapshots s "
         "JOIN netapp_volume_mapping vm ON vm.id = s.mapping_id "
         "JOIN netapp_endpoints ep ON ep.id = vm.endpoint_id "
-        "ORDER BY s.created_at DESC LIMIT 200"
+        "ORDER BY s.created_at DESC LIMIT 5000"
     )
     result = []
     db_keys = set()   # (volume_uuid, snap_name) — for deduplication
@@ -609,7 +621,7 @@ def _list_snapshots():
             log.warning(f"[netapp_storage] ONTAP snapshot scan {m.get('volume_name')}: {exc}")
 
     result.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-    return result[:300]
+    return result[:5000]
 
 
 def _create_snapshot():

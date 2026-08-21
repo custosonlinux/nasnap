@@ -99,6 +99,10 @@ class NaSnapDB:
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS np_user_prefs (
+                username   TEXT PRIMARY KEY,
+                timezone   TEXT NOT NULL DEFAULT ''
+            );
             CREATE TABLE IF NOT EXISTS np_ldap_config (
                 id                TEXT PRIMARY KEY DEFAULT 'default',
                 enabled           INTEGER NOT NULL DEFAULT 0,

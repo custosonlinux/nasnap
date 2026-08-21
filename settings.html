@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    // Apply the theme immediately, before first paint, to avoid a flash of
+    // the default (dark) look — same 'nasnap-theme' key the main UI uses, so
+    // whatever the user picked there is what shows up here too.
+    (function(){
+      var t = localStorage.getItem('nasnap-theme');
+      if (t === 'light') document.documentElement.classList.add('light-theme-pre');
+      if (t === 'glass') document.documentElement.classList.add('glass-theme-pre');
+    })();
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NaSnap — Profile &amp; Settings</title>
@@ -11,6 +21,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     html.glass-theme-pre { background: #0a1628; }
+    html.light-theme-pre { background: #F0F4F8; }
 
     :root {
       --bg:      #2C3E50;
@@ -191,6 +202,17 @@
     }
     @keyframes spin { to { transform:rotate(360deg); } }
 
+    /* ── Light Theme ── */
+    body.light-theme {
+      --bg:     #F0F4F8;
+      --card:   #FFFFFF;
+      --border: #CBD5E0;
+      --hover:  #E2EAF3;
+      --text:   #1A2536;
+      --muted:  #64748B;
+    }
+    body.light-theme input, body.light-theme select, body.light-theme textarea { color: var(--text); }
+
     /* ── Glass Theme ── */
     body.glass-theme {
       --border: rgba(255,255,255,0.12);
@@ -310,6 +332,30 @@
         </div>
       </div>
 
+      <div class="section-label">Appearance</div>
+      <div class="pw-form">
+        <div class="form-group">
+          <label>Theme</label>
+          <select id="profile-theme" class="form-control" onchange="setTheme(this.value)">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="glass">Liquid Glass</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section-label">Timezone</div>
+      <div class="pw-form">
+        <div class="form-group">
+          <label>Display timezone</label>
+          <select id="profile-tz" class="form-control"></select>
+        </div>
+        <div class="pw-footer">
+          <button id="tz-btn" class="btn btn-primary" onclick="saveTimezone()">Save Timezone</button>
+          <span id="tz-msg" class="pw-msg"></span>
+        </div>
+      </div>
+
       <div class="section-label">Change Password</div>
       <div class="pw-form">
         <div class="form-group">
@@ -426,6 +472,20 @@
 <div id="toast"></div>
 
 <script>
+function applyTheme(theme) {
+  document.documentElement.classList.remove('light-theme-pre', 'glass-theme-pre');
+  document.body.classList.remove('light-theme', 'glass-theme');
+  if (theme === 'light') document.body.classList.add('light-theme');
+  if (theme === 'glass') document.body.classList.add('glass-theme');
+  var sel = document.getElementById('profile-theme');
+  if (sel) sel.value = theme;
+}
+function setTheme(theme) {
+  localStorage.setItem('nasnap-theme', theme);
+  applyTheme(theme);
+}
+applyTheme(localStorage.getItem('nasnap-theme') || 'dark');
+
 function logout() {
   fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
     .finally(function() { window.location.replace('/login'); });
@@ -441,6 +501,57 @@ function fmtDate(iso) {
   try {
     return new Date(iso).toLocaleDateString(undefined, {year:'numeric',month:'short',day:'numeric'});
   } catch(e) { return iso.substring(0,10); }
+}
+
+// Set once /api/system/info returns the viewer's personal timezone preference
+// (empty = fall back to the browser's own timezone, i.e. today's behavior).
+var _nsUserTz = '';
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  try {
+    var opts = {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'};
+    if (_nsUserTz) opts.timeZone = _nsUserTz;
+    return new Date(iso).toLocaleString(undefined, opts);
+  } catch(e) { return iso.replace('T',' ').substring(0,16); }
+}
+
+var TZ_FALLBACK = [
+  'UTC','Europe/Berlin','Europe/London','Europe/Paris','Europe/Madrid','Europe/Rome',
+  'Europe/Amsterdam','Europe/Zurich','Europe/Vienna','Europe/Warsaw','Europe/Moscow',
+  'America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Sao_Paulo',
+  'Asia/Tokyo','Asia/Shanghai','Asia/Singapore','Asia/Kolkata','Asia/Dubai',
+  'Australia/Sydney','Pacific/Auckland',
+];
+function populateTzSelect(currentValue) {
+  var sel = document.getElementById('profile-tz');
+  if (!sel) return;
+  var list;
+  try { list = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : TZ_FALLBACK; }
+  catch(e) { list = TZ_FALLBACK; }
+  sel.innerHTML = '<option value="">Automatic (use browser timezone)</option>'
+    + list.map(function(tz) { return '<option value="' + esc(tz) + '">' + esc(tz) + '</option>'; }).join('');
+  sel.value = currentValue || '';
+}
+function saveTimezone() {
+  var tz  = document.getElementById('profile-tz').value;
+  var btn = document.getElementById('tz-btn');
+  btn.disabled = true;
+  fetch('/api/auth/me/timezone', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timezone: tz })
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      btn.disabled = false;
+      var el = document.getElementById('tz-msg');
+      if (d.ok) {
+        el.textContent = 'Timezone saved.'; el.className = 'pw-msg ok';
+        toast('Timezone saved', 'success');
+      } else {
+        el.textContent = d.error || 'Failed to save timezone.'; el.className = 'pw-msg error';
+      }
+    })
+    .catch(function() { btn.disabled = false; });
 }
 
 function fmtBytes(b) {
@@ -465,13 +576,15 @@ fetch('/api/system/info', { credentials: 'include' })
     badge.className = 'role-badge ' + (d.role || '');
     document.getElementById('profile-created').textContent =
       d.created_at ? 'Member since ' + fmtDate(d.created_at) : '';
+    populateTzSelect(d.timezone);
+    _nsUserTz = d.timezone || '';
 
     if (d.role !== 'admin') return;
 
     document.getElementById('card-system').style.display = '';
     document.getElementById('sys-version').textContent  = 'v' + d.version;
     document.getElementById('sys-uptime').textContent   = d.uptime;
-    document.getElementById('sys-started').textContent  = fmtDate(d.started_at) + ' ' + (d.started_at ? d.started_at.substring(11,16) + ' UTC' : '');
+    document.getElementById('sys-started').textContent  = fmtDateTime(d.started_at);
     document.getElementById('sys-python').textContent   = d.python_version;
     document.getElementById('sys-platform').textContent = d.platform;
     document.getElementById('sys-datadir').textContent  = d.data_dir;

@@ -2032,6 +2032,15 @@ class OntapClient:
         self.disable_volume_snapshots_and_arp(vol_uuid)
         return vol_uuid
 
+    def list_export_policies(self, svm_name=None):
+        """Lists NFS export policies, optionally filtered to one SVM.
+        Returns [{"id": 123, "name": "default", "svm": {"name": "svm1"}}, ...].
+        """
+        params = {"fields": "id,name,svm.name", "max_records": 200}
+        if svm_name:
+            params["svm.name"] = svm_name
+        return self._get_all_records("protocols/nfs/export-policies", params=params)
+
     def create_export_policy(self, svm_name, policy_name):
         """Creates an NFS export policy. Returns policy id (int)."""
         body = {"name": policy_name, "svm": {"name": svm_name}}

@@ -326,7 +326,8 @@ def send_job_notification(schedule_name, job_status, snap_name,
             dest     = sm.get("dest_cluster") or sm.get("dest_svm") or "?"
             state    = sm.get("state") or "?"
             lag_str  = _format_lag(sm.get("lag_time") or "")
-            last_t   = (sm.get("last_transfer_time") or "")[:16].replace("T", " ")
+            from . import email_common as _ec_ts
+            last_t   = _ec_ts.fmt_ts(sm.get("last_transfer_time") or "", fmt='%Y-%m-%d %H:%M')
             if not sm.get("healthy") or state in ("broken_off", "broken-off"):
                 color, icon = "#dc2626", "✗"
             elif state == "snapmirrored":
@@ -1129,8 +1130,9 @@ def _backup_config_get():
     cron_next = ''
     try:
         from croniter import croniter
+        from ..core._helpers import get_global_timezone
         cron_next = croniter(row.get('cron_expr', '0 2 * * *'),
-                             datetime.now()).get_next(datetime).strftime('%Y-%m-%d %H:%M')
+                             datetime.now(get_global_timezone())).get_next(datetime).strftime('%Y-%m-%d %H:%M')
     except Exception:
         pass
 
@@ -1247,12 +1249,20 @@ def _check_and_run_backup():
             return
 
         from croniter import croniter
-        now  = datetime.now()
+        from ..core._helpers import get_global_timezone
+        now  = datetime.now(get_global_timezone())
         prev = croniter(cfg.get('cron_expr', '0 2 * * *'), now).get_prev(datetime)
 
         last_run = cfg.get('last_run_at', '')
         if last_run:
-            last_dt = datetime.fromisoformat(last_run.rstrip('Z').split('+')[0])
+            # last_run_at is stored UTC-aware; prev is aware in the configured
+            # global tz — comparing aware-to-aware is correct regardless of
+            # whether the two differ (previously this compared a UTC wall-clock
+            # value, with its offset silently stripped, against server-local
+            # wall-clock time — wrong whenever server tz != UTC).
+            last_dt = datetime.fromisoformat(last_run.replace('Z', '+00:00'))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
             if prev <= last_dt:
                 return  # already ran for this slot
 

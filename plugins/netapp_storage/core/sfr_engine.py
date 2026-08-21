@@ -170,31 +170,39 @@ def list_san_vm_disks(pve, vg_name, vmid):
 
 # ── Snapshot disk listing ─────────────────────────────────────────────────────
 
+_DISK_EXTS = (".qcow2", ".raw", ".vmdk")
+
+
 def list_snap_disks(pve, nfs_mount_path, snap_name, vmid):
-    """List QCOW2 files + sizes for a VM inside an ONTAP snapshot.
+    """List disk image files + sizes for a VM inside an ONTAP snapshot.
     Returns [{"path": "/full/path/vm-116-disk-0.qcow2", "size_str": "12 GB"}, ...].
-    Size is the QCOW2 file size on disk (not virtual size) — sufficient to
+    Size is the on-disk file size (not virtual size) — sufficient to
     distinguish tiny EFI/TPM disks from data disks.
+
+    PVE directory/NFS storage isn't qcow2-only — raw and vmdk are both valid
+    format choices when adding a disk — so all three extensions are searched.
+    qemu-nbd (mount_disk()) auto-detects the actual format regardless.
     """
     from ._helpers import ssh_run
     snap_images = f"{nfs_mount_path}/.snapshot/{snap_name}/images/{vmid}"
+    ext_glob = "\\( " + " -o ".join(f"-name '*{e}'" for e in _DISK_EXTS) + " \\)"
     try:
         out = ssh_run(
             pve.host, pve.ssh_user, pve.ssh_password,
-            f"ls {shlex.quote(snap_images)}/*.qcow2 2>/dev/null || true",
+            f"find {shlex.quote(snap_images)} -maxdepth 1 -type f {ext_glob} 2>/dev/null || true",
             capture=True, timeout=15,
         )
-        paths = sorted(l.strip() for l in out.strip().splitlines() if l.strip().endswith(".qcow2"))
+        paths = sorted(l.strip() for l in out.strip().splitlines() if l.strip().endswith(_DISK_EXTS))
         if not paths:
             # Fallback: search one level deeper (non-standard layouts)
             out2 = ssh_run(
                 pve.host, pve.ssh_user, pve.ssh_password,
                 f"find {shlex.quote(nfs_mount_path + '/.snapshot/' + snap_name)} "
-                f"-maxdepth 4 -name '*.qcow2' 2>/dev/null | grep '/{vmid}/' || true",
+                f"-maxdepth 4 -type f {ext_glob} 2>/dev/null | grep '/{vmid}/' || true",
                 capture=True, timeout=20,
             )
             paths = sorted(
-                l.strip() for l in out2.strip().splitlines() if l.strip().endswith(".qcow2")
+                l.strip() for l in out2.strip().splitlines() if l.strip().endswith(_DISK_EXTS)
             )
         if not paths:
             return []
