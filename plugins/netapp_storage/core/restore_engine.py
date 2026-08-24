@@ -1892,6 +1892,35 @@ def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_k
                 log.warning(f"[netapp_storage] live manifest fallback failed: {live_err}")
                 _log(f"WARNING: could not check the live manifest tree: {live_err}")
 
+    # Absolute last resort: no manifest anywhere — frozen inside this snapshot or
+    # written since — has ever recorded this VM. It may simply never have been
+    # included in a NaSnap-driven snapshot job. Build a manifest entry straight
+    # from the VM's current PVE config instead. Its disk layout reflects "right
+    # now", not snapshot time — fine for the common case (disks rarely change),
+    # but can be wrong if they have. Still strictly better than failing outright.
+    if vmid is not None:
+        try:
+            from .snapshot_engine import _extract_disk_files
+            live_node = mgr.find_vm_node(vmid) or node
+            for vt in ("qemu", "lxc"):
+                result = mgr.get_vm_config(live_node, vmid, vt)
+                if not result.get("success"):
+                    continue
+                cfg_raw = result["config"].get("raw", {})
+                disks = _extract_disk_files(cfg_raw, mapping["pve_storage_id"], vt)
+                if not disks:
+                    continue
+                _log(f"VM {vmid} isn't in any NaSnap manifest — using its current live "
+                    f"Proxmox config instead (disk layout as of now, not snapshot time).")
+                return {"vms": [{
+                    "vmid": vmid, "vm_type": vt,
+                    "name": cfg_raw.get("name", cfg_raw.get("hostname", f"vm-{vmid}")),
+                    "disks": disks, "raw_config": cfg_raw,
+                }]}
+        except Exception as live_cfg_err:
+            log.warning(f"[netapp_storage] live PVE config fallback failed: {live_cfg_err}")
+            _log(f"WARNING: could not read VM {vmid}'s live Proxmox config: {live_cfg_err}")
+
     if best is not None:
         # best is only ever set when vmid was given (see _has_vm) and every manifest
         # found so far lacked it — surface that clearly instead of silently guessing.
