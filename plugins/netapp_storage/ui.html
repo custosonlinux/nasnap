@@ -2204,7 +2204,7 @@ function applyI18n() {
           <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">SnapMirror Secondary</button>
         </div>
         <input id="rcSearch" type="text" placeholder="Filter by VM name, ID or datastore…" oninput="rcFilterChanged()" style="flex:1;min-width:140px;max-width:220px;margin-left:4px">
-        <button id="rcRefreshBtn" class="btn btn-ghost btn-sm" onclick="_rcSource==='secondary'?rcDrRelChanged():loadRcVmList()">
+        <button id="rcRefreshBtn" class="btn btn-ghost btn-sm" title="Reload the VM list. Also re-checks OS type (e.g. after installing the QEMU Guest Agent)." onclick="_rcSource==='secondary'?rcDrRelChanged():loadRcVmList(true)">
           <svg id="rcRefreshIcon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh
         </button>
         <span id="rcStaleNote" style="font-size:10px;color:var(--muted);display:none"></span>
@@ -4851,7 +4851,7 @@ function _rcSetStale(stale, ts) {
   note.style.display = '';
 }
 
-async function loadRcVmList() {
+async function loadRcVmList(forceOsRefresh) {
   var btn  = document.getElementById('rcRefreshBtn');
   var icon = document.getElementById('rcRefreshIcon');
 
@@ -4878,7 +4878,13 @@ async function loadRcVmList() {
     var snaps = await apiFetch('snapshots');
     _allSnapshots = snaps;
     _rcLiveStatusCache = {};
-    _sfrOsCache = {};
+    // Only wipe the OS-detection cache on an explicit user-requested refresh
+    // (e.g. after installing QEMU Guest Agent) — not on every tab entry.
+    // Otherwise every visit re-probes QGA for all VMs from scratch and the
+    // table flashes: cached badges render, then vanish when the cache is
+    // wiped and the list re-renders, then reappear once the fresh probe
+    // (now uncached again) finally comes back.
+    if (forceOsRefresh) _sfrOsCache = {};
     renderRcVmList();
     _rcSetStale(false);
     try { localStorage.setItem(_RC_CACHE_KEY, JSON.stringify({vms:_rcVms, ts:Date.now()})); } catch(_) {}
