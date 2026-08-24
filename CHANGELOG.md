@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.9.0] — 2026-08-24
+
 ### Added
 
 - **Instant Recovery (NFS)** — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume, no data copied up front. New **VMs** sidebar group with an Instant Recovery start wizard and a tab listing active/recent sessions. Works from a snapshot or from a live VM (ad-hoc snapshot taken first). Optional network-isolated boot (fresh random MACs, `link_down=1`) avoids IP/MAC collisions with the still-live source. A session is committed via **Storage Migrate** (onto a permanent datastore, reusing Bulk Migrate's per-disk `move_disk`/`move_volume` mechanism) or **Discarded** (temporary VM + FlexClone torn down immediately). Sessions running past 3 days get a log reminder via the hourly Detect & Scan job.

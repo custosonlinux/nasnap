@@ -6,7 +6,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.8.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.9.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -1070,7 +1070,7 @@ DEBUG=1 .venv/bin/python app.py
 - **Provisioning — reuse an existing NFS export policy** — Advanced option in the New Datastore wizard to select an existing SVM export policy instead of always creating a dedicated one.
 - **VM Restore & Clone — instant cached list** with background refresh instead of blocking on load every time.
 
-### Unreleased (post-1.8.0)
+### v1.9.0 — Released
 
 - **Instant Recovery (NFS)** *(Alpha)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume — no data copy up front, the clone only diverges once written to. New **VMs** sidebar group hosts the wizard and the Instant Recovery tab (active/recent sessions). Works from either a snapshot or a live VM (an ad-hoc snapshot is taken first). An optional network-isolated boot assigns fresh random MACs and sets `link_down=1` so the clone can't collide with the still-live source VM. Once tested, a session is either **Storage Migrated** onto a permanent datastore (reuses the same per-disk `move_disk`/`move_volume` mechanism as Bulk Migrate) or **Discarded**, tearing down the temporary VM and FlexClone immediately. Sessions left running past 3 days get a log reminder, surfaced during the hourly Detect & Scan job.
 - **Storage Migrate — TPM devices** — PVE can only move a `tpmstate0` disk while the VM is stopped; Bulk Migrate and Instant Recovery's commit step were treating it like any other disk, so a running VM with a TPM ended up with its regular disks already moved and the TPM device stranded (job reported failed despite mostly succeeding). Both flows now migrate every other disk live first, then — only if a TPM device is present — briefly stop the VM, move the TPM state, and restart it (the restart always happens, even if the TPM move itself fails). A precheck warns and asks for explicit confirmation before the migration starts if any selected VM has a TPM device.
@@ -1085,7 +1085,7 @@ DEBUG=1 .venv/bin/python app.py
 - **System snapshots (`vserverdr*`, `snapmirror.*`) filtered everywhere** — previously only the Snapshots tab excluded `snapmirror.`-prefixed snapshots, and not SVM-DR `vserverdr*` ones; DR-plan and SnapMirror-secondary snapshot browsing didn't filter either. Now centralized and applied consistently.
 - **Instant Recovery session list showed the wrong VM name** — the list displayed the *source* VM's name instead of the name actually assigned to the new VM in the wizard.
 
-### v1.9 — Planned
+### v1.10 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
