@@ -172,6 +172,26 @@ def _migrate():
     return {"success": True, "job_id": job_id}
 
 
+def _migrate_tpm_check():
+    session_id = request.args.get("session_id", "")
+    if not session_id:
+        return {"has_tpm": False}
+    db = get_db()
+    row = db.query_one("SELECT * FROM netapp_instant_recovery_sessions WHERE id=?", (session_id,))
+    if not row:
+        return {"has_tpm": False}
+    sess = dict(row)
+    from ..core._helpers import get_mapping, pve_for_mapping
+    from ..core.migrate_engine import vm_tpm_on_storage
+    try:
+        mapping = get_mapping(db, sess["mapping_id"])
+        mgr, _ = pve_for_mapping(db, mapping)
+        has_tpm = vm_tpm_on_storage(mgr, sess["node"], sess["new_vmid"], sess["vm_type"], sess["temp_storage_id"])
+    except Exception:
+        has_tpm = False
+    return {"has_tpm": has_tpm}
+
+
 def _discard():
     err = _require_admin()
     if err:
@@ -219,5 +239,6 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "instant-recovery/start-live", _start_live)
     register_plugin_route(PLUGIN_ID, "instant-recovery/sessions", _list_sessions)
     register_plugin_route(PLUGIN_ID, "instant-recovery/migrate", _migrate)
+    register_plugin_route(PLUGIN_ID, "instant-recovery/migrate-tpm-check", _migrate_tpm_check)
     register_plugin_route(PLUGIN_ID, "instant-recovery/discard", _discard)
     register_plugin_route(PLUGIN_ID, "instant-recovery/status", _status)

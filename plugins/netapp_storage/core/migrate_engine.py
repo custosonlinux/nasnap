@@ -21,6 +21,7 @@ from ._helpers import (
     get_mapping, pve_for_mapping, JobLogger, JobCancelledError, check_cancel,
 )
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
+from .restore_engine import _vm_start, _vm_stop
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,29 @@ def _disks_on_storage(cfg: dict, storage_id: str) -> list:
             continue
         disks.append(k)
     return disks
+
+
+def _vm_status(mgr, node, vmid, vm_type="qemu"):
+    vt = "qemu" if vm_type == "qemu" else "lxc"
+    r = mgr._api_get(f"{mgr._base}/nodes/{node}/{vt}/{vmid}/status/current")
+    if r.ok:
+        return r.json().get("data", {}).get("status", "")
+    return ""
+
+
+def vm_tpm_on_storage(mgr, node, vmid, vm_type, storage_id):
+    """True if this VM has a tpmstate disk that currently lives on storage_id.
+
+    TPM state can only be move_disk'd while the VM is stopped (PVE limitation) —
+    used to warn the user up front, before a migrate that would otherwise fail
+    partway through with disks already moved and the TPM device left behind.
+    """
+    vt_ep = "qemu" if vm_type == "qemu" else "lxc"
+    r = mgr._api_get(f"{mgr._base}/nodes/{node}/{vt_ep}/{vmid}/config")
+    if not r.ok:
+        return False
+    cfg = r.json().get("data", {})
+    return any(k.startswith("tpmstate") for k in _disks_on_storage(cfg, storage_id))
 
 
 _PVE_PCT_RE = re.compile(r"\(([\d.]+)\s*%\)")
@@ -149,11 +173,18 @@ def _migrate_one_vm(job_id, vmid, vm_type, node, source_storage_id, target_stora
             _finish_job(db, job_id)
             return
 
+        # TPM state can only be move_disk'd while the VM is stopped (PVE limitation) —
+        # migrate every other disk live first, then briefly stop the VM just for the
+        # TPM device so a running VM with a TPM doesn't fail partway through with its
+        # regular disks already moved and the TPM left stranded on the source storage.
+        tpm_keys  = [k for k in disk_keys if k.startswith("tpmstate")]
+        live_keys = [k for k in disk_keys if k not in tpm_keys]
+
         jlog.log(f"Found {len(disk_keys)} disk(s) to migrate: {', '.join(disk_keys)}")
         n = len(disk_keys)
         last_logged_pct = [-1]
 
-        for i, key in enumerate(disk_keys):
+        def _move_one(i, key):
             check_cancel(job_id)
             is_lxc_vol = key.startswith(_LXC_KEYS)
             action   = "move_volume" if is_lxc_vol else "move_disk"
@@ -182,6 +213,24 @@ def _migrate_one_vm(job_id, vmid, vm_type, node, source_storage_id, target_stora
             last_logged_pct[0] = -1
             jlog.log(f"{key} moved successfully.")
             _set_progress(db, job_id, int((i + 1) / n * 100))
+
+        for i, key in enumerate(live_keys):
+            _move_one(i, key)
+
+        if tpm_keys:
+            was_running = _vm_status(mgr, node, vmid, vm_type) == "running"
+            try:
+                if was_running:
+                    jlog.log("TPM device can only be moved while the VM is stopped — shutting down …")
+                    _vm_stop(mgr, node, vmid, vm_type)
+                    if _vm_status(mgr, node, vmid, vm_type) != "stopped":
+                        raise RuntimeError(f"VM {vmid} did not shut down in time — TPM migration aborted")
+                for i, key in enumerate(tpm_keys, start=len(live_keys)):
+                    _move_one(i, key)
+            finally:
+                if was_running:
+                    jlog.log("Restarting VM …")
+                    _vm_start(mgr, node, vmid, vm_type)
 
         _finish_job(db, job_id)
         jlog.log(f"Migration completed: VM {vmid} → {target_storage_id}")

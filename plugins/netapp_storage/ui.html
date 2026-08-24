@@ -5276,9 +5276,11 @@ async function discardInstantRecovery(sessionId, vmidLabel) {
 }
 
 var _irMigrateSessionId = null;
+var _irMigrateHasTpm = false;
 
 async function openIrMigrateModal(sessionId) {
   _irMigrateSessionId = sessionId;
+  _irMigrateHasTpm = false;
   var sel = document.getElementById('ir_migrate_target');
   sel.innerHTML = '<option value="">— loading… —</option>';
   var modal = document.getElementById('irMigrateModal');
@@ -5297,6 +5299,10 @@ async function openIrMigrateModal(sessionId) {
   } catch(e) {
     sel.innerHTML = '<option value="">— error loading —</option>';
   }
+  try {
+    var t = await apiFetch('instant-recovery/migrate-tpm-check?session_id='+encodeURIComponent(sessionId));
+    _irMigrateHasTpm = !!t.has_tpm;
+  } catch(e) { _irMigrateHasTpm = false; }
 }
 
 function closeIrMigrateModal() {
@@ -5308,6 +5314,13 @@ function closeIrMigrateModal() {
 async function submitIrMigrate() {
   var target = document.getElementById('ir_migrate_target').value;
   if (!target) { toast('Select a target datastore', 'error'); return; }
+  if (_irMigrateHasTpm) {
+    var ok = await uiConfirm(
+      'This VM has a TPM device that can only be moved while stopped.\n\n' +
+      'NaSnap will migrate the other disks live, then briefly stop, migrate the TPM device, and restart the VM automatically. Continue?',
+      'Start Migration', 'btn-primary');
+    if (!ok) return;
+  }
   var btn = document.getElementById('irMigrateSubmitBtn');
   btn.disabled = true;
   try {
@@ -6463,12 +6476,37 @@ function bmBuildSummary() {
   var anyRunning = vmList.some(function(v){ return v.status==='running'; });
   var runNote = document.getElementById('bm_running_note');
   if (runNote) runNote.style.display = anyRunning ? '' : 'none';
+
+  _bmState.tpmVmids = [];
+  var tpmNote = document.getElementById('bm_tpm_note');
+  if (tpmNote) tpmNote.style.display = 'none';
+  apiPost('storage/bulk-migrate-tpm-check', { source_mapping_id:_bmState.sourceMappingId, vmids:vmids })
+    .then(function(r) {
+      if (_bmState.step !== 3) return; // user navigated away before this resolved
+      _bmState.tpmVmids = r.tpm_vmids || [];
+      if (!_bmState.tpmVmids.length || !tpmNote) return;
+      var names = _bmState.tpmVmids.map(function(vid){ return (vmById[vid]||{}).name || ('VM '+vid); });
+      document.getElementById('bm_tpm_note_text').textContent =
+        (names.length===1 ? 'VM ' : names.length+' VMs ') + names.join(', ') + ' has a TPM device that can only migrate offline.';
+      tpmNote.style.display = '';
+    })
+    .catch(function(){ /* best-effort — worst case the confirm dialog just doesn't fire */ });
 }
 
 async function doBulkMigrate() {
   var vmids = _bmSelectedVmidsSorted();
   var vmById = {};
   _bmState.vms.forEach(function(v){ vmById[v.vmid] = v; });
+  if (_bmState.tpmVmids && _bmState.tpmVmids.length) {
+    var tpmNames = _bmState.tpmVmids.map(function(vid){ return (vmById[vid]||{}).name || ('VM '+vid); });
+    var ok = await uiConfirm(
+      (_bmState.tpmVmids.length===1 ? 'VM ' : _bmState.tpmVmids.length+' VMs ') + tpmNames.join(', ') +
+      ' has a TPM device that can only be moved while stopped.\n\n' +
+      'NaSnap will migrate the other disks live, then briefly stop, migrate the TPM device, and restart ' +
+      (_bmState.tpmVmids.length===1 ? 'it' : 'them') + ' automatically. Continue?',
+      'Start Migration', 'btn-primary');
+    if (!ok) return;
+  }
   var maxParallel = parseInt(document.getElementById('bm_max_parallel').value, 10) || 3;
   var btn = document.getElementById('bmSubmitBtn');
   btn.disabled = true; btn.textContent = 'Starting…';
@@ -16330,6 +16368,9 @@ actLogPoll();
       </div>
       <div id="bm_running_note" style="display:none;margin-top:8px;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--muted)">
         Some selected VMs are currently running. Live QEMU disk moves are generally safe; LXC volume moves may have more restrictions depending on mount type.
+      </div>
+      <div id="bm_tpm_note" style="display:none;margin-top:8px;padding:10px 14px;background:rgba(240,173,78,.12);border:1px solid rgba(240,173,78,.35);border-radius:6px;font-size:12px;color:var(--warning,#e09600)">
+        <span id="bm_tpm_note_text"></span> Their other disks migrate live; NaSnap will then briefly shut the VM down, move the TPM device, and start it back up automatically. You'll be asked to confirm this before the migration starts.
       </div>
     </div>
 
