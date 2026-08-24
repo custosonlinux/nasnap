@@ -4681,6 +4681,7 @@ var _actJobLabels  = {
   'migrate_vm':            'Migrate VM',
   'instant_recovery_start':    'Instant Recovery',
   'instant_recovery_migrate':  'Instant Recovery: Storage Migrate',
+  'instant_recovery_cleanup':  'Instant Recovery: Clean up clone',
   'instant_recovery_discard':  'Instant Recovery: Discard',
 };
 
@@ -5250,6 +5251,8 @@ async function loadInstantRecoverySessions() {
       var actions = s.status === 'done'
         ? '<button class="btn btn-ghost btn-sm" onclick="dismissInstantRecovery(\''+s.id+'\')">Remove</button>'
         : '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="openIrMigrateModal(\''+s.id+'\')">Storage Migrate</button> '
+          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' title="VM already migrated by hand (e.g. in Proxmox)? Just remove the temporary clone." '
+            + 'onclick="cleanupIrClone(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Clean Up Clone</button> '
           + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>';
       return '<tr>'
         + '<td>'+esc(String(s.new_vmid))+(s.source_vm_name?' – '+esc(s.source_vm_name):'')+'</td>'
@@ -5268,6 +5271,21 @@ async function dismissInstantRecovery(sessionId) {
   try {
     await apiPost('instant-recovery/dismiss', { session_id: sessionId });
     loadInstantRecoverySessions();
+  } catch(e) { toast(e.message, 'error', e.detail); }
+}
+
+async function cleanupIrClone(sessionId, vmidLabel) {
+  var ok = await uiConfirm(
+    'Clean up the temporary clone for VM '+vmidLabel+'?\n\n'
+    + 'Only removes the FlexClone and temporary storage — the VM itself is never touched or stopped. '
+    + 'Use this if you migrated the VM\'s disks yourself outside NaSnap (e.g. staged it in Proxmox: disks live now, TPM device later). '
+    + 'Fails safely if the VM still has any disk left on the temporary storage.',
+    'Clean Up Clone', 'btn-primary');
+  if (!ok) return;
+  try {
+    var r = await apiPost('instant-recovery/cleanup-clone', { session_id: sessionId });
+    toast('Cleaning up clone …', 'success');
+    if (r.job_id) trackJob(r.job_id, 'Instant Recovery: Clean up clone');
   } catch(e) { toast(e.message, 'error', e.detail); }
 }
 

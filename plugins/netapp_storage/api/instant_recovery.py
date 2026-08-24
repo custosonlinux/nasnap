@@ -4,11 +4,13 @@ Instant Recovery API (NFS)
   instant-recovery/start        POST  – boot a VM straight off a FlexClone (from a snapshot)
   instant-recovery/start-live   POST  – same, but source is a live VM (ad-hoc snapshot first)
   instant-recovery/sessions     GET   – list sessions
-  instant-recovery/migrate      POST  – commit: Storage Migrate onto a permanent datastore
-  instant-recovery/dismiss      POST  – remove a completed (migrated) session from the list
-                                         (VM already permanent, clone already gone — bookkeeping only)
-  instant-recovery/discard      POST  – tear down: destroy the temp VM + FlexClone
-  instant-recovery/status       GET   – job status (?job_id=...)
+  instant-recovery/migrate       POST  – commit: Storage Migrate onto a permanent datastore
+  instant-recovery/cleanup-clone POST  – VM was migrated manually (e.g. in Proxmox) — tear down
+                                          just the FlexClone/temp storage, never touch the VM
+  instant-recovery/dismiss       POST  – remove a completed (migrated) session from the list
+                                          (VM already permanent, clone already gone — bookkeeping only)
+  instant-recovery/discard       POST  – tear down: destroy the temp VM + FlexClone
+  instant-recovery/status        GET   – job status (?job_id=...)
 """
 
 import json
@@ -22,7 +24,7 @@ from nasnap_core.api.plugins import register_plugin_route
 
 from ..core.instant_recovery_engine import (
     start_instant_recovery_job, start_instant_recovery_migrate_job,
-    start_instant_recovery_discard_job,
+    start_instant_recovery_discard_job, start_instant_recovery_cleanup_job,
 )
 
 log = logging.getLogger(__name__)
@@ -174,6 +176,58 @@ def _migrate():
     return {"success": True, "job_id": job_id}
 
 
+def _cleanup_clone():
+    """The user migrated the VM's disks themselves outside NaSnap (e.g. staged
+    it in Proxmox directly: disks live now, TPM device later once nobody's on
+    the VM) — tear down just the FlexClone/temp storage, never touch the VM.
+    Refuses if the VM still has any disk on the temp storage, since deleting
+    that storage out from under a live disk would corrupt the VM."""
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        return {"error": "session_id required"}, 400
+
+    db = get_db()
+    row = db.query_one("SELECT * FROM netapp_instant_recovery_sessions WHERE id=?", (session_id,))
+    if not row:
+        return {"error": "Session not found"}, 404
+    sess = dict(row)
+    if sess["status"] not in ("running",):
+        return {"error": f"Session is not in a cleanable state (status: {sess['status']})"}, 409
+
+    from ..core._helpers import get_mapping, pve_for_mapping
+    from ..core.migrate_engine import _disks_on_storage
+    mapping = get_mapping(db, sess["mapping_id"])
+    try:
+        mgr, _hid = pve_for_mapping(db, mapping)
+        vt_ep = "qemu" if sess["vm_type"] == "qemu" else "lxc"
+        r = mgr._api_get(f"{mgr._base}/nodes/{sess['node']}/{vt_ep}/{sess['new_vmid']}/config")
+    except Exception as exc:
+        return {"error": f"Could not reach the VM to verify its disks: {exc}"}, 502
+    if not r.ok:
+        return {"error": f"Could not read VM config (HTTP {r.status_code}) — "
+                          f"refusing to clean up without confirming no disks remain on the temp storage"}, 502
+    cfg = r.json().get("data", {})
+    remaining = _disks_on_storage(cfg, sess["temp_storage_id"])
+    if remaining:
+        return {"error": f"VM {sess['new_vmid']} still has disk(s) on the temporary storage: "
+                          f"{', '.join(remaining)}. Migrate them (in Proxmox or via Storage Migrate) first."}, 409
+
+    username = request.session.get("user", "system")
+    now = datetime.now(timezone.utc).isoformat()
+    job_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO netapp_jobs (id, job_type, vmid, node, status, created_by, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (job_id, "instant_recovery_cleanup", sess["new_vmid"], sess["node"], "running", username, now),
+    )
+    start_instant_recovery_cleanup_job(job_id, session_id, username)
+    return {"success": True, "job_id": job_id}
+
+
 def _migrate_tpm_check():
     session_id = request.args.get("session_id", "")
     if not session_id:
@@ -266,6 +320,7 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "instant-recovery/sessions", _list_sessions)
     register_plugin_route(PLUGIN_ID, "instant-recovery/migrate", _migrate)
     register_plugin_route(PLUGIN_ID, "instant-recovery/migrate-tpm-check", _migrate_tpm_check)
+    register_plugin_route(PLUGIN_ID, "instant-recovery/cleanup-clone", _cleanup_clone)
     register_plugin_route(PLUGIN_ID, "instant-recovery/dismiss", _dismiss)
     register_plugin_route(PLUGIN_ID, "instant-recovery/discard", _discard)
     register_plugin_route(PLUGIN_ID, "instant-recovery/status", _status)

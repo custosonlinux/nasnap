@@ -411,6 +411,47 @@ def _run_instant_recovery_discard(job_id, session_id, username):
         _reg_unregister(job_id)
 
 
+# ── Clean up clone only (VM already migrated manually, e.g. in Proxmox) ────
+
+def start_instant_recovery_cleanup_job(job_id, session_id, username):
+    t = threading.Thread(target=_run_instant_recovery_cleanup,
+                         args=(job_id, session_id, username), daemon=True)
+    t.start()
+    _reg_register(job_id, t)
+
+
+def _run_instant_recovery_cleanup(job_id, session_id, username):
+    """Tears down just the FlexClone/temp storage — never touches the VM.
+
+    For the case where the user migrated the VM's disks themselves outside
+    NaSnap (e.g. in Proxmox directly: disks live now, TPM device later once
+    nobody's on the VM). The API layer has already confirmed the VM has no
+    disk left on the temp storage before this job is started."""
+    db = get_db()
+    jlog = JobLogger(job_id, db)
+    try:
+        row = db.query_one("SELECT * FROM netapp_instant_recovery_sessions WHERE id=?", (session_id,))
+        if not row:
+            raise RuntimeError("Instant Recovery session not found")
+        sess = dict(row)
+        db.execute("UPDATE netapp_instant_recovery_sessions SET status='discarding' WHERE id=?", (session_id,))
+
+        jlog.log(f"Cleaning up temporary clone for VM {sess['new_vmid']} — the VM itself is left untouched …")
+        _teardown_session_clone(db, sess, jlog)
+
+        db.execute("UPDATE netapp_instant_recovery_sessions SET status='done' WHERE id=?", (session_id,))
+        _finish_job(db, job_id)
+        jlog.log("Clone cleaned up — VM was not touched.")
+    except Exception as exc:
+        log.error(f"[netapp_storage] Instant Recovery cleanup {session_id} failed: {exc}")
+        jlog.log(f"ERROR: {exc}")
+        _fail_job(db, job_id)
+        db.execute("UPDATE netapp_instant_recovery_sessions SET status='running', error=? WHERE id=?",
+                  (str(exc), session_id))
+    finally:
+        _reg_unregister(job_id)
+
+
 # ── Reminder for long-running sessions ──────────────────────────────────────
 
 def check_stale_sessions(db, logger=None):
