@@ -35,7 +35,7 @@ from nasnap_core.core.db import get_db
 
 from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
-    build_ontap_client, build_pve_client,
+    build_ontap_client, pve_for_mapping,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
 )
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
@@ -149,7 +149,7 @@ def _run_instant_recovery(job_id, params, username):
         endpoint = get_endpoint(db, mapping["endpoint_id"])
         client = build_ontap_client(endpoint)
 
-        mgr = build_pve_client(db, snap["pve_cluster_id"])
+        mgr, resolved_hid = pve_for_mapping(db, mapping)
         node = snap.get("node") or mgr.find_vm_node(src_vmid) or ""
         if not node:
             raise RuntimeError("Could not determine a target PVE node")
@@ -225,7 +225,7 @@ def _run_instant_recovery(job_id, params, username):
             "junction_path, ad_hoc_snapshot, status, created_at, created_by) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (session_id, mapping["id"], snapshot_id, src_vmid, vm_entry.get("name", ""),
-             new_vmid, vm_type, snap["pve_cluster_id"], node, temp_storage_id, clone_vol_uuid,
+             new_vmid, vm_type, resolved_hid, node, temp_storage_id, clone_vol_uuid,
              clone_name, junction, 1 if params.get("ad_hoc_snapshot") else 0,
              "running", now, username),
         )
@@ -283,7 +283,7 @@ def _teardown_session_clone(db, sess, jlog):
     mapping = get_mapping(db, sess["mapping_id"])
     endpoint = get_endpoint(db, mapping["endpoint_id"])
     client = build_ontap_client(endpoint)
-    mgr = build_pve_client(db, sess["pve_cluster_id"])
+    mgr, _ = pve_for_mapping(db, mapping)
     pve_host = _resolve_node_host(mgr, sess["node"])
     pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
 
@@ -340,7 +340,8 @@ def _run_instant_recovery_migrate(job_id, session_id, target_storage_id, usernam
     sess = dict(row)
     db.execute("UPDATE netapp_instant_recovery_sessions SET status='migrating' WHERE id=?", (session_id,))
 
-    mgr = build_pve_client(db, sess["pve_cluster_id"])
+    mapping = get_mapping(db, sess["mapping_id"])
+    mgr, _ = pve_for_mapping(db, mapping)
     # _migrate_one_vm manages this job_id's netapp_jobs row lifecycle itself
     # (register/finish/fail/unregister) — same code Bulk Migrate uses.
     _migrate_one_vm(job_id, sess["new_vmid"], sess["vm_type"], sess["node"],
@@ -385,7 +386,8 @@ def _run_instant_recovery_discard(job_id, session_id, username):
         sess = dict(row)
         db.execute("UPDATE netapp_instant_recovery_sessions SET status='discarding' WHERE id=?", (session_id,))
 
-        mgr = build_pve_client(db, sess["pve_cluster_id"])
+        mapping = get_mapping(db, sess["mapping_id"])
+        mgr, _ = pve_for_mapping(db, mapping)
         pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
         pve_host = _resolve_node_host(mgr, sess["node"])
 

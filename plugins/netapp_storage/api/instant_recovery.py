@@ -65,7 +65,7 @@ def _start_live():
         if not str(data.get(field, "")).strip():
             return {"error": f"Required field missing: {field}"}, 400
 
-    from ..core._helpers import get_mapping, build_pve_client
+    from ..core._helpers import get_mapping, pve_for_mapping
     from ..core.snapshot_engine import run_snapshot_sync
 
     db = get_db()
@@ -75,7 +75,7 @@ def _start_live():
 
     node = ""
     try:
-        mgr = build_pve_client(db, mapping["pve_cluster_id"])
+        mgr, _ = pve_for_mapping(db, mapping)
         node = mgr.find_vm_node(src_vmid) or ""
     except Exception as exc:
         log.warning(f"[netapp_storage] Instant Recovery live: node lookup failed: {exc}")

@@ -178,12 +178,16 @@ def _start_clone_live():
 def _get_nextid():
     """Returns the next free VMID from the PVE cluster."""
     pve_cluster_id = request.args.get("pve_cluster_id")
-    if not pve_cluster_id:
+    mapping_id = request.args.get("mapping_id")
+    if not pve_cluster_id and not mapping_id:
         return {"error": "pve_cluster_id required"}, 400
     db = get_db()
     try:
-        from ..core._helpers import build_pve_client
-        mgr = build_pve_client(db, pve_cluster_id)
+        from ..core._helpers import build_pve_client, get_mapping, pve_for_mapping
+        if mapping_id:
+            mgr, _ = pve_for_mapping(db, get_mapping(db, mapping_id))
+        else:
+            mgr = build_pve_client(db, pve_cluster_id)
         r = mgr._api_get(f"{mgr._base}/cluster/nextid")
         if r.ok:
             return {"vmid": r.json().get("data")}

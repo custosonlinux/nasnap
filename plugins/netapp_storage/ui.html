@@ -5184,11 +5184,14 @@ function irSnapChanged() {
 }
 
 async function irLoadNextId() {
-  if (!_irState.pveClusterId) return;
+  if (!_irState.mappingId) return;
   try {
-    var d = await apiFetch('clone/nextid?pve_cluster_id='+encodeURIComponent(_irState.pveClusterId));
+    var d = await apiFetch('clone/nextid?mapping_id='+encodeURIComponent(_irState.mappingId));
     if (d.vmid) document.getElementById('ir_new_vmid').value = d.vmid;
-  } catch(e) {}
+    else toast('Could not auto-suggest a VMID — enter one manually', 'info');
+  } catch(e) {
+    toast('Could not auto-suggest a VMID — enter one manually', 'info');
+  }
 }
 
 async function submitInstantRecovery() {
@@ -5217,7 +5220,6 @@ async function submitInstantRecovery() {
     if (r.job_id) trackJob(r.job_id, 'Instant Recovery: ' + newName);
     closeIrStartModal();
     document.querySelector('[data-tab="instant-recovery"]').click();
-    setTimeout(loadInstantRecoverySessions, 1500);
   } catch(e) {
     toast(e.message, 'error', e.detail);
   } finally {
@@ -5270,7 +5272,6 @@ async function discardInstantRecovery(sessionId, vmidLabel) {
     var r = await apiPost('instant-recovery/discard', { session_id: sessionId });
     toast('Discarding …', 'success');
     if (r.job_id) trackJob(r.job_id, 'Instant Recovery discard');
-    setTimeout(loadInstantRecoverySessions, 1500);
   } catch(e) { toast(e.message, 'error', e.detail); }
 }
 
@@ -5315,7 +5316,6 @@ async function submitIrMigrate() {
     toast('Storage Migrate started', 'success');
     if (r.job_id) trackJob(r.job_id, 'Instant Recovery migrate');
     closeIrMigrateModal();
-    setTimeout(loadInstantRecoverySessions, 1500);
   } catch(e) {
     toast(e.message, 'error', e.detail);
   } finally {
@@ -13984,6 +13984,10 @@ function _isStorageJob(label) {
   return /^(Provision|Remove|Resize|Add host|Mount|SnapMirror):/.test(label || '');
 }
 
+function _isIrJob(label) {
+  return /^Instant Recovery/.test(label || '');
+}
+
 function trackJob(jobId, label) {
   if (!jobId || _activeJobs[jobId]) return;
   _activeJobs[jobId] = { label: label, status: 'running', pct: 0, lastLog: '' };
@@ -14008,9 +14012,11 @@ async function _pollJob(jobId) {
       setTimeout(function() { _pollJob(jobId); }, 2000);
     } else if (d.status === 'done') {
       if (_isStorageJob(entry.label)) loadStorageUnified();
+      if (_isIrJob(entry.label)) loadInstantRecoverySessions();
       setTimeout(function() { delete _activeJobs[jobId]; _renderJobTrackers(); }, 6000);
     } else if (d.status === 'failed') {
       if (_isStorageJob(entry.label)) loadStorageUnified();
+      if (_isIrJob(entry.label)) loadInstantRecoverySessions();
       setTimeout(function() { if (_activeJobs[jobId]) { delete _activeJobs[jobId]; _renderJobTrackers(); } }, 30000);
     }
   } catch(e) {
