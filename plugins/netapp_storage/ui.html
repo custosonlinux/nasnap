@@ -5249,11 +5249,14 @@ async function loadInstantRecoverySessions() {
       var stale = s.last_reminder_at
         ? ' <span title="Running a while — consider committing or discarding" style="color:var(--warning)">⚠</span>' : '';
       var actions = s.status === 'done'
-        ? '<button class="btn btn-ghost btn-sm" onclick="dismissInstantRecovery(\''+s.id+'\')">Remove</button>'
-        : '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="openIrMigrateModal(\''+s.id+'\')">Storage Migrate</button> '
+        ? '<button class="btn btn-ghost btn-sm" title="Clear this entry from the list. The VM and its disks are already permanent — nothing left to clean up." '
+          + 'onclick="dismissInstantRecovery(\''+s.id+'\')">Remove</button>'
+        : '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' title="Commit: move the VM\'s disks onto a permanent datastore live, then remove the temporary clone." '
+            + 'onclick="openIrMigrateModal(\''+s.id+'\')">Storage Migrate</button> '
           + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' title="VM already migrated by hand (e.g. in Proxmox)? Just remove the temporary clone." '
             + 'onclick="cleanupIrClone(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Clean Up Clone</button> '
-          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>';
+          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' title="Discard: stop and delete the temporary VM, then remove the clone. No lasting footprint." '
+            + 'onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>';
       return '<tr>'
         + '<td>'+esc(String(s.new_vmid))+(s.source_vm_name?' – '+esc(s.source_vm_name):'')+'</td>'
         + '<td>VM '+esc(String(s.source_vmid))+'</td>'
