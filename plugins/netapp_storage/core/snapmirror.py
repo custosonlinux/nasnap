@@ -293,7 +293,7 @@ def get_secondary_snapshots(db, relationship_id):
     Returns snapshots on the secondary volume.
     Requires dest_endpoint_id and dest_volume_uuid to be set.
     """
-    from ._helpers import get_endpoint, build_ontap_client
+    from ._helpers import get_endpoint, build_ontap_client, is_system_snapshot
 
     rel = db.query_one(
         "SELECT * FROM netapp_snapmirror_relationships WHERE id=?", (relationship_id,)
@@ -309,7 +309,8 @@ def get_secondary_snapshots(db, relationship_id):
 
     ep = get_endpoint(db, rel["dest_endpoint_id"])
     client = build_ontap_client(ep)
-    snaps = client.list_snapshots(rel["dest_volume_uuid"])
+    snaps = [s for s in client.list_snapshots(rel["dest_volume_uuid"])
+             if not is_system_snapshot(s.get("name", ""))]
     return snaps, rel
 
 

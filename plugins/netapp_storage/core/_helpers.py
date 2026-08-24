@@ -24,6 +24,17 @@ class JobCancelledError(RuntimeError):
     """Raised inside a job thread when a cancel request is detected."""
 
 
+# ONTAP-internal snapshots that are never meaningful to show or usable for
+# restore/clone/instant-recovery — SnapMirror transfer markers and SVM-DR
+# baselines/updates. Used only at display/merge layers; callers that need the
+# full raw ONTAP list (retention GC, exact-name lookups) must not use this.
+_SYSTEM_SNAPSHOT_PREFIXES = ("snapmirror.", "vserverdr")
+
+
+def is_system_snapshot(name: str) -> bool:
+    return (name or "").startswith(_SYSTEM_SNAPSHOT_PREFIXES)
+
+
 def check_cancel(job_id: str) -> None:
     """Raise JobCancelledError if a cancel has been requested for this job."""
     from ._job_registry import is_cancel_requested

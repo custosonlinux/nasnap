@@ -5219,8 +5219,11 @@ async function submitInstantRecovery() {
                   new_name:newName, network_isolated:netIso };
     } else {
       endpoint = 'instant-recovery/start';
-      payload = { snapshot_id:_irState.snap.id, src_vmid:_irState.vmid, new_vmid:newVmid,
-                  new_name:newName, network_isolated:netIso };
+      payload = _irState.snap.source === 'ontap_native'
+        ? { native:true, mapping_id:_irState.mappingId, snap_name:_irState.snap.snap_name,
+            src_vmid:_irState.vmid, new_vmid:newVmid, new_name:newName, network_isolated:netIso }
+        : { snapshot_id:_irState.snap.id, src_vmid:_irState.vmid, new_vmid:newVmid,
+            new_name:newName, network_isolated:netIso };
     }
     var r = await apiPost(endpoint, payload);
     toast('Instant Recovery starting …', 'success');
@@ -5264,8 +5267,8 @@ async function loadInstantRecoverySessions() {
           + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' title="Discard: stop and delete the temporary VM, then remove the clone. No lasting footprint." '
             + 'onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>';
       return '<tr>'
-        + '<td>'+esc(String(s.new_vmid))+(s.source_vm_name?' – '+esc(s.source_vm_name):'')+'</td>'
-        + '<td>VM '+esc(String(s.source_vmid))+'</td>'
+        + '<td>'+esc(String(s.new_vmid))+(s.new_name?' – '+esc(s.new_name):'')+'</td>'
+        + '<td>VM '+esc(String(s.source_vmid))+(s.source_vm_name?' ('+esc(s.source_vm_name)+')':'')+'</td>'
         + '<td>'+fmtDateRel(s.created_at)+stale+'</td>'
         + '<td>'+(_irStatusLabels[s.status]||esc(s.status))+(s.error?' <span title="'+esc(s.error)+'" style="color:var(--error)">⚠</span>':'')+'</td>'
         + '<td>'+actions+'</td>'

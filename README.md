@@ -836,7 +836,7 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `instant-recovery/start` | Boot a VM off a FlexClone of a snapshot |
+| POST | `instant-recovery/start` | Boot a VM off a FlexClone of a snapshot (plugin-managed or ONTAP-native via `native: true`) |
 | POST | `instant-recovery/start-live` | Same, but source is a live VM (ad-hoc snapshot taken first) |
 | GET | `instant-recovery/sessions` | List active/recent sessions |
 | POST | `instant-recovery/migrate` | Commit: Storage Migrate onto a permanent datastore |
@@ -1080,6 +1080,9 @@ DEBUG=1 .venv/bin/python app.py
 - **Storage Migrate / Instant Recovery — PVE host fallback** — resolving the PVE client for a volume mapping now falls back to any other configured host in the same cluster if the mapping's own `pve_cluster_id` is stale (e.g. that host was removed from Settings after the mapping was created), instead of hard-failing.
 - **Instant Recovery — session list refresh race** — the session list refreshed on a fixed 1.5 s timer started right after launching the (asynchronous) start/discard/migrate job, so a newly created session often didn't appear until a much later manual refresh. Refresh is now triggered by the job tracker on actual job completion instead of a guessed delay.
 - **Default theme changed to Liquid Glass** — new installs (and any session without a saved theme preference) now default to the Liquid Glass theme instead of dark.
+- **Instant Recovery now supports ONTAP-native snapshots** — selecting a snapshot taken outside NaSnap (e.g. via System Manager) previously failed with "Snapshot not found" at submit time; it now works the same way Restore and Clone already handle native snapshots (ad-hoc placeholder row, manifest resolved from the snapshot's own `.netapp-snapmanifest` tree).
+- **System snapshots (`vserverdr*`, `snapmirror.*`) filtered everywhere** — previously only the Snapshots tab excluded `snapmirror.`-prefixed snapshots, and not SVM-DR `vserverdr*` ones; DR-plan and SnapMirror-secondary snapshot browsing didn't filter either. Now centralized and applied consistently.
+- **Instant Recovery session list showed the wrong VM name** — the list displayed the *source* VM's name instead of the name actually assigned to the new VM in the wizard.
 
 ### v1.9 — Planned
 

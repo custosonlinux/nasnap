@@ -1,7 +1,8 @@
 """
 Instant Recovery API (NFS)
 
-  instant-recovery/start        POST  – boot a VM straight off a FlexClone (from a snapshot)
+  instant-recovery/start        POST  – boot a VM straight off a FlexClone (from a snapshot,
+                                         plugin-managed or ONTAP-native via `native: true`)
   instant-recovery/start-live   POST  – same, but source is a live VM (ad-hoc snapshot first)
   instant-recovery/sessions     GET   – list sessions
   instant-recovery/migrate       POST  – commit: Storage Migrate onto a permanent datastore
@@ -42,18 +43,51 @@ def _start():
     if err:
         return err
     data = request.get_json() or {}
-    for field in ("snapshot_id", "src_vmid", "new_vmid"):
-        if not str(data.get(field, "")).strip():
-            return {"error": f"Required field missing: {field}"}, 400
-
     db = get_db()
-    snap = db.query_one("SELECT id, status FROM netapp_snapshots WHERE id=?", (data["snapshot_id"],))
-    if not snap:
-        return {"error": "Snapshot not found"}, 404
-    if snap["status"] != "done":
-        return {"error": f"Snapshot not ready (status: {snap['status']})"}, 409
 
-    return _launch(db, data["snapshot_id"], data, ad_hoc=False)
+    # ── ONTAP-native snapshot (not in the plugin DB) ────────────────────
+    if data.get("native"):
+        for field in ("mapping_id", "snap_name", "src_vmid", "new_vmid"):
+            if not str(data.get(field, "")).strip():
+                return {"error": f"Required field missing: {field}"}, 400
+
+        from ..core._helpers import get_mapping, load_plugin_config
+        mapping = get_mapping(db, data["mapping_id"])
+        if mapping.get("storage_protocol", "nfs") != "nfs":
+            return {"error": "Instant Recovery currently supports NFS datastores only"}, 400
+
+        snap_name = data["snap_name"]
+        cfg = load_plugin_config()
+        manifest_subdir = cfg.get("manifest_subdir", ".netapp-snapmanifest")
+        manifest_path = (
+            f"{mapping['nfs_mount_path']}/.snapshot/{snap_name}"
+            f"/{manifest_subdir}/{snap_name}/manifest.json"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        snapshot_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO netapp_snapshots "
+            "(id, mapping_id, snap_name, consistency, pve_cluster_id, node, "
+            "vmids_json, vm_types_json, manifest_path, manifest_json, label, status, created_at, completed_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (snapshot_id, data["mapping_id"], snap_name, "–",
+             mapping["pve_cluster_id"], "",
+             "[]", "{}", manifest_path, "", "", "done", now, now),
+        )
+
+    # ── Plugin-managed snapshot (already in the DB) ─────────────────────
+    else:
+        for field in ("snapshot_id", "src_vmid", "new_vmid"):
+            if not str(data.get(field, "")).strip():
+                return {"error": f"Required field missing: {field}"}, 400
+        snapshot_id = data["snapshot_id"]
+        snap = db.query_one("SELECT id, status FROM netapp_snapshots WHERE id=?", (snapshot_id,))
+        if not snap:
+            return {"error": "Snapshot not found"}, 404
+        if snap["status"] != "done":
+            return {"error": f"Snapshot not ready (status: {snap['status']})"}, 409
+
+    return _launch(db, snapshot_id, data, ad_hoc=False)
 
 
 def _start_live():

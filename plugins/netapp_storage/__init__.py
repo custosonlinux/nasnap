@@ -168,6 +168,7 @@ def _init_db():
         _add_column_if_missing(db, "netapp_volume_mapping",     "snapshot_locking_enabled","INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "netapp_snapmirror_relationships", "policy_name", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(db, "netapp_provisioned_datastores",   "is_flexgroup", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(db, "netapp_instant_recovery_sessions", "new_name",    "TEXT NOT NULL DEFAULT ''")
 
         log.info("[netapp_storage] DB tables initialised")
     except Exception as e:

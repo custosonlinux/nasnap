@@ -374,6 +374,7 @@ CREATE TABLE IF NOT EXISTS netapp_instant_recovery_sessions (
     source_vmid       INTEGER NOT NULL DEFAULT 0,
     source_vm_name    TEXT NOT NULL DEFAULT '',
     new_vmid          INTEGER NOT NULL DEFAULT 0,
+    new_name          TEXT NOT NULL DEFAULT '',
     vm_type           TEXT NOT NULL DEFAULT 'qemu',
     pve_cluster_id    TEXT NOT NULL DEFAULT '',
     node              TEXT NOT NULL DEFAULT '',

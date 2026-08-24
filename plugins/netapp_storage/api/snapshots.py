@@ -31,7 +31,7 @@ from flask import request
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
-from ..core._helpers import get_endpoint, build_ontap_client, load_plugin_config
+from ..core._helpers import get_endpoint, build_ontap_client, load_plugin_config, is_system_snapshot
 from ..core.snapshot_engine import start_snapshot_job
 
 log = logging.getLogger(__name__)
@@ -583,7 +583,7 @@ def _list_snapshots():
             client = build_ontap_client(ep)
             ontap_snaps = client.list_snapshots(m["volume_uuid"])
             for s in ontap_snaps:
-                if s["name"].startswith("snapmirror."):
+                if is_system_snapshot(s["name"]):
                     continue
                 key = (m["volume_uuid"], s["name"])
                 if key in db_keys or key in seen_native_keys:

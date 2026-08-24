@@ -968,13 +968,14 @@ def _list_dr_snapshots():
         return {"error": "Entry not found"}, 404
     entry = dict(entry)
     try:
-        from ..core._helpers import get_endpoint, build_ontap_client
+        from ..core._helpers import get_endpoint, build_ontap_client, is_system_snapshot
         dr_ep = get_endpoint(db, entry["dr_endpoint_id"])
         client = build_ontap_client(dr_ep)
         vol = client.get_volume_by_name(entry["dr_svm"], entry["dr_volume"])
         vol_uuid = vol.get("uuid", "")
         snaps = client.list_snapshots(vol_uuid)
-        result = [{"name": s.get("name", ""), "created": s.get("create_time", "")} for s in (snaps or [])]
+        result = [{"name": s.get("name", ""), "created": s.get("create_time", "")}
+                 for s in (snaps or []) if not is_system_snapshot(s.get("name", ""))]
         result.sort(key=lambda s: s["created"], reverse=True)
         return jsonify(result)
     except Exception as exc:

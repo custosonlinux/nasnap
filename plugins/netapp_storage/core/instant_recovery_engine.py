@@ -220,12 +220,12 @@ def _run_instant_recovery(job_id, params, username):
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "INSERT INTO netapp_instant_recovery_sessions "
-            "(id, mapping_id, snapshot_id, source_vmid, source_vm_name, new_vmid, vm_type, "
+            "(id, mapping_id, snapshot_id, source_vmid, source_vm_name, new_vmid, new_name, vm_type, "
             "pve_cluster_id, node, temp_storage_id, clone_volume_uuid, clone_volume_name, "
             "junction_path, ad_hoc_snapshot, status, created_at, created_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (session_id, mapping["id"], snapshot_id, src_vmid, vm_entry.get("name", ""),
-             new_vmid, vm_type, resolved_hid, node, temp_storage_id, clone_vol_uuid,
+             new_vmid, new_name, vm_type, resolved_hid, node, temp_storage_id, clone_vol_uuid,
              clone_name, junction, 1 if params.get("ad_hoc_snapshot") else 0,
              "running", now, username),
         )
