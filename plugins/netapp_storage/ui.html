@@ -16590,7 +16590,7 @@ actLogPoll();
     <!-- Bottom action bar: TC-style F-key buttons -->
     <div style="padding:5px 12px;background:var(--bg-alt);border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" id="sfrDlBtn"    onclick="sfrDownload()"    disabled title="Download selected file(s)/dir — a single file downloads as-is, anything else is packed into an archive">↓ Download</button>
-      <button class="btn btn-primary btn-sm" id="sfrCopyBtn" onclick="sfrCopyToVm()"   disabled title="Copy selected files/dirs to VM (requires QGA; Linux VMs only for multi/dir)">F5 Copy → VM</button>
+      <button class="btn btn-primary btn-sm" id="sfrCopyBtn" onclick="sfrCopyToVm()"   disabled title="Copy selected files/dirs to VM (requires QGA; Linux VMs only for multi/dir)">Copy to VM</button>
       <div style="flex:1"></div>
       <button class="btn btn-ghost btn-sm" onclick="sfrVmNewFolder()" title="Create new folder in VM">New Folder</button>
       <button class="btn btn-danger btn-sm" id="sfrVmDelBtn" onclick="sfrVmDelete()" disabled title="Delete selected in VM">Delete</button>
@@ -17287,11 +17287,11 @@ function _sfrUpdateActions() {
     ? 'Multi-file / directory copy is not supported for Windows VMs — select a single file instead'
     : 'Copy selected files/dirs to VM (requires QGA; Linux VMs only for multi/dir)';
   if (selCount > 1) {
-    copyBtn.textContent = 'F5 Copy ' + selCount + ' → VM';
+    copyBtn.textContent = 'Copy ' + selCount + ' to VM';
   } else if (selCount === 1 && selVals[0].type === 'd') {
-    copyBtn.textContent = 'F5 Copy dir → VM';
+    copyBtn.textContent = 'Copy dir to VM';
   } else {
-    copyBtn.textContent = 'F5 Copy → VM';
+    copyBtn.textContent = 'Copy to VM';
   }
 }
 
