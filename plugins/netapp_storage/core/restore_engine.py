@@ -81,7 +81,7 @@ def _run_restore_sfsr(job_id, params, username):
         _vm_stop(mgr, node, vmid, vm_type)
 
         # ── Manifest lesen ────────────────────────────────────────────
-        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key)
+        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key, vmid=vmid)
         vm_entry = _find_vm_in_manifest(manifest, vmid)
         disks = vm_entry.get("disks", [])
         snap_name = snap["snap_name"]
@@ -204,7 +204,7 @@ def _run_restore_flexclone(job_id, params, username):
         _set_progress(db, job_id, 35)
 
         # ── Disk-Dateien kopieren ─────────────────────────────────────
-        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key)
+        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key, vmid=vmid)
         vm_entry = _find_vm_in_manifest(manifest, vmid)
         disks = vm_entry.get("disks", [])
         target_base = mapping["nfs_mount_path"]
@@ -666,7 +666,7 @@ def _run_restore_san_single(job_id, params, username):
 
         # ── 1. Load manifest → disk list ─────────────────────────────
         jlog.log("Reading manifest …")
-        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key)
+        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key, vmid=vmid)
         vm_entry = _find_vm_in_manifest(manifest, vmid)
         disks    = vm_entry.get("disks", [])
         if not disks:
@@ -998,7 +998,7 @@ def _run_restore_dr_iscsi(job_id, params, username, db, jlog, mapping):
         if snap_row:
             snap = dict(snap_row)
             manifest = _load_manifest(snap, mapping, node, mgr,
-                                      pve_host, pve_user, pve_pass, pve_key)
+                                      pve_host, pve_user, pve_pass, pve_key, vmid=vmid)
             vm_type  = json.loads(snap.get("vm_types_json") or "{}").get(str(vmid), vm_type)
         else:
             jlog.log("Snapshot record not found in DB — will restore all LVs found in clone VG.")
@@ -1281,7 +1281,7 @@ def _run_restore_dr_nvme(job_id, params, username, db, jlog, mapping):
         if snap_row:
             snap     = dict(snap_row)
             manifest = _load_manifest(snap, mapping, node, mgr,
-                                      pve_host, pve_user, pve_pass, pve_key)
+                                      pve_host, pve_user, pve_pass, pve_key, vmid=vmid)
             vm_type  = json.loads(snap.get("vm_types_json") or "{}").get(str(vmid), vm_type)
         else:
             jlog.log("Snapshot record not found in DB — will restore all LVs found in clone VG.")
@@ -1771,8 +1771,27 @@ def _vm_start(mgr, node, vmid, vm_type="qemu"):
         log.warning(f"[netapp_storage] VM-Start {vmid}: {e}")
 
 
-def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key):
-    """Read the manifest — exact NFS path, then DB fallback, then search in .snapshot directory."""
+def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key, vmid=None, jlog=None):
+    """Read the manifest — exact NFS path, then DB fallback, then search in .snapshot
+    directory, then (if `vmid` is given) the current live manifest tree.
+
+    When `vmid` is given, a manifest is only returned immediately if it actually
+    contains that VM; otherwise it's kept as the best candidate so far and the next,
+    wider fallback tier is tried. This matters for ONTAP-native snapshots (hourly.N,
+    anti-ransomware, etc.): the .snapshot-scoped search only ever sees NaSnap
+    manifests that already existed at the moment that particular snapshot was frozen
+    — a VM added to NaSnap after that point is invisible there, even though the
+    volume's current (live) manifest history knows about it.
+    """
+    best = None
+
+    def _has_vm(m):
+        return vmid is None or any(e.get("vmid") == vmid for e in (m or {}).get("vms", []))
+
+    def _log(msg):
+        if jlog:
+            jlog.log(msg)
+
     manifest_path = snap.get("manifest_path", "")
 
     # SAN snapshots: manifest is on the snapmanifest LV but always also in the DB.
@@ -1791,16 +1810,25 @@ def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_k
         out = ssh_run(pve_host, pve_user, pve_pass,
                       f"cat {shlex.quote(manifest_path)}",
                       capture=True, key_material=pve_key)
-        return json.loads(out)
+        m = json.loads(out)
+        if _has_vm(m):
+            return m
+        _log(f"Manifest at {manifest_path} doesn't list VM {vmid} — trying other sources …")
+        best = m
     except Exception as ssh_err:
         log.warning(f"[netapp_storage] manifest exact path failed: {ssh_err}")
 
     # DB fallback
     manifest_json = snap.get("manifest_json", "")
     if manifest_json:
-        return json.loads(manifest_json)
+        m = json.loads(manifest_json)
+        if _has_vm(m):
+            return m
+        if best is None:
+            _log(f"DB-stored manifest doesn't list VM {vmid} either — trying other sources …")
+        best = best or m
 
-    # Search for most recent manifest in .snapshot directory.
+    # Search for most recent manifest in .snapshot directory (frozen at snapshot time).
     # Useful for ONTAP-native snapshots (hourly.0, daily.0 etc.) that contain
     # all NaSnap manifests present at that time.
     snap_manifest_dir = os.path.dirname(os.path.dirname(manifest_path))
@@ -1816,10 +1844,60 @@ def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_k
                                f"cat {shlex.quote(found)}",
                                capture=True, key_material=pve_key)
                 log.info(f"[netapp_storage] Manifest found via search: {found}")
-                return json.loads(out2)
+                m = json.loads(out2)
+                if _has_vm(m):
+                    _log(f"Using manifest from this snapshot's own history: {found}")
+                    return m
+                _log(f"This snapshot's own manifest history doesn't list VM {vmid} either "
+                    f"(latest found: {found}) — checking the live manifest tree …")
+                best = best or m
+            else:
+                _log(f"No manifest found in this snapshot's own history ({snap_manifest_dir}) — "
+                    f"checking the live manifest tree …")
         except Exception as find_err:
             log.warning(f"[netapp_storage] manifest search failed: {find_err}")
+            _log(f"WARNING: could not search this snapshot's manifest history: {find_err}")
 
+        # VM still not in this snapshot's own frozen manifest history — it may have
+        # been added to NaSnap after this particular snapshot was taken (common for
+        # ONTAP-native snapshots that NaSnap doesn't control the timing of). Fall
+        # back to the live manifest tree, which has every manifest written since,
+        # not just the ones that existed when this snapshot was frozen.
+        if vmid is not None:
+            try:
+                from ._helpers import load_plugin_config
+                manifest_subdir = load_plugin_config().get("manifest_subdir", ".netapp-snapmanifest")
+                live_dir = f"{mapping['nfs_mount_path']}/{manifest_subdir}"
+                out = ssh_run(pve_host, pve_user, pve_pass,
+                              f"find {shlex.quote(live_dir)} -name manifest.json 2>/dev/null "
+                              f"| sort | tail -1",
+                              capture=True, key_material=pve_key)
+                found = out.strip()
+                if found:
+                    out2 = ssh_run(pve_host, pve_user, pve_pass,
+                                   f"cat {shlex.quote(found)}",
+                                   capture=True, key_material=pve_key)
+                    m = json.loads(out2)
+                    if _has_vm(m):
+                        log.info(f"[netapp_storage] VM {vmid} not in snapshot '{snap.get('snap_name','')}'s "
+                                f"own manifest history — using latest live manifest instead: {found}")
+                        _log(f"VM {vmid} not in this snapshot's own history — using the current live "
+                            f"manifest instead: {found}")
+                        return m
+                    _log(f"VM {vmid} not in the current live manifest either (latest: {found}).")
+                    best = best or m
+                else:
+                    _log(f"No manifest found in the live manifest tree ({live_dir}) either.")
+            except Exception as live_err:
+                log.warning(f"[netapp_storage] live manifest fallback failed: {live_err}")
+                _log(f"WARNING: could not check the live manifest tree: {live_err}")
+
+    if best is not None:
+        # best is only ever set when vmid was given (see _has_vm) and every manifest
+        # found so far lacked it — surface that clearly instead of silently guessing.
+        _log(f"WARNING: no manifest lists VM {vmid} — falling back to the closest one found; "
+            f"its disk layout may be missing or wrong for this VM.")
+        return best
     raise RuntimeError(f"Manifest not found in: {snap_manifest_dir}")
 
 

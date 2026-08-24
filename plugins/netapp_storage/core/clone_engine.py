@@ -92,7 +92,7 @@ def _run_clone(job_id, params, username):
 
         # ── Manifest lesen ─────────────────────────────────────────────
         jlog.log("Reading manifest …")
-        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key)
+        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key, vmid=src_vmid)
         vm_entry = _find_vm_in_manifest(manifest, src_vmid)
         disks    = vm_entry.get("disks", [])
         snap_name = snap["snap_name"]
@@ -420,7 +420,7 @@ def _run_clone_san(job_id, params, username):
         disks    = None
 
         try:
-            manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key)
+            manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key, vmid=src_vmid)
             vm_entry = _find_vm_in_manifest(manifest, src_vmid)
             disks    = vm_entry.get("disks", [])
         except RuntimeError:

@@ -161,7 +161,8 @@ def _run_instant_recovery(job_id, params, username):
         snap_name = snap["snap_name"]
 
         jlog.log("Reading manifest …")
-        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key)
+        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key,
+                                  vmid=src_vmid, jlog=jlog)
         vm_entry = _find_vm_in_manifest(manifest, src_vmid)
         if not vm_entry.get("disks"):
             raise RuntimeError(f"No disks in manifest for VM {src_vmid}")
