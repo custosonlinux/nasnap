@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Instant Recovery (NFS)** — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume, no data copied up front. New **VMs** sidebar group with an Instant Recovery start wizard and a tab listing active/recent sessions. Works from a snapshot or from a live VM (ad-hoc snapshot taken first). Optional network-isolated boot (fresh random MACs, `link_down=1`) avoids IP/MAC collisions with the still-live source. A session is committed via **Storage Migrate** (onto a permanent datastore, reusing Bulk Migrate's per-disk `move_disk`/`move_volume` mechanism) or **Discarded** (temporary VM + FlexClone torn down immediately). Sessions running past 3 days get a log reminder via the hourly Detect & Scan job.
+- **Storage Migrate — TPM device handling** — Bulk Migrate and Instant Recovery's commit step now migrate every non-TPM disk live first, then — only if a TPM device (`tpmstate0`) is present — briefly stop the VM, move the TPM state (PVE requires this while stopped), and restart it automatically. A precheck (`storage/bulk-migrate-tpm-check`, `instant-recovery/migrate-tpm-check`) warns up front and asks for explicit confirmation before the migration starts if any selected VM has a TPM device.
+
+### Fixed
+
+- **Storage Migrate / Instant Recovery — TPM device left stranded** — previously the TPM disk was migrated the same way as regular disks; on a running VM the move fails (PVE only supports it offline), so the job reported failed even though the regular disks had already been moved successfully. See "TPM device handling" above.
+- **Storage Migrate / Instant Recovery — stale PVE host reference** — resolving the PVE client for a volume mapping now falls back to any other configured host in the same cluster if the mapping's own `pve_cluster_id` no longer resolves (e.g. that host was removed from Settings after the mapping was created), instead of hard-failing the whole operation.
+- **Instant Recovery — session list refresh race** — the session list refreshed on a fixed 1.5 s timer started right after launching the (asynchronous) start/discard/migrate job; on anything slower than 1.5 s the newly created/updated session didn't appear until a later manual refresh. Refresh is now triggered by the job tracker on actual job completion.
+- **Default theme changed to Liquid Glass** — new installs (and any session without a saved theme preference) now default to the Liquid Glass theme instead of dark.
+
 ---
 
 ## [1.8.0] — 2026-08-21

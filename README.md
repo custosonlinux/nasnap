@@ -17,6 +17,7 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Snapshot** any VM or set of VMs on a shared ONTAP datastore — crash-consistent, app-consistent (QEMU guest agent), or suspend-based.
 - **Restore** individual VMs (SFSR for NFS, LV copy for SAN) or revert an entire datastore to a snapshot in seconds (volume revert).
 - **Clone** VMs from any snapshot to a new VMID with fresh MAC addresses.
+- **Instant Recovery** *(Alpha, NFS only)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume, with no data copied up front. Test the VM (optionally network-isolated with fresh MACs to avoid IP/MAC collisions with the source), then either **Storage Migrate** it onto a permanent datastore live (falling back to a brief automatic stop/restart only if the VM has a TPM device, which ONTAP/PVE can't move while running) or **Discard** it to tear the clone down with no lasting footprint. Also works from a live VM (takes a small ad-hoc snapshot first). Sessions left running past 3 days get a log reminder to commit or discard.
 - **Protect datastores with Protection Plans** — assign multiple datastores to a single plan with unified scheduling, retention, hooks, and email notifications. Each datastore runs as an independent job (Veeam-style); a consolidated email summarises all results per plan run.
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
 - **Set up SnapMirror/SnapVault replication in one click** *(Alpha)* — pick a second registered NetApp system and NaSnap automatically peers the clusters and SVMs (if not already peered), then creates the relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available at provisioning time or retroactively via the datastore's **SnapMirror / Vault** action, which also handles policy changes and safely breaking/removing a relationship (optionally keeping the destination volume for restore).
@@ -51,6 +52,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
 | VM Clone from snapshot | ✅ | 🟡 Beta | 🟡 Beta¹ |
+| Instant Recovery (boot from FlexClone, commit or discard) | 🟠 Alpha | ❌ n/a | ❌ n/a |
 | Clone from ONTAP-native snapshots | ✅ | 🟡 Beta | 🟡 Beta |
 | Multi-VM snapshot | ✅ | 🟡 Beta | 🟡 Beta |
 | ONTAP-native snapshot visibility | ✅ | 🟡 Beta | 🟡 Beta |
@@ -827,8 +829,20 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | GET | `restore/status` | Restore job status |
 | POST | `clone/start` | Start clone job |
 | POST | `clone/dr-start` | Start DR clone job |
-| GET | `clone/nextid` | Suggest next free VMID |
+| GET | `clone/nextid` | Suggest next free VMID (`mapping_id` or `pve_cluster_id`) |
 | GET | `clone/nodes` | List available Proxmox nodes |
+
+### Instant Recovery (NFS)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `instant-recovery/start` | Boot a VM off a FlexClone of a snapshot |
+| POST | `instant-recovery/start-live` | Same, but source is a live VM (ad-hoc snapshot taken first) |
+| GET | `instant-recovery/sessions` | List active/recent sessions |
+| POST | `instant-recovery/migrate` | Commit: Storage Migrate onto a permanent datastore |
+| GET | `instant-recovery/migrate-tpm-check` | Whether a session's VM has a TPM device requiring a brief stop/restart to migrate |
+| POST | `instant-recovery/discard` | Tear down: destroy the temporary VM + FlexClone |
+| GET | `instant-recovery/status` | Job status (`?job_id=`) |
 
 ### Schedules & Jobs
 
@@ -877,6 +891,7 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | GET | `provisioning/datastores/index` | Read `.nasnap/index.json` from a datastore (`?mapping_id=` or `?pve_storage_id=`) |
 | POST | `provisioning/datastores/scan` | Scan index and reconcile snapshots into DB (single datastore) |
 | POST | `storage/bulk-migrate-start` | Start a Bulk Migrate job (move a set of VMs from one datastore to another) |
+| POST | `storage/bulk-migrate-tpm-check` | Which of the given VMs have a TPM device on the source storage (needs a brief stop/restart, not a live move) |
 | POST | `provisioning/datastores/scan-all` | Scan all NFS datastores in the background and reconcile |
 | POST | `provisioning/datastores/reindex` | Force-rewrite `.nasnap/index.json` from DB records |
 | GET/POST | `provisioning/plugin-settings` | Read/write plugin-wide settings (`auto_scan_on_startup`) |
@@ -1052,6 +1067,14 @@ DEBUG=1 .venv/bin/python app.py
 - **Snapshot Garbage Collection** — automatically removes database records for snapshots ONTAP has already rotated out, fixing snapshot counts that could balloon into the thousands despite ONTAP's 1024-per-volume cap.
 - **Provisioning — reuse an existing NFS export policy** — Advanced option in the New Datastore wizard to select an existing SVM export policy instead of always creating a dedicated one.
 - **VM Restore & Clone — instant cached list** with background refresh instead of blocking on load every time.
+
+### Unreleased (post-1.8.0)
+
+- **Instant Recovery (NFS)** *(Alpha)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume — no data copy up front, the clone only diverges once written to. New **VMs** sidebar group hosts the wizard and the Instant Recovery tab (active/recent sessions). Works from either a snapshot or a live VM (an ad-hoc snapshot is taken first). An optional network-isolated boot assigns fresh random MACs and sets `link_down=1` so the clone can't collide with the still-live source VM. Once tested, a session is either **Storage Migrated** onto a permanent datastore (reuses the same per-disk `move_disk`/`move_volume` mechanism as Bulk Migrate) or **Discarded**, tearing down the temporary VM and FlexClone immediately. Sessions left running past 3 days get a log reminder, surfaced during the hourly Detect & Scan job.
+- **Storage Migrate — TPM devices** — PVE can only move a `tpmstate0` disk while the VM is stopped; Bulk Migrate and Instant Recovery's commit step were treating it like any other disk, so a running VM with a TPM ended up with its regular disks already moved and the TPM device stranded (job reported failed despite mostly succeeding). Both flows now migrate every other disk live first, then — only if a TPM device is present — briefly stop the VM, move the TPM state, and restart it (the restart always happens, even if the TPM move itself fails). A precheck warns and asks for explicit confirmation before the migration starts if any selected VM has a TPM device.
+- **Storage Migrate / Instant Recovery — PVE host fallback** — resolving the PVE client for a volume mapping now falls back to any other configured host in the same cluster if the mapping's own `pve_cluster_id` is stale (e.g. that host was removed from Settings after the mapping was created), instead of hard-failing.
+- **Instant Recovery — session list refresh race** — the session list refreshed on a fixed 1.5 s timer started right after launching the (asynchronous) start/discard/migrate job, so a newly created session often didn't appear until a much later manual refresh. Refresh is now triggered by the job tracker on actual job completion instead of a guessed delay.
+- **Default theme changed to Liquid Glass** — new installs (and any session without a saved theme preference) now default to the Liquid Glass theme instead of dark.
 
 ### v1.9 — Planned
 
