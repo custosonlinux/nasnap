@@ -1336,16 +1336,62 @@ def read_snap_file_bytes(pve, mount_path, rel_path):
     return base64.b64decode(b64.replace("\n", "").replace("\r", "").strip())
 
 
-def snap_tar_bytes(pve, mount_path, rel_path):
-    """Returns bytes of a tar.gz of a path inside the mounted snapshot."""
+def snap_tar_bytes(pve, mount_path, rel_paths):
+    """Returns bytes of a tar.gz of one or more paths (files/dirs) inside the
+    mounted snapshot. All paths must share the same parent directory — true
+    for a multi-selection within a single directory listing."""
     import base64
     from ._helpers import ssh_run
-    full = f"{mount_path}/{rel_path.lstrip('/')}"
-    parent = full.rsplit("/", 1)[0] if "/" in full else mount_path
-    name   = full.rsplit("/", 1)[1] if "/" in full else rel_path.strip("/")
+    if isinstance(rel_paths, str):
+        rel_paths = [rel_paths]
+    fulls  = [f"{mount_path}/{p.lstrip('/')}" for p in rel_paths]
+    parent = fulls[0].rsplit("/", 1)[0] if "/" in fulls[0] else mount_path
+    names  = [f.rsplit("/", 1)[1] if "/" in f else f for f in fulls]
+    name_args = " ".join(shlex.quote(n) for n in names)
     b64 = ssh_run(pve.host, pve.ssh_user, pve.ssh_password,
-                  f"tar -czf - -C {shlex.quote(parent)} {shlex.quote(name)} | base64",
+                  f"tar -czf - -C {shlex.quote(parent)} {name_args} | base64",
                   capture=True, timeout=300)
+    return base64.b64decode(b64.replace("\n", "").replace("\r", "").strip())
+
+
+def snap_zip_bytes(pve, mount_path, rel_paths):
+    """Returns bytes of a ZIP of one or more paths (files/dirs) inside the
+    mounted snapshot. Built with Python's stdlib zipfile (a temp file on the
+    PVE host, since ZIP needs to seek while writing its central directory —
+    can't stream straight to a pipe like tar) rather than the `zip` binary,
+    to avoid a new host-side package dependency just for this."""
+    import base64
+    from ._helpers import ssh_run
+    if isinstance(rel_paths, str):
+        rel_paths = [rel_paths]
+    fulls  = [f"{mount_path}/{p.lstrip('/')}" for p in rel_paths]
+    parent = fulls[0].rsplit("/", 1)[0] if "/" in fulls[0] else mount_path
+    names  = [f.rsplit("/", 1)[1] if "/" in f else f for f in fulls]
+    py = (
+        "import zipfile,os,sys,tempfile\n"
+        "base=sys.argv[1]\n"
+        "names=sys.argv[2:]\n"
+        "fd,tmp=tempfile.mkstemp(suffix='.zip')\n"
+        "os.close(fd)\n"
+        "zf=zipfile.ZipFile(tmp,'w',zipfile.ZIP_DEFLATED)\n"
+        "for name in names:\n"
+        "    full=os.path.join(base,name)\n"
+        "    if os.path.isdir(full):\n"
+        "        for root,dirs,files in os.walk(full):\n"
+        "            for f in files:\n"
+        "                p=os.path.join(root,f)\n"
+        "                zf.write(p,os.path.relpath(p,base))\n"
+        "    else:\n"
+        "        zf.write(full,name)\n"
+        "zf.close()\n"
+        "sys.stdout.write(tmp)\n"
+    )
+    name_args = " ".join(shlex.quote(n) for n in names)
+    cmd = (
+        f"T=$(python3 -c {shlex.quote(py)} {shlex.quote(parent)} {name_args}) "
+        f"&& base64 \"$T\" && rm -f \"$T\""
+    )
+    b64 = ssh_run(pve.host, pve.ssh_user, pve.ssh_password, cmd, capture=True, timeout=300)
     return base64.b64decode(b64.replace("\n", "").replace("\r", "").strip())
 
 

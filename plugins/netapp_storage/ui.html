@@ -16589,12 +16589,11 @@ actLogPoll();
 
     <!-- Bottom action bar: TC-style F-key buttons -->
     <div style="padding:5px 12px;background:var(--bg-alt);border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-ghost btn-sm" id="sfrDlBtn"    onclick="sfrDownload()"    disabled title="Download selected file from snapshot">↓ Download</button>
-      <button class="btn btn-ghost btn-sm" id="sfrDlTarBtn" onclick="sfrDownloadTar()" disabled title="Download as tar.gz">↓ tar.gz</button>
+      <button class="btn btn-ghost btn-sm" id="sfrDlBtn"    onclick="sfrDownload()"    disabled title="Download selected file(s)/dir — a single file downloads as-is, anything else is packed into an archive">↓ Download</button>
       <button class="btn btn-primary btn-sm" id="sfrCopyBtn" onclick="sfrCopyToVm()"   disabled title="Copy selected files/dirs to VM (requires QGA; Linux VMs only for multi/dir)">F5 Copy → VM</button>
       <div style="flex:1"></div>
-      <button class="btn btn-ghost btn-sm" onclick="sfrVmNewFolder()" title="Create new folder in VM">F7 New Folder</button>
-      <button class="btn btn-danger btn-sm" id="sfrVmDelBtn" onclick="sfrVmDelete()" disabled title="Delete selected in VM">F8 Delete</button>
+      <button class="btn btn-ghost btn-sm" onclick="sfrVmNewFolder()" title="Create new folder in VM">New Folder</button>
+      <button class="btn btn-danger btn-sm" id="sfrVmDelBtn" onclick="sfrVmDelete()" disabled title="Delete selected in VM">Delete</button>
     </div>
 
     <!-- Copy destination bar -->
@@ -17263,16 +17262,22 @@ function _sfrSelVm(fullPath, type, name) {
 function _sfrUpdateActions() {
   var selVals  = Object.values(_sfr.snapSels);
   var selCount = selVals.length;
-  var hasSingleFile = selCount === 1 && _sfr.snapSel && _sfr.snapSel.type === 'f';
-  var hasAny        = selCount > 0 && !!_sfr.snapSel;
+  var hasAny   = selCount > 0 && !!_sfr.snapSel;
   // Backend (sfr_engine.copy_tar_to_vm) refuses multi-file/directory copy for
   // Windows guests — block it in the UI too instead of letting the click
   // through and surfacing a raw error.
   var isMultiOrDir = selCount > 1 || (selCount === 1 && selVals[0].type === 'd');
   var blockedByOs  = _sfr.guestOs === 'windows' && isMultiOrDir;
 
-  document.getElementById('sfrDlBtn').disabled    = !hasSingleFile;
-  document.getElementById('sfrDlTarBtn').disabled = !hasAny;
+  var dlBtn = document.getElementById('sfrDlBtn');
+  dlBtn.disabled = !hasAny;
+  if (selCount > 1) {
+    dlBtn.textContent = '↓ Download ' + selCount + ' (archive)';
+  } else if (selCount === 1 && selVals[0].type === 'd') {
+    dlBtn.textContent = '↓ Download (archive)';
+  } else {
+    dlBtn.textContent = '↓ Download';
+  }
   document.getElementById('sfrVmDelBtn').disabled = !_sfr.vmSel;
 
   // Update copy button label to hint at count / dir mode
@@ -17293,17 +17298,24 @@ function _sfrUpdateActions() {
 // ── Download ──────────────────────────────────────────────────────────────────
 
 function sfrDownload() {
-  // Single-file download — uses the most recently clicked file (snapSel)
-  if (!_sfr.snapSel || _sfr.snapSel.type !== 'f' || !_sfr.sid) return;
-  var url = API + '/file-restore/sessions/download?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapSel.fullPath);
-  window.location.href = url;
-}
+  var selVals = Object.values(_sfr.snapSels);
+  if (!selVals.length || !_sfr.sid) return;
 
-function sfrDownloadTar() {
-  // tar.gz download — uses the most recently clicked item (snapSel) regardless of type
-  if (!_sfr.snapSel || !_sfr.sid) return;
-  var url = API + '/file-restore/sessions/download-tar?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(_sfr.snapSel.fullPath);
-  window.location.href = url;
+  // A single selected file downloads as-is. Anything else (a directory, or
+  // more than one selection) is packed into an archive — tar.gz for Linux
+  // sources, zip for Windows, so it opens natively without extra tools.
+  if (selVals.length === 1 && selVals[0].type === 'f') {
+    var url = API + '/file-restore/sessions/download?sid=' + encodeURIComponent(_sfr.sid) +
+              '&path=' + encodeURIComponent(selVals[0].fullPath);
+    window.location.href = url;
+    return;
+  }
+
+  var endpoint = _sfr.guestOs === 'windows' ? 'download-zip' : 'download-tar';
+  var qs = 'sid=' + encodeURIComponent(_sfr.sid) + selVals.map(function(s) {
+    return '&path=' + encodeURIComponent(s.fullPath);
+  }).join('');
+  window.location.href = API + '/file-restore/sessions/' + endpoint + '?' + qs;
 }
 
 // ── Copy to VM ────────────────────────────────────────────────────────────────

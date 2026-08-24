@@ -638,6 +638,10 @@ environment:
 
 Before the first byte is sent, NaSnap auto-probes PVE's actual `file-write` payload limit via a short binary-search (8–16 API calls). The progress bar shows the correct total size immediately, so the bar is deterministic throughout the transfer even during this probe phase. The probe result is cached for the lifetime of the container process.
 
+### Download
+
+A single **↓ Download** button handles both cases automatically: selecting exactly one file downloads it as-is; selecting a directory or more than one item packs the selection into an archive — **tar.gz** for Linux-sourced snapshots, **ZIP** for Windows-sourced ones (detected from the VM's guest OS), so it opens natively without extra tools either way.
+
 ### Supported VM types
 
 The copy mechanism is the same regardless of whether the source snapshot is on NFS or SAN — once mounted, the file browser and transfer logic are identical.
@@ -645,7 +649,7 @@ The copy mechanism is the same regardless of whether the source snapshot is on N
 | VM | Copy to VM | Multi-file / directory |
 |---|---|---|
 | Linux (QEMU GA) | ✅ Single file + multi-file + directories | ✅ tar stream via QGA |
-| Windows (QEMU GA) | ✅ Single file (PowerShell QGA copy) | ❌ Use ↓ tar.gz to download and restore manually |
+| Windows (QEMU GA) | ✅ Single file (PowerShell QGA copy) | ❌ Use ↓ Download (packs into a ZIP for Windows) and restore manually |
 
 ---
 

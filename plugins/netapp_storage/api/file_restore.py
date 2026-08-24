@@ -865,13 +865,13 @@ def _download_file():
         return {"error": str(e)}, 500
 
 
-def _download_tar():
+def _download_archive(archive_fn, ext, mimetype):
     err = _require_admin()
     if err:
         return err
-    sid  = request.args.get("sid", "").strip()
-    path = request.args.get("path", "").strip()
-    if not sid or not path:
+    sid   = request.args.get("sid", "").strip()
+    paths = [p for p in request.args.getlist("path") if p.strip()]
+    if not sid or not paths:
         return {"error": "sid and path required"}, 400
     db = get_db()
     sess = _get_sess(db, sid)
@@ -881,16 +881,25 @@ def _download_tar():
         return {"error": "No partition mounted"}, 400
     try:
         pve = _pve_for_sess(db, sess)
-        raw = sfr_engine.snap_tar_bytes(pve, f"{sess['mount_path']}/mnt", path)
-        name = (path.strip("/").rsplit("/", 1)[-1] or "archive").replace(" ", "_")
+        raw = archive_fn(pve, f"{sess['mount_path']}/mnt", paths)
+        name = "selection" if len(paths) > 1 else (paths[0].strip("/").rsplit("/", 1)[-1] or "archive")
+        name = name.replace(" ", "_")
         _touch(db, sid)
         return Response(
             raw,
-            mimetype="application/gzip",
-            headers={"Content-Disposition": _content_disposition(f"{name}.tar.gz")},
+            mimetype=mimetype,
+            headers={"Content-Disposition": _content_disposition(f"{name}.{ext}")},
         )
     except Exception as e:
         return {"error": str(e)}, 500
+
+
+def _download_tar():
+    return _download_archive(sfr_engine.snap_tar_bytes, "tar.gz", "application/gzip")
+
+
+def _download_zip():
+    return _download_archive(sfr_engine.snap_zip_bytes, "zip", "application/zip")
 
 
 def _umount_disk():
@@ -952,6 +961,7 @@ def register_routes():
     R(PLUGIN_ID, f"{_BASE}/sessions/copy-cancel",     _copy_cancel)
     R(PLUGIN_ID, f"{_BASE}/sessions/download",         _download_file)
     R(PLUGIN_ID, f"{_BASE}/sessions/download-tar",     _download_tar)
+    R(PLUGIN_ID, f"{_BASE}/sessions/download-zip",     _download_zip)
 
 
 # ── Session cleanup daemon ────────────────────────────────────────────────────

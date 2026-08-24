@@ -8,6 +8,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Single File Restore — unified Download button** — the separate "↓ Download" (single file only) and "↓ tar.gz" buttons are now one **↓ Download** button: a single selected file downloads as-is, a directory or multi-selection is automatically packed into an archive — `tar.gz` for Linux-sourced snapshots, **ZIP** for Windows-sourced ones (detected the same way as the existing OS badge), so the result opens natively either way without extra tools. The archive download also now supports true multi-file selections (previously it silently archived only the last-clicked item, ignoring the rest of the selection). New `snap_zip_bytes()` builds ZIPs with Python's stdlib `zipfile` on the PVE host — no new host package dependency.
+- **Single File Restore — dropped "F7"/"F8" from the New Folder / Delete button labels** — those keys were never actually bound to anything (no keyboard handler existed), so the labels only implied a shortcut that didn't work; both actions have always been mouse-only.
+
 ---
 
 ## [1.9.0] — 2026-08-24
