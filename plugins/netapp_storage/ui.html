@@ -5247,20 +5247,28 @@ async function loadInstantRecoverySessions() {
       var busy = (s.status === 'migrating' || s.status === 'discarding');
       var stale = s.last_reminder_at
         ? ' <span title="Running a while — consider committing or discarding" style="color:var(--warning)">⚠</span>' : '';
+      var actions = s.status === 'done'
+        ? '<button class="btn btn-ghost btn-sm" onclick="dismissInstantRecovery(\''+s.id+'\')">Remove</button>'
+        : '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="openIrMigrateModal(\''+s.id+'\')">Storage Migrate</button> '
+          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>';
       return '<tr>'
         + '<td>'+esc(String(s.new_vmid))+(s.source_vm_name?' – '+esc(s.source_vm_name):'')+'</td>'
         + '<td>VM '+esc(String(s.source_vmid))+'</td>'
         + '<td>'+fmtDateRel(s.created_at)+stale+'</td>'
         + '<td>'+(_irStatusLabels[s.status]||esc(s.status))+(s.error?' <span title="'+esc(s.error)+'" style="color:var(--error)">⚠</span>':'')+'</td>'
-        + '<td>'
-          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="openIrMigrateModal(\''+s.id+'\')">Storage Migrate</button> '
-          + '<button class="btn btn-ghost btn-sm" '+(busy?'disabled':'')+' onclick="discardInstantRecovery(\''+s.id+'\',\''+esc(String(s.new_vmid))+'\')">Discard</button>'
-          + '</td>'
+        + '<td>'+actions+'</td>'
         + '</tr>';
     }).join('');
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty" style="color:var(--error)">'+esc(e.message)+'</td></tr>';
   }
+}
+
+async function dismissInstantRecovery(sessionId) {
+  try {
+    await apiPost('instant-recovery/dismiss', { session_id: sessionId });
+    loadInstantRecoverySessions();
+  } catch(e) { toast(e.message, 'error', e.detail); }
 }
 
 async function discardInstantRecovery(sessionId, vmidLabel) {

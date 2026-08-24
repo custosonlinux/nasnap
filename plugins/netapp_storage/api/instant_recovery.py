@@ -5,6 +5,8 @@ Instant Recovery API (NFS)
   instant-recovery/start-live   POST  – same, but source is a live VM (ad-hoc snapshot first)
   instant-recovery/sessions     GET   – list sessions
   instant-recovery/migrate      POST  – commit: Storage Migrate onto a permanent datastore
+  instant-recovery/dismiss      POST  – remove a completed (migrated) session from the list
+                                         (VM already permanent, clone already gone — bookkeeping only)
   instant-recovery/discard      POST  – tear down: destroy the temp VM + FlexClone
   instant-recovery/status       GET   – job status (?job_id=...)
 """
@@ -192,6 +194,30 @@ def _migrate_tpm_check():
     return {"has_tpm": has_tpm}
 
 
+def _dismiss():
+    """Removes a completed (migrated) session from the list. The FlexClone and
+    temp storage were already torn down at the end of a successful migrate —
+    this only clears the bookkeeping row, it never touches the VM. Not to be
+    confused with Discard, which stops+destroys the (still temporary) VM."""
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        return {"error": "session_id required"}, 400
+
+    db = get_db()
+    sess = db.query_one("SELECT status FROM netapp_instant_recovery_sessions WHERE id=?", (session_id,))
+    if not sess:
+        return {"error": "Session not found"}, 404
+    if sess["status"] != "done":
+        return {"error": f"Only a completed (migrated) session can be removed (status: {sess['status']})"}, 409
+
+    db.execute("DELETE FROM netapp_instant_recovery_sessions WHERE id=?", (session_id,))
+    return {"success": True}
+
+
 def _discard():
     err = _require_admin()
     if err:
@@ -240,5 +266,6 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "instant-recovery/sessions", _list_sessions)
     register_plugin_route(PLUGIN_ID, "instant-recovery/migrate", _migrate)
     register_plugin_route(PLUGIN_ID, "instant-recovery/migrate-tpm-check", _migrate_tpm_check)
+    register_plugin_route(PLUGIN_ID, "instant-recovery/dismiss", _dismiss)
     register_plugin_route(PLUGIN_ID, "instant-recovery/discard", _discard)
     register_plugin_route(PLUGIN_ID, "instant-recovery/status", _status)
