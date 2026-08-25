@@ -10576,7 +10576,11 @@ function showProvWizard() {
   if(r) r.checked=true;
   provProtoChange();
   var btn = document.getElementById('provSubmitBtn');
-  if (btn) { btn.disabled = false; btn.textContent = 'Create Datastore'; }
+  if (btn) btn.disabled = false;
+  var createErr0 = document.getElementById('provWizCreateErr');
+  if (createErr0) createErr0.textContent = '';
+  var confirmErr0 = document.getElementById('provWizConfirmErr');
+  if (confirmErr0) confirmErr0.textContent = '';
   document.getElementById('provWizModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   loadProvEndpoints();
@@ -10616,7 +10620,7 @@ function hideProvWizard() {
 }
 
 function provWizShowStep(n) {
-  [1,2,3,4].forEach(function(i){
+  [1,2,3,4,5].forEach(function(i){
     var s=document.getElementById('provWizStep'+i);
     var tb=document.getElementById('provWizStepTab'+i);
     if(s) s.style.display=i===n?'block':'none';
@@ -11056,6 +11060,126 @@ async function provWizNext3() {
   provWizShowStep(4);
 }
 
+async function provWizNext4() {
+  var repl = provWizCollectReplication();
+  if (repl === false) return; // validation error already toasted
+  var errEl = document.getElementById('provWizConfirmErr');
+  var spin  = document.getElementById('provWizConfirmSpinner');
+  errEl.textContent = '';
+  spin.style.display = 'inline-block';
+  try {
+    await provWizBuildSummary(repl);
+    provWizShowStep(5);
+  } catch (e) {
+    errEl.textContent = e.message || String(e);
+  } finally {
+    spin.style.display = 'none';
+  }
+}
+
+async function provWizBuildSummary(repl) {
+  var proto     = (document.querySelector('input[name="provProto"]:checked')||{}).value||'nfs';
+  var name      = document.getElementById('provWizName').value.trim();
+  var storageId = document.getElementById('provWizStorageId').value.trim();
+  var volId     = document.getElementById('provWizVolume').value;
+  var epSel     = document.getElementById('provWizEndpoint');
+  var epLabel   = epSel.selectedOptions[0] ? epSel.selectedOptions[0].textContent : '';
+  var svm       = document.getElementById('provWizSvm').value.trim();
+  var hostIds   = [];
+  document.querySelectorAll('#provWizHostList input[type=checkbox]:checked').forEach(function(cb){ hostIds.push(cb.value); });
+  var hostNames = (_provPveHosts||[]).filter(function(h){ return hostIds.indexOf(h.id)!==-1; }).map(function(h){ return h.name; });
+
+  // Duplicate check against the server — a fresh, authoritative check (not a
+  // guess from possibly-stale client state), run right before the final
+  // review so the wizard itself flags a would-be duplicate instead of only
+  // failing after "Create Datastore" is clicked.
+  var warn = '';
+  var conflict = null;
+  try {
+    var dsList = await apiFetch('provisioning/datastores');
+    conflict = (dsList.datastores || []).find(function(d) {
+      return (d.name || '').toLowerCase() === name.toLowerCase()
+          || (d.pve_storage_id || '') === storageId;
+    });
+  } catch (e) { /* non-fatal — server still enforces this at Create time */ }
+  if (conflict) {
+    warn = '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(240,80,80,.1);'
+      + 'border:1px solid rgba(240,80,80,.35);color:var(--error);font-size:12px">'
+      + '⚠ A datastore named "' + esc(conflict.name) + '" (storage id "' + esc(conflict.pve_storage_id)
+      + '") already exists. Creating this one would mount two volumes on the same Proxmox mountpoint. '
+      + 'Go back and choose a different name/storage ID.</div>';
+  }
+
+  var lines = [];
+  lines.push('📛 Name: <strong>'+esc(name)+'</strong>');
+  lines.push('🔌 Protocol: <strong>'+esc(proto.toUpperCase())+'</strong>');
+  lines.push('🏢 ONTAP: <strong>'+esc(epLabel)+'</strong> — SVM <strong>'+esc(svm)+'</strong>');
+  if (volId === '__new__') {
+    lines.push('📦 Volume: <strong>new</strong> — '+esc(document.getElementById('provWizVolName').value.trim()||'(auto)'));
+  } else {
+    var vol = (_provOntapRes.volumes||[]).find(function(v){ return v.uuid===volId; });
+    lines.push('📦 Volume: <strong>existing</strong> — '+esc(vol?vol.name:volId));
+  }
+  if (proto === 'nfs') {
+    var junction = document.getElementById('provWizNfsJunction').value.trim();
+    var lifSel   = document.getElementById('provWizNfsLif');
+    var lifLabel = lifSel.selectedOptions[0] ? lifSel.selectedOptions[0].textContent : '';
+    lines.push('🌐 NFS LIF: <strong>'+esc(lifLabel)+'</strong>');
+    lines.push('🔗 Junction Path: <strong>'+esc(junction)+'</strong>');
+    if (volId === '__new__') {
+      lines.push('💽 Volume Size: <strong>'+esc(document.getElementById('provWizNfsSize').value)+' '
+        +esc(document.getElementById('provWizNfsSizeUnit').value)+'</strong>');
+    }
+  } else if (proto === 'iscsi' || proto === 'nvme') {
+    lines.push('🗄️ VG: <strong>'+esc(document.getElementById('provWizVgName').value.trim())+'</strong> ('
+      +esc(document.getElementById('provWizLvmType').value)+')');
+    if (proto === 'iscsi') {
+      var lunId = document.getElementById('provWizLun').value;
+      if (lunId === '__new__') {
+        lines.push('💽 LUN: <strong>new</strong> — '+esc(document.getElementById('provWizLunName').value.trim()||'(auto)')
+          +' ('+esc(document.getElementById('provWizLunSize').value)+' '+esc(document.getElementById('provWizLunSizeUnit').value)+')');
+      } else {
+        var lun = (_provOntapRes.luns||[]).find(function(l){ return l.uuid===lunId; });
+        lines.push('💽 LUN: <strong>existing</strong> — '+esc(lun?lun.name:lunId));
+      }
+      var igId = document.getElementById('provWizIgroup').value;
+      if (igId === '__new__') {
+        lines.push('👥 iGroup: <strong>new</strong> — '+esc(document.getElementById('provWizIgroupName').value.trim()||'(auto)'));
+      } else {
+        var ig = (_provOntapRes.igroups||[]).find(function(g){ return g.uuid===igId; });
+        lines.push('👥 iGroup: <strong>existing</strong> — '+esc(ig?ig.name:igId));
+      }
+    } else {
+      var nsId = document.getElementById('provWizNs').value;
+      if (nsId === '__new__') {
+        lines.push('💽 Namespace: <strong>new</strong> — '+esc(document.getElementById('provWizNsName').value.trim()||'(auto)')
+          +' ('+esc(document.getElementById('provWizNsSize').value)+' '+esc(document.getElementById('provWizNsSizeUnit').value)+')');
+      } else {
+        var ns = (_provOntapRes.nvme_namespaces||[]).find(function(n){ return n.uuid===nsId; });
+        lines.push('💽 Namespace: <strong>existing</strong> — '+esc(ns?ns.name:nsId));
+      }
+      var subId = document.getElementById('provWizSubsystem').value;
+      if (subId === '__new__') {
+        lines.push('🖧 Subsystem: <strong>new</strong> — '+esc(document.getElementById('provWizSubsystemName').value.trim()||'(auto)'));
+      } else {
+        var sub = (_provOntapRes.nvme_subsystems||[]).find(function(s){ return s.uuid===subId; });
+        lines.push('🖧 Subsystem: <strong>existing</strong> — '+esc(sub?sub.name:subId));
+      }
+    }
+  }
+  lines.push('💾 PVE Storage ID: <strong>'+esc(storageId)+'</strong>');
+  lines.push('🖥️ PVE Hosts: <strong>'+esc(hostNames.join(', ')||'(none)')+'</strong>');
+  if (repl && repl.enabled) {
+    lines.push('⟳ Replication: <strong>enabled</strong> to SVM <strong>'+esc(repl.target_svm)+'</strong>');
+  } else {
+    lines.push('⟳ Replication: <strong>disabled</strong>');
+  }
+
+  document.getElementById('provWizSummary').innerHTML = warn + lines.join('<br>');
+  var submitBtn = document.getElementById('provSubmitBtn');
+  if (submitBtn) submitBtn.disabled = !!conflict;
+}
+
 function provWizToggleReplication() {
   document.getElementById('provWizReplBody').style.display=
     document.getElementById('provWizReplEnable').checked?'':'none';
@@ -11249,7 +11373,11 @@ async function submitProvWizard() {
   if(repl===false) return; // validation error already toasted
   if(repl) body.replication=repl;
   var btn=document.getElementById('provSubmitBtn');
-  btn.disabled=true; btn.textContent='Creating…';
+  var createSpin=document.getElementById('provWizCreateSpinner');
+  var createErr=document.getElementById('provWizCreateErr');
+  if(createErr) createErr.textContent='';
+  btn.disabled=true;
+  if(createSpin) createSpin.style.display='inline-block';
   try {
     var r=await apiPost('provisioning/datastores',body);
     hideProvWizard();
@@ -11259,7 +11387,9 @@ async function submitProvWizard() {
     loadProvDatastores();
   } catch(e) {
     toast(e.message,'error');
-    btn.disabled=false; btn.textContent='Create Datastore';
+    if(createErr) createErr.textContent=e.message||String(e);
+    if(createSpin) createSpin.style.display='none';
+    btn.disabled=false;
   }
 }
 
@@ -14472,6 +14602,7 @@ actLogPoll();
         <div id="provWizStepTab2" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">2 · Resource</div>
         <div id="provWizStepTab3" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">3 · Hosts &amp; Name</div>
         <div id="provWizStepTab4" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">4 · Replication</div>
+        <div id="provWizStepTab5" style="flex:1;text-align:center;font-size:12px;color:var(--muted);padding:4px 0">5 · Confirm</div>
       </div>
 
       <!-- Step 1: Protocol + Endpoint + SVM + Datastore name -->
@@ -14793,9 +14924,28 @@ actLogPoll();
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" onclick="provWizShowStep(3)">← Back</button>
-          <button class="btn btn-primary" id="provSubmitBtn" onclick="submitProvWizard()">Create Datastore</button>
+          <button class="btn btn-primary" onclick="provWizNext4()">
+            Next → <span id="provWizConfirmSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+          </button>
+          <button class="btn btn-ghost" onclick="hideProvWizard()">Cancel</button>
+          <span id="provWizConfirmErr" style="color:var(--error);font-size:12px"></span>
+        </div>
+      </div>
+
+      <!-- Step 5: Confirm — final review, duplicate-checked against the server -->
+      <div id="provWizStep5" style="display:none">
+        <div style="margin-bottom:16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Summary</div>
+          <div id="provWizSummary" style="font-size:13px;line-height:1.8;background:var(--bg);padding:10px 14px;border-radius:6px"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="provWizShowStep(4)">← Back</button>
+          <button class="btn btn-primary" id="provSubmitBtn" onclick="submitProvWizard()">
+            Create Datastore <span id="provWizCreateSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+          </button>
           <button class="btn btn-ghost" onclick="hideProvWizard()">Cancel</button>
         </div>
+        <div id="provWizCreateErr" style="color:var(--error);font-size:12px;margin-top:6px"></div>
       </div>
 
     </div><!-- /modal body -->
