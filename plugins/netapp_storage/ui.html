@@ -11659,11 +11659,39 @@ function rcvLvmTypeChange() {
   document.getElementById('rcvPoolRow').style.display = (t.value==='thin') ? '' : 'none';
 }
 
-function rcvNext2() {
+async function rcvNext2() {
   var sid    = document.getElementById('rcvStorageId').value.trim();
   if (!sid) { alert('Please enter a Storage Name.'); return; }
   var hosts  = Array.from(document.querySelectorAll('.rcvHostCb:checked')).map(function(c){return c.value;});
   if (!hosts.length) { alert('Select at least one PVE host.'); return; }
+
+  // Check for a name/storage-ID collision with an existing datastore before
+  // building the summary. The server rejects this too when "Bind Volume" is
+  // clicked, but checking here surfaces it immediately instead of only after
+  // the final submit — this is exactly the class of bug that let a duplicate
+  // mount slip through unnoticed on the same Proxmox mountpoint.
+  var nextBtn = document.getElementById('rcvNext2Btn');
+  if (nextBtn) nextBtn.disabled = true;
+  try {
+    var dsList = await apiFetch('provisioning/datastores');
+    var conflict = (dsList.datastores || []).find(function(d) {
+      return (d.name || '').toLowerCase() === sid.toLowerCase()
+          || (d.pve_storage_id || '') === sid;
+    });
+    if (conflict) {
+      alert('A datastore named "' + conflict.name + '" (storage id "' + conflict.pve_storage_id
+        + '") already exists. Choose a different Storage Name to avoid mounting two volumes '
+        + 'on the same Proxmox mountpoint.');
+      return;
+    }
+  } catch (e) {
+    console.error('rcvNext2 conflict check:', e);
+    // Don't block the wizard if the check itself fails (e.g. network hiccup) —
+    // the server still enforces this at Bind time.
+  } finally {
+    if (nextBtn) nextBtn.disabled = false;
+  }
+
   var isSan  = rcvState.protocol==='iscsi'||rcvState.protocol==='nvme';
   if (isSan) {
     rcvState.vg_name   = document.getElementById('rcvVgName').value.trim();
@@ -14983,7 +15011,7 @@ actLogPoll();
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" onclick="rcvShowStep(1)">← Back</button>
-          <button class="btn btn-primary" onclick="rcvNext2()">Next →</button>
+          <button class="btn btn-primary" id="rcvNext2Btn" onclick="rcvNext2()">Next →</button>
         </div>
       </div>
 
