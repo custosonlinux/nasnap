@@ -290,6 +290,9 @@
   }
   .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
   .btn-primary:hover { filter: brightness(1.1); }
+  .btn:disabled, .btn[disabled] {
+    opacity: .45; cursor: not-allowed; pointer-events: none;
+  }
   .btn-ghost  { background: transparent; color: var(--muted); border-color: var(--border); }
   .btn-ghost:hover  { color: var(--text); border-color: var(--text); background: var(--hover); }
   .btn-secondary { background: transparent; color: var(--text); border-color: var(--border); }
