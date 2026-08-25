@@ -194,6 +194,26 @@ def find_name_conflict(db, table, name, exclude_id=None, name_column="name"):
     return dict(row) if row else None
 
 
+def cluster_sibling_host_ids(db, host_id):
+    """Returns every netapp_pve_hosts id sharing the same PVE cluster as
+    host_id (including host_id itself) — or just [host_id] if it's
+    standalone (empty cluster_group_id) or not found.
+
+    A cluster-wide NFS storage (registered via `pvesm add` without a
+    `--nodes` restriction — e.g. Instant Recovery's temp storage) gets
+    mounted by Proxmox on every node in the cluster, not just the one an
+    orchestration step happened to SSH into. Cleanup that only touches that
+    one node leaves the exact same mount orphaned on every other node.
+    """
+    row = db.query_one("SELECT cluster_group_id FROM netapp_pve_hosts WHERE id=?", (host_id,))
+    cgid = (dict(row).get("cluster_group_id") or "") if row else ""
+    if not cgid:
+        return [host_id]
+    rows = db.query("SELECT id FROM netapp_pve_hosts WHERE cluster_group_id=?", (cgid,)) or []
+    ids = [r["id"] for r in rows]
+    return ids if host_id in ids else ids + [host_id]
+
+
 def find_name_or_host_conflict(db, table, name, host, exclude_id=None):
     """Case-insensitive uniqueness check on EITHER a `name` or a `host` column
     of `table` — the shared shape behind "don't let two rows point at the same

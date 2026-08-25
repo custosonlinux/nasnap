@@ -36,7 +36,7 @@ from nasnap_core.core.db import get_db
 
 from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
-    build_ontap_client, pve_for_mapping,
+    build_ontap_client, build_pve_client, pve_for_mapping, cluster_sibling_host_ids,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
     reserve_vmid, sanitize_vm_name,
 )
@@ -141,6 +141,7 @@ def _run_instant_recovery(job_id, params, username):
     pve_host = ""
     pve_user, pve_pass, pve_key = "root", "", ""
     mgr = None
+    resolved_hid = ""
     node = ""
     vm_type = "qemu"
     mapping = None
@@ -193,6 +194,17 @@ def _run_instant_recovery(job_id, params, username):
             client.poll_job(clone_job_uuid,
                             interval_s=poll_cfg.get("job_poll_interval_s", 3),
                             timeout_s=poll_cfg.get("job_poll_timeout_s", 300))
+            if not clone_vol_uuid:
+                # ONTAP answered the create call asynchronously (return_timeout=0) —
+                # the volume didn't exist yet at that point, so no uuid came back.
+                # Without this, clone_volume_uuid is stored empty and every later
+                # teardown silently skips FlexClone deletion (the "if
+                # sess.get('clone_volume_uuid')" guard never fires), leaving the
+                # ONTAP volume behind forever with nothing pointing at it.
+                try:
+                    clone_vol_uuid = client.get_volume_by_name(mapping["svm_name"], clone_name).get("uuid", "")
+                except Exception as exc:
+                    jlog.log(f"WARNING: could not resolve FlexClone volume UUID after creation: {exc}")
         jlog.log("FlexClone ready — no data copied yet.")
         _set_progress(db, job_id, 35)
 
@@ -251,7 +263,7 @@ def _run_instant_recovery(job_id, params, username):
         _cancel_job(db, job_id)
         _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                      clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog,
-                     conf_path_reserved=conf_path_reserved)
+                     conf_path_reserved=conf_path_reserved, pve_host_id=resolved_hid)
     except Exception as exc:
         log.error(f"[netapp_storage] Instant Recovery job {job_id} failed: {exc}")
         jlog.log(f"ERROR: {exc}")
@@ -261,13 +273,96 @@ def _run_instant_recovery(job_id, params, username):
         # persist until the user decides).
         _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                      clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog,
-                     conf_path_reserved=conf_path_reserved)
+                     conf_path_reserved=conf_path_reserved, pve_host_id=resolved_hid)
     finally:
         _reg_unregister(job_id)
 
 
+def _unmount_path(pve_host, pve_user, pve_pass, pve_key, temp_mp, jlog, retries=1):
+    """Unmounts + rmdir's temp_mp on one host. Retries a plain umount up to
+    `retries` times (2s apart) before falling back to a lazy umount.
+
+    Returns True only if it ended up unmounted cleanly — a lazy unmount
+    counts as NOT clean, since the underlying resource may still be busy.
+    """
+    def _log(msg):
+        if jlog:
+            jlog.log(msg)
+        else:
+            log.warning(f"[netapp_storage] {msg}")
+
+    for attempt in range(retries):
+        try:
+            out = ssh_run(pve_host, pve_user, pve_pass,
+                   f"mountpoint -q {temp_mp} && echo MOUNTED || echo GONE",
+                   capture=True, key_material=pve_key, timeout=10)
+            if "GONE" in (out or ""):
+                ssh_run(pve_host, pve_user, pve_pass, f"rmdir {temp_mp} 2>/dev/null; true",
+                       key_material=pve_key, timeout=10)
+                return True
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"umount {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
+        except Exception as exc:
+            _log(f"WARNING: [{pve_host}] umount attempt {attempt + 1} failed: {exc}")
+        if attempt < retries - 1:
+            time.sleep(2)
+    try:
+        out = ssh_run(pve_host, pve_user, pve_pass,
+               f"mountpoint -q {temp_mp} && echo MOUNTED || echo GONE",
+               capture=True, key_material=pve_key, timeout=10)
+        if "GONE" in (out or ""):
+            ssh_run(pve_host, pve_user, pve_pass, f"rmdir {temp_mp} 2>/dev/null; true",
+                   key_material=pve_key, timeout=10)
+            return True
+    except Exception:
+        pass
+    try:
+        ssh_run(pve_host, pve_user, pve_pass, f"umount -l {temp_mp} 2>/dev/null; true",
+               key_material=pve_key, timeout=10)
+        _log(f"WARNING: [{pve_host}] '{temp_mp}' would not unmount cleanly — force-detached (umount -l).")
+    except Exception as exc:
+        _log(f"WARNING: [{pve_host}] force-unmount failed: {exc}")
+    try:
+        ssh_run(pve_host, pve_user, pve_pass, f"rmdir {temp_mp} 2>/dev/null; true",
+               key_material=pve_key, timeout=10)
+    except Exception:
+        pass
+    return False
+
+
+def _unmount_everywhere_in_cluster(db, primary_host_id, primary_host, primary_user,
+                                   primary_pass, primary_key, temp_storage_id, jlog):
+    """Unmounts /mnt/pve/<temp_storage_id> on every PVE node in the same
+    cluster as primary_host_id, not just the one node this job happened to
+    SSH into. A cluster-wide storage (pvesm add without --nodes) gets
+    mounted by Proxmox on every node, so a single-host unmount leaves the
+    exact same orphaned mount on every other node. Returns True if every
+    reachable node ended up unmounted cleanly.
+    """
+    temp_mp = shlex.quote(f"/mnt/pve/{temp_storage_id}")
+    all_clean = True
+    for hid in cluster_sibling_host_ids(db, primary_host_id):
+        if hid == primary_host_id:
+            h_host, h_user, h_pass, h_key, retries = primary_host, primary_user, primary_pass, primary_key, 3
+        else:
+            try:
+                h_mgr = build_pve_client(db, hid)
+                h_host = h_mgr.host
+                h_user, h_pass, h_key = get_ssh_creds(h_mgr)
+                retries = 1
+            except Exception as exc:
+                if jlog:
+                    jlog.log(f"WARNING: could not reach cluster host {hid} to check for a leftover mount: {exc}")
+                all_clean = False
+                continue
+        if not _unmount_path(h_host, h_user, h_pass, h_key, temp_mp, jlog, retries=retries):
+            all_clean = False
+    return all_clean
+
+
 def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
-                  clone_vol_uuid, endpoint_id, db, jlog, conf_path_reserved=""):
+                  clone_vol_uuid, endpoint_id, db, jlog, conf_path_reserved="",
+                  pve_host_id=""):
     """Best-effort cleanup with only the raw pieces (used when a session row
     was never created, i.e. the start job itself failed partway through)."""
     if conf_path_reserved and pve_host:
@@ -289,14 +384,18 @@ def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
         # /mnt/pve/<temp_storage_id> with no corresponding PVE storage entry,
         # invisible to `pvesm status` from this point on (a "PVE Host
         # Maintenance" check flags these as orphan_nfs_mounts).
-        try:
-            ssh_run(pve_host, pve_user, pve_pass,
-                   f"umount /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null || "
-                   f"umount -l /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null; "
-                   f"rmdir /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null; true",
-                   key_material=pve_key)
-        except Exception as exc:
-            log.warning(f"[netapp_storage] cleanup umount temp storage: {exc}")
+        if pve_host_id:
+            _unmount_everywhere_in_cluster(db, pve_host_id, pve_host, pve_user, pve_pass, pve_key,
+                                           temp_storage_id, jlog)
+        else:
+            try:
+                ssh_run(pve_host, pve_user, pve_pass,
+                       f"umount /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null || "
+                       f"umount -l /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null; "
+                       f"rmdir /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null; true",
+                       key_material=pve_key)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] cleanup umount temp storage: {exc}")
     if clone_vol_uuid and endpoint_id:
         try:
             endpoint = get_endpoint(db, endpoint_id)
@@ -326,7 +425,7 @@ def _teardown_session_clone(db, sess, jlog):
     mapping = get_mapping(db, sess["mapping_id"])
     endpoint = get_endpoint(db, mapping["endpoint_id"])
     client = build_ontap_client(endpoint)
-    mgr, _ = pve_for_mapping(db, mapping)
+    mgr, resolved_hid = pve_for_mapping(db, mapping)
     pve_host = _resolve_node_host(mgr, sess["node"])
     pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
 
@@ -341,42 +440,15 @@ def _teardown_session_clone(db, sess, jlog):
         jlog.log(f"WARNING: pvesm remove failed: {exc}")
         ok = False
 
-    # pvesm remove only edits storage.cfg, never unmounts — do that explicitly
-    # or the mount survives with no PVE storage entry to find it by (see PVE
-    # Host Maintenance's orphan_nfs_mounts check). Retry a few times first:
-    # right after `qm destroy --purge` released the VM's disk files, the
-    # kernel can briefly still consider the mount busy.
-    temp_mp = shlex.quote(f"/mnt/pve/{sess['temp_storage_id']}")
-    unmounted = False
-    for attempt in range(3):
-        try:
-            out = ssh_run(pve_host, pve_user, pve_pass,
-                   f"mountpoint -q {temp_mp} && echo MOUNTED || echo GONE",
-                   capture=True, key_material=pve_key, timeout=10)
-            if "GONE" in (out or ""):
-                unmounted = True
-                break
-            ssh_run(pve_host, pve_user, pve_pass,
-                   f"umount {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
-        except Exception as exc:
-            jlog.log(f"WARNING: umount attempt {attempt + 1} failed: {exc}")
-        if attempt < 2:
-            time.sleep(2)
-    if not unmounted:
-        try:
-            ssh_run(pve_host, pve_user, pve_pass,
-                   f"umount -l {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
-            jlog.log(f"WARNING: '{temp_mp}' would not unmount cleanly after 3 attempts — "
-                     f"force-detached (umount -l). Check PVE Host Maintenance if it lingers.")
-            ok = False
-        except Exception as exc:
-            jlog.log(f"WARNING: force-unmount failed: {exc}")
-            ok = False
-    try:
-        ssh_run(pve_host, pve_user, pve_pass,
-               f"rmdir {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
-    except Exception:
-        pass
+    # pvesm remove only edits storage.cfg — Proxmox mounts a cluster-wide
+    # storage (no --nodes restriction, which is how this temp storage was
+    # registered) on EVERY node in the cluster, not just this one, so the
+    # unmount has to run on every node too or the same orphaned mount
+    # survives on every other node (see PVE Host Maintenance's
+    # orphan_nfs_mounts check — this is exactly what that check catches).
+    if not _unmount_everywhere_in_cluster(db, resolved_hid, pve_host, pve_user, pve_pass, pve_key,
+                                          sess["temp_storage_id"], jlog):
+        ok = False
 
     if sess.get("clone_volume_uuid"):
         try:

@@ -186,6 +186,15 @@ def _run_restore_flexclone(job_id, params, username):
             client.poll_job(clone_job_uuid,
                             interval_s=poll_cfg.get("job_poll_interval_s", 3),
                             timeout_s=poll_cfg.get("job_poll_timeout_s", 300))
+            if not clone_vol_uuid:
+                # ONTAP answered the create call asynchronously (return_timeout=0) —
+                # the volume didn't exist yet at that point, so no uuid came back.
+                # Without this, clone_vol_uuid stays empty and _flexclone_cleanup's
+                # "if clone_vol_uuid" guard silently skips deleting the FlexClone.
+                try:
+                    clone_vol_uuid = client.get_volume_by_name(mapping["svm_name"], clone_name).get("uuid", "")
+                except Exception as exc:
+                    jlog.log(f"WARNING: could not resolve FlexClone volume UUID after creation: {exc}")
         jlog.log("FlexClone ready.")
         _set_progress(db, job_id, 20)
 
