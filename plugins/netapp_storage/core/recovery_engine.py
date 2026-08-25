@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 
 from ._helpers import (
     get_endpoint, build_ontap_client, build_pve_client,
-    get_ssh_creds, JobLogger, ssh_run, load_plugin_config,
+    get_ssh_creds, JobLogger, ssh_run, load_plugin_config, vmid_conf_status,
 )
 from .san_helpers import (
     get_iscsi_initiator_iqn,
@@ -178,25 +178,38 @@ def _conf_string(vm_entry):
     return ""
 
 
-def get_used_vmids(pve_host_ids, db):
-    """Returns a sorted list of VMIDs currently in use on any of the given PVE hosts."""
+def get_used_vm_identities(pve_host_ids, db):
+    """Returns [{"vmid": int, "name": str, "type": "qemu"|"lxc"}, ...] for every
+    VM/CT config currently on any of the given PVE hosts (first reachable host
+    wins — /etc/pve is cluster-shared via pmxcfs). Used by the Clone/Instant
+    Recovery/Restore wizards to flag a target VMID *or* VM name that would
+    collide with something already there, before the write happens."""
     for hid in pve_host_ids:
         try:
             pve        = build_pve_client(db, hid)
             su, sp, sk = get_ssh_creds(pve)
             out = ssh_run(
                 pve.host, su, sp,
-                "{ ls /etc/pve/qemu-server/*.conf 2>/dev/null; "
-                "  ls /etc/pve/lxc/*.conf 2>/dev/null; } "
-                "| xargs -I{} basename {} .conf 2>/dev/null || true",
-                capture=True, key_material=sk, timeout=10,
+                "for f in /etc/pve/qemu-server/*.conf; do "
+                "  [ -f \"$f\" ] || continue; "
+                "  echo \"qemu $(basename \"$f\" .conf) $(grep -m1 '^name:' \"$f\" | cut -c7-)\"; "
+                "done; "
+                "for f in /etc/pve/lxc/*.conf; do "
+                "  [ -f \"$f\" ] || continue; "
+                "  echo \"lxc $(basename \"$f\" .conf) $(grep -m1 '^hostname:' \"$f\" | cut -c11-)\"; "
+                "done",
+                capture=True, key_material=sk, timeout=15,
             )
-            vmids = []
+            result = []
             for line in out.splitlines():
-                line = line.strip()
-                if line.isdigit():
-                    vmids.append(int(line))
-            return sorted(set(vmids))
+                parts = line.strip().split(" ", 2)
+                if len(parts) >= 2 and parts[1].isdigit():
+                    result.append({
+                        "type": parts[0],
+                        "vmid": int(parts[1]),
+                        "name": parts[2].strip() if len(parts) > 2 else "",
+                    })
+            return result
         except Exception:
             continue
     return []
@@ -402,22 +415,15 @@ def restore_vm_configs(manifest, pve_host_ids, vmid_offset,
                 # must be checked — not just this manifest entry's own guest type —
                 # or a same-numbered guest of the other type would be silently
                 # overwritten below.
-                other_dir  = "/etc/pve/qemu-server" if vm_type == "lxc" else "/etc/pve/lxc"
-                other_path = f"{other_dir}/{vmid_new}.conf"
-                check = ssh_run(
-                    sh, su, sp,
-                    f"{{ [ -f {shlex.quote(conf_path)} ] && echo OWN; "
-                    f"[ -f {shlex.quote(other_path)} ] && echo OTHER; }} 2>/dev/null; true",
-                    capture=True, key_material=sk, timeout=10,
-                )
-                if "OWN" in check:
+                status = vmid_conf_status(sh, su, sp, sk, vmid_new, vm_type)
+                if status == "own":
                     jlog.log(f"  VM {vmid_new} ({vm_type}): config already exists — skipping.")
                     written = True
                     break
-                if "OTHER" in check:
+                if status == "other":
                     jlog.log(f"  ERROR: VMID {vmid_new} is already in use as a different "
-                             f"guest type on this host ({other_path}) — skipping to avoid "
-                             f"a VMID conflict. Choose a different target VMID/offset.")
+                             f"guest type on this host — skipping to avoid a VMID conflict. "
+                             f"Choose a different target VMID/offset.")
                     break
 
                 # ── Rename disk files/LVs when VMID changes ───────────────────

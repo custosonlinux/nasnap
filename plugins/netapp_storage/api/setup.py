@@ -8,7 +8,6 @@ Deploy Wizard API
   setup/push-ssh-key      POST — push SSH pub key to a PVE host using one-time password
   setup/check-packages    POST — check which packages are installed on a PVE host
   setup/install-packages  POST — install packages on a PVE host (background job)
-  setup/create-ontap-user POST — create a dedicated plugin user on an ONTAP cluster
 """
 
 import json
@@ -25,7 +24,7 @@ from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
 from ..core._helpers import (
-    PLUGIN_ID, JobLogger, ssh_run, validate_safe_name, find_name_conflict,
+    PLUGIN_ID, JobLogger, ssh_run, validate_safe_name, find_name_or_host_conflict,
 )
 
 log = logging.getLogger(__name__)
@@ -107,90 +106,6 @@ def _test_endpoints():
         results.append(r)
 
     return jsonify({"results": results})
-
-
-# ── Step 3: Create dedicated ONTAP user ──────────────────────────────────────
-
-def _create_ontap_user():
-    """Creates a dedicated plugin user on an ONTAP cluster.
-
-    Body:
-      host          — cluster management IP/FQDN
-      admin_user    — existing admin username
-      admin_password
-      new_username  — username to create (default: nasnap)
-      new_password  — password for the new user
-      ssl_verify    — bool (default false)
-      role          — 'admin' (default) or 'readonly'
-    """
-    data = request.get_json() or {}
-
-    host           = data.get("host", "").strip()
-    admin_user     = data.get("admin_user", "admin").strip()
-    admin_password = data.get("admin_password", "").strip()
-    new_username   = data.get("new_username", "nasnap").strip()
-    new_password   = data.get("new_password", "").strip()
-    ssl_verify     = bool(data.get("ssl_verify", False))
-    role_name      = data.get("role", "admin")
-
-    if not host or not admin_password or not new_password:
-        return jsonify({"error": "host, admin_password and new_password are required"}), 400
-    if not new_username:
-        return jsonify({"error": "new_username must not be empty"}), 400
-
-    from ..core.ontap_client import OntapClient, OntapError
-    try:
-        client = OntapClient(
-            host=host,
-            username=admin_user,
-            password=admin_password,
-            ssl_verify=ssl_verify,
-            timeout=20,
-        )
-
-        # Verify admin credentials work
-        client._get("cluster", params={"fields": "name"})
-
-        # Check if user already exists
-        try:
-            existing = client._get(f"security/accounts/{new_username}")
-            return jsonify({
-                "ok":      True,
-                "created": False,
-                "message": f"User '{new_username}' already exists.",
-            })
-        except OntapError as e:
-            if e.status_code != 404:
-                raise
-
-        # Create the user: HTTP application + password auth, restricted to REST API only
-        body = {
-            "name": new_username,
-            "role": {"name": role_name},
-            "password": new_password,
-            "applications": [
-                {
-                    "application": "http",
-                    "authentication_methods": ["password"],
-                }
-            ],
-        }
-        client._post("security/accounts", body=body)
-
-        return jsonify({
-            "ok":      True,
-            "created": True,
-            "message": (
-                f"User '{new_username}' created with role '{role_name}'. "
-                f"HTTP/REST access only — no CLI or SSH access."
-            ),
-        })
-
-    except OntapError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        log.error(f"[setup] create_ontap_user failed: {exc}")
-        return jsonify({"error": str(exc)}), 500
 
 
 # ── Step 4: SSH key management ────────────────────────────────────────────────
@@ -659,12 +574,9 @@ def _import_pve_nodes():
 
     imported, skipped = [], []
     for node in node_names:
-        # Skip duplicates (same host OR same name), case-insensitive
-        existing = db.query_one(
-            "SELECT id FROM netapp_pve_hosts WHERE LOWER(host)=LOWER(?) OR LOWER(name)=LOWER(?)",
-            (node, node),
-        )
-        if existing:
+        # Skip duplicates (same host OR same name) — shared with the manual
+        # Add-PVE-Host form so both paths agree on what counts as a duplicate.
+        if find_name_or_host_conflict(db, "netapp_pve_hosts", node, node):
             skipped.append(node)
             continue
         host_id = str(_uuid.uuid4())
@@ -757,9 +669,19 @@ def _add_ontap_system():
         name = validate_safe_name(name, "Endpoint name")
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    conflict = find_name_conflict(get_db(), "netapp_endpoints", name)
+    # Only a genuine conflict — matching name on a DIFFERENT host — is rejected.
+    # Re-running this for the same host under the same name is the intended
+    # "update credentials" flow (Step D below finds it by host and updates it
+    # in place), not a duplicate.
+    conflict = get_db().query_one(
+        "SELECT id, name, host FROM netapp_endpoints WHERE LOWER(name)=LOWER(?) AND LOWER(host)!=LOWER(?)",
+        (name, host),
+    )
     if conflict:
-        return jsonify({"error": f"An ONTAP endpoint named '{conflict['name']}' already exists."}), 409
+        return jsonify({
+            "error": f"An ONTAP endpoint named '{conflict['name']}' ({conflict['host']}) already "
+                     f"exists — choose a different name.",
+        }), 409
 
     from ..core.ontap_client import OntapClient, OntapError
 
@@ -859,7 +781,6 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "setup/push-ssh-key",      _push_ssh_key)
     register_plugin_route(PLUGIN_ID, "setup/check-packages",    _check_packages)
     register_plugin_route(PLUGIN_ID, "setup/install-packages",  _install_packages)
-    register_plugin_route(PLUGIN_ID, "setup/create-ontap-user", _create_ontap_user)
     register_plugin_route(PLUGIN_ID, "setup/pve-clusters",      _get_pve_clusters)
     register_plugin_route(PLUGIN_ID, "setup/import-pve-nodes",  _import_pve_nodes)
     register_plugin_route(PLUGIN_ID, "setup/add-ontap-system",  _add_ontap_system)

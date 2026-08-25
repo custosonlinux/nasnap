@@ -408,10 +408,6 @@ def start_scheduler():
     _scheduler_thread.start()
 
 
-def stop_scheduler():
-    _scheduler_stop.set()
-
-
 # ── API handlers ───────────────────────────────────────────────────────────────
 
 def _list_schedules():

@@ -85,20 +85,42 @@ def sanitize_vm_name(name, fallback):
     return safe or fallback
 
 
-def is_vmid_in_use(host, user, password, key_material, vmid, timeout=10):
-    """True if a VM or CT config already exists for this VMID anywhere in the
-    cluster. qemu-server and lxc share one VMID numbering space in PVE, so
-    both directories must be checked — checking only the guest type being
-    written would miss a same-numbered guest of the *other* type."""
-    qemu_path = f"/etc/pve/qemu-server/{vmid}.conf"
-    lxc_path  = f"/etc/pve/lxc/{vmid}.conf"
+def vmid_conf_status(host, user, password, key_material, vmid, own_type="qemu", timeout=10):
+    """Checks whether a VMID's config already exists on this PVE cluster.
+
+    qemu-server and lxc share one VMID numbering space in PVE, so both
+    directories are always checked — checking only the guest type being
+    written would miss a same-numbered guest of the *other* type. This is
+    the single shared primitive behind every VMID-collision check in the
+    plugin (clone, instant recovery, restore-from-manifest); previously each
+    caller re-implemented its own version of this same shell check.
+
+    Returns:
+      "free"  — VMID isn't used anywhere.
+      "own"   — a config already exists for `own_type` (e.g. a prior/partial
+                write of the same restore — idempotent, usually fine to skip).
+      "other" — a DIFFERENT guest type occupies this VMID — a real conflict.
+    """
+    own_path   = f"/etc/pve/qemu-server/{vmid}.conf" if own_type == "qemu" else f"/etc/pve/lxc/{vmid}.conf"
+    other_path = f"/etc/pve/lxc/{vmid}.conf" if own_type == "qemu" else f"/etc/pve/qemu-server/{vmid}.conf"
     out = ssh_run(
         host, user, password,
-        f"{{ [ -f {shlex.quote(qemu_path)} ] && echo QEMU; "
-        f"[ -f {shlex.quote(lxc_path)} ] && echo LXC; }} 2>/dev/null; true",
+        f"{{ [ -f {shlex.quote(own_path)} ] && echo OWN; "
+        f"[ -f {shlex.quote(other_path)} ] && echo OTHER; }} 2>/dev/null; true",
         capture=True, key_material=key_material, timeout=timeout,
     )
-    return bool((out or "").strip())
+    out = out or ""
+    if "OWN" in out:
+        return "own"
+    if "OTHER" in out:
+        return "other"
+    return "free"
+
+
+def is_vmid_in_use(host, user, password, key_material, vmid, timeout=10):
+    """True if a VM or CT config already exists for this VMID anywhere in the
+    cluster (either guest type — see vmid_conf_status)."""
+    return vmid_conf_status(host, user, password, key_material, vmid, "qemu", timeout) != "free"
 
 
 _SAFE_NAME_RE = re.compile(r'^[A-Za-z0-9 ._-]+$')
@@ -133,6 +155,27 @@ def find_name_conflict(db, table, name, exclude_id=None, name_column="name"):
         return None
     q = f"SELECT * FROM {table} WHERE LOWER({name_column})=LOWER(?)"
     params = [name]
+    if exclude_id:
+        q += " AND id != ?"
+        params.append(exclude_id)
+    row = db.query_one(q, tuple(params))
+    return dict(row) if row else None
+
+
+def find_name_or_host_conflict(db, table, name, host, exclude_id=None):
+    """Case-insensitive uniqueness check on EITHER a `name` or a `host` column
+    of `table` — the shared shape behind "don't let two rows point at the same
+    machine under different names" for both netapp_pve_hosts and
+    netapp_endpoints. `table` is always a caller-supplied string literal
+    (never request input), so building the SQL with an f-string is safe.
+    Returns the conflicting row as a dict, or None.
+    """
+    name = (name or "").strip()
+    host = (host or "").strip()
+    if not name and not host:
+        return None
+    q = f"SELECT * FROM {table} WHERE LOWER(name)=LOWER(?) OR LOWER(host)=LOWER(?)"
+    params = [name, host]
     if exclude_id:
         q += " AND id != ?"
         params.append(exclude_id)

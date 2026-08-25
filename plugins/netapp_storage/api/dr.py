@@ -89,19 +89,6 @@ def _dr_start_job(job_type, username, plan_id=""):
     return job_id
 
 
-def _dr_job_log(job_id, lines):
-    db = get_db()
-    db.execute("UPDATE netapp_jobs SET log_json=? WHERE id=?", (json.dumps(lines), job_id))
-
-
-def _dr_job_finish(job_id, status, lines):
-    db = get_db()
-    db.execute(
-        "UPDATE netapp_jobs SET status=?, log_json=?, completed_at=? WHERE id=?",
-        (status, json.dumps(lines), _now(), job_id)
-    )
-
-
 def _live_dr_plan_state(db, plan_id, fallback_state):
     """Derives a stuck plan's real state from the DR-side SnapMirror relationships
     of its entries, instead of guessing from the *_running value it crashed in —

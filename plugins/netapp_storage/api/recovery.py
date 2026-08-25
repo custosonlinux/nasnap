@@ -459,12 +459,13 @@ def _recovery_restore_vms():
 
 
 def _recovery_used_vmids():
-    """Returns sorted list of VMIDs currently in use on the PVE hosts of a datastore
-    (or of a single PVE cluster, for wizards that don't have a datastore id handy
-    — Clone/Instant Recovery operate on a mapping/pve_cluster_id instead).
+    """Returns VMIDs and VM/CT names currently in use on the PVE hosts of a
+    datastore (or of a single PVE cluster, for wizards that don't have a
+    datastore id handy — Clone/Instant Recovery operate on a mapping/
+    pve_cluster_id instead).
 
     Query params: ds_id  OR  pve_cluster_id
-    Returns: {vmids: [100, 101, ...]}
+    Returns: {vmids: [100, 101, ...], names: ["web01", "db01", ...]}
     """
     err = _require_admin()
     if err:
@@ -484,10 +485,12 @@ def _recovery_used_vmids():
     else:
         pve_host_ids = [pve_cluster_id]
 
-    from ..core.recovery_engine import get_used_vmids
+    from ..core.recovery_engine import get_used_vm_identities
     try:
-        vmids = get_used_vmids(pve_host_ids, db)
-        return {"vmids": vmids}
+        identities = get_used_vm_identities(pve_host_ids, db)
+        vmids = sorted({i["vmid"] for i in identities})
+        names = sorted({i["name"] for i in identities if i.get("name")})
+        return {"vmids": vmids, "names": names}
     except Exception as exc:
         return {"error": str(exc)}, 500
 

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 176">
+  <!-- Favicon crop of nasnap_logo.svg — badge only, wordmark dropped (illegible at favicon size) -->
+  <rect x="20" y="8" width="160" height="160" rx="34" fill="#141E30"/>
+  <path d="M 72 93 A 32 32 0 1 1 132 83"
+        fill="none" stroke="white" stroke-width="9" stroke-linecap="round"/>
+  <polyline points="138,74 132,83 124,77"
+            fill="none" stroke="white" stroke-width="9"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="34" y="117" width="132" height="14" rx="4" fill="white"/>
+  <rect x="34" y="135" width="132" height="14" rx="4" fill="white" opacity="0.65"/>
+  <rect x="34" y="153" width="132" height="14" rx="4" fill="white" opacity="0.38"/>
+  <circle cx="158" cy="36" r="16" fill="#E57000"/>
+  <polyline points="148,28 157,36 148,44"
+            fill="none" stroke="white" stroke-width="3.2"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="163,28 154,36 163,44"
+            fill="none" stroke="white" stroke-width="3.2"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

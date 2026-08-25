@@ -3432,19 +3432,6 @@ def _prov_check_nfs_lif():
     return {"results": results}
 
 
-def _detect_nfs_client_ip(pve, nfs_lif_ip, jlog=None):
-    """Return the NFS VLAN IP of the PVE host for use in ONTAP export rules.
-
-    Priority: pve.nfs_ip (explicitly configured NFS network IP) → pve.host.
-    'ip route get' is intentionally NOT used here: on hosts where the default
-    gateway is on the management interface, it returns the management IP, not the
-    dedicated NFS VLAN IP that ONTAP must see as the client.
-    """
-    if pve.nfs_ip:
-        return pve.nfs_ip
-    return pve.host
-
-
 # ── NFS: provision ────────────────────────────────────────────────────────────
 
 def _grant_nfs_access(client, svm_name, policy_id, pve_host_ids, db, jlog):

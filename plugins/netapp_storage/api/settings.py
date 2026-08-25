@@ -1312,7 +1312,8 @@ def _pve_health_check():
             "host_id":    h["id"],
             "host_name":  h["name"],
             "host":       h["host"],
-            "stale_nfs":  [],
+            "stale_nfs":         [],
+            "orphan_nfs_mounts": [],
             "sfr_dirs":   [],
             "nasnap_vgs": [],
             "error":      "",
@@ -1331,6 +1332,25 @@ def _pve_health_check():
                 mp = line.strip()
                 if mp:
                     rec["stale_nfs"].append(mp)
+
+            # Orphaned NFS mounts: mounted in the OS under /mnt/pve/ but with no
+            # matching entry in `pvesm status` — i.e. PVE's own view no longer
+            # knows about a mount that's still live at the OS level. This is
+            # distinct from "stale file handle" above (the export is gone there);
+            # here the mount is perfectly healthy, just orphaned from PVE's
+            # bookkeeping. Seen after Instant Recovery teardown: `pvesm remove`
+            # only edits storage.cfg, it never unmounts the filesystem itself.
+            out1b = ssh_run(host, user, pw,
+                "pve_ids=$(pvesm status 2>/dev/null | awk 'NR>1{print $1}'); "
+                "for mp in $(mount -t nfs,nfs4 2>/dev/null | awk '{print $3}' | grep '^/mnt/pve/'); do "
+                "  sid=$(basename \"$mp\"); "
+                "  echo \"$pve_ids\" | grep -qxF \"$sid\" || echo \"$mp\"; "
+                "done 2>/dev/null || true",
+                capture=True, timeout=20)
+            for line in out1b.strip().splitlines():
+                mp = line.strip()
+                if mp:
+                    rec["orphan_nfs_mounts"].append(mp)
 
             # SFR leftover temp dirs
             out2 = ssh_run(host, user, pw,
@@ -1491,6 +1511,7 @@ def _pve_cleanup():
     data               = request.get_json() or {}
     host_id            = str(data.get("host_id", "")).strip()
     stale_nfs          = data.get("stale_nfs",          [])
+    orphan_nfs_mounts  = data.get("orphan_nfs_mounts",  [])
     sfr_dirs           = data.get("sfr_dirs",           [])
     nasnap_vgs         = data.get("nasnap_vgs",         [])
     orphan_nbds        = data.get("orphan_nbds",        [])
@@ -1518,6 +1539,20 @@ def _pve_cleanup():
         except Exception as e:
             ok, errmsg = False, str(e)
         items.append({"type": "stale_nfs", "target": mp, "ok": ok, "error": errmsg})
+
+    # Orphaned NFS mounts: still live at the OS level, just not registered
+    # with PVE anymore — plain unmount (not -l/stale-handle-style, the mount
+    # is healthy) then remove the now-empty mountpoint directory.
+    for mp in orphan_nfs_mounts:
+        ok, errmsg = True, ""
+        try:
+            ssh_run(host, user, pw,
+                f"umount {shlex.quote(mp)} 2>/dev/null || umount -l {shlex.quote(mp)} 2>/dev/null || true; "
+                f"rmdir {shlex.quote(mp)} 2>/dev/null || true",
+                timeout=15)
+        except Exception as e:
+            ok, errmsg = False, str(e)
+        items.append({"type": "orphan_nfs_mount", "target": mp, "ok": ok, "error": errmsg})
 
     # SFR dirs: kill users → find nbd device → unmount → disconnect nbd → rm -rf
     for d in sfr_dirs:

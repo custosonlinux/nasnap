@@ -33,7 +33,7 @@ from nasnap_core.api.plugins import register_plugin_route
 
 from ..core._helpers import (
     get_endpoint, build_ontap_client, load_plugin_config, is_system_snapshot,
-    validate_safe_name, find_name_conflict,
+    validate_safe_name, find_name_or_host_conflict,
 )
 from ..core.snapshot_engine import start_snapshot_job
 
@@ -84,9 +84,9 @@ def _add_endpoint():
         ep_name = validate_safe_name(data["name"], "Endpoint name")
     except ValueError as exc:
         return {"error": str(exc)}, 400
-    conflict = find_name_conflict(db, "netapp_endpoints", ep_name)
+    conflict = find_name_or_host_conflict(db, "netapp_endpoints", ep_name, data["host"])
     if conflict:
-        return {"error": f"An ONTAP endpoint named '{conflict['name']}' already exists."}, 409
+        return {"error": f"An ONTAP endpoint named '{conflict['name']}' ({conflict['host']}) already exists."}, 409
     eid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -186,10 +186,10 @@ def _update_endpoint():
         name = validate_safe_name(name, "Endpoint name")
     except ValueError as exc:
         return {"error": str(exc)}, 400
-    conflict = find_name_conflict(db, "netapp_endpoints", name, exclude_id=eid)
-    if conflict:
-        return {"error": f"An ONTAP endpoint named '{conflict['name']}' already exists."}, 409
     host       = data.get("host", "").strip() or dict(row)["host"]
+    conflict = find_name_or_host_conflict(db, "netapp_endpoints", name, host, exclude_id=eid)
+    if conflict:
+        return {"error": f"An ONTAP endpoint named '{conflict['name']}' ({conflict['host']}) already exists."}, 409
     username   = data.get("username", "").strip() or dict(row)["username"]
     ssl_verify = bool(data["ssl_verify"]) if "ssl_verify" in data else bool(dict(row)["ssl_verify"])
     skip_nfs   = bool(data["skip_nfs"])   if "skip_nfs"   in data else bool(dict(row)["skip_nfs"])
@@ -257,9 +257,9 @@ def _add_pve_host():
         host_name = validate_safe_name(data["name"], "PVE host name")
     except ValueError as exc:
         return {"error": str(exc)}, 400
-    conflict = find_name_conflict(db, "netapp_pve_hosts", host_name)
+    conflict = find_name_or_host_conflict(db, "netapp_pve_hosts", host_name, data["host"])
     if conflict:
-        return {"error": f"A PVE host named '{conflict['name']}' already exists."}, 409
+        return {"error": f"A PVE host named '{conflict['name']}' ({conflict['host']}) already exists."}, 409
     hid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     db.execute(
@@ -395,9 +395,9 @@ def _update_pve_host():
         host_name = validate_safe_name(data["name"], "PVE host name")
     except ValueError as exc:
         return {"error": str(exc)}, 400
-    conflict = find_name_conflict(db, "netapp_pve_hosts", host_name, exclude_id=hid)
+    conflict = find_name_or_host_conflict(db, "netapp_pve_hosts", host_name, data["host"], exclude_id=hid)
     if conflict:
-        return {"error": f"A PVE host named '{conflict['name']}' already exists."}, 409
+        return {"error": f"A PVE host named '{conflict['name']}' ({conflict['host']}) already exists."}, 409
     password = data.get("password", "").strip()
     enc = db._encrypt(password) if password else row["password_encrypted"]
     db.execute(

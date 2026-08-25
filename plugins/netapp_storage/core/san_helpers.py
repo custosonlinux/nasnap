@@ -25,31 +25,6 @@ log = logging.getLogger(__name__)
 
 # ── LVM type detection ─────────────────────────────────────────────────────────
 
-def detect_lvm_type(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name):
-    """Detects whether a VG uses LVM linear or LVM thin.
-
-    Returns ('thin', pool_lv_name) or ('linear', '').
-    """
-    vg_q = shlex.quote(vg_name)
-    try:
-        out = ssh_run(
-            ssh_host, ssh_user, ssh_pass,
-            f"lvs --noheadings -o lv_name,lv_attr {vg_q} 2>/dev/null",
-            capture=True, key_material=ssh_key,
-        )
-        for line in out.splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and parts[1].startswith("t"):
-                pool_name = parts[0].strip()
-                log.info(f"[netapp_storage] VG {vg_name}: LVM thin, Pool='{pool_name}'")
-                return "thin", pool_name
-        log.info(f"[netapp_storage] VG {vg_name}: LVM linear")
-        return "linear", ""
-    except Exception as exc:
-        log.warning(f"[netapp_storage] LVM type detection {vg_name} failed: {exc}")
-        return "linear", ""
-
-
 def get_vg_lv_map(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name):
     """Returns all LVs of a VG: {lv_name: {'size': str, 'attr': str}}."""
     vg_q = shlex.quote(vg_name)

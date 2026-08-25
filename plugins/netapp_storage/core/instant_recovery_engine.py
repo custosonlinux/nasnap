@@ -270,6 +270,19 @@ def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                    key_material=pve_key)
         except Exception as exc:
             log.warning(f"[netapp_storage] cleanup pvesm remove: {exc}")
+        # pvesm remove only edits storage.cfg — it does NOT unmount the
+        # filesystem. Without this, a leftover NFS mount survives at
+        # /mnt/pve/<temp_storage_id> with no corresponding PVE storage entry,
+        # invisible to `pvesm status` from this point on (a "PVE Host
+        # Maintenance" check flags these as orphan_nfs_mounts).
+        try:
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"umount /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null || "
+                   f"umount -l /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null; "
+                   f"rmdir /mnt/pve/{shlex.quote(temp_storage_id)} 2>/dev/null; true",
+                   key_material=pve_key)
+        except Exception as exc:
+            log.warning(f"[netapp_storage] cleanup umount temp storage: {exc}")
     if clone_vol_uuid and endpoint_id:
         try:
             endpoint = get_endpoint(db, endpoint_id)
@@ -302,6 +315,17 @@ def _teardown_session_clone(db, sess, jlog):
                key_material=pve_key)
     except Exception as exc:
         jlog.log(f"WARNING: pvesm remove failed: {exc}")
+    try:
+        # pvesm remove only edits storage.cfg, never unmounts — do that
+        # explicitly or the mount survives with no PVE storage entry to
+        # find it by (see PVE Host Maintenance's orphan_nfs_mounts check).
+        temp_mp = shlex.quote(f"/mnt/pve/{sess['temp_storage_id']}")
+        ssh_run(pve_host, pve_user, pve_pass,
+               f"umount {temp_mp} 2>/dev/null || umount -l {temp_mp} 2>/dev/null; "
+               f"rmdir {temp_mp} 2>/dev/null; true",
+               key_material=pve_key)
+    except Exception as exc:
+        jlog.log(f"WARNING: umount temp storage failed: {exc}")
 
     if sess.get("clone_volume_uuid"):
         try:

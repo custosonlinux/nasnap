@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NetApp Storage</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMTc2Ij4KICA8IS0tIEZhdmljb24gY3JvcCBvZiBuYXNuYXBfbG9nby5zdmcg4oCUIGJhZGdlIG9ubHksIHdvcmRtYXJrIGRyb3BwZWQgKGlsbGVnaWJsZSBhdCBmYXZpY29uIHNpemUpIC0tPgogIDxyZWN0IHg9IjIwIiB5PSI4IiB3aWR0aD0iMTYwIiBoZWlnaHQ9IjE2MCIgcng9IjM0IiBmaWxsPSIjMTQxRTMwIi8+CiAgPHBhdGggZD0iTSA3MiA5MyBBIDMyIDMyIDAgMSAxIDEzMiA4MyIKICAgICAgICBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjkiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxwb2x5bGluZSBwb2ludHM9IjEzOCw3NCAxMzIsODMgMTI0LDc3IgogICAgICAgICAgICBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjkiCiAgICAgICAgICAgIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDxyZWN0IHg9IjM0IiB5PSIxMTciIHdpZHRoPSIxMzIiIGhlaWdodD0iMTQiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIvPgogIDxyZWN0IHg9IjM0IiB5PSIxMzUiIHdpZHRoPSIxMzIiIGhlaWdodD0iMTQiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIgb3BhY2l0eT0iMC42NSIvPgogIDxyZWN0IHg9IjM0IiB5PSIxNTMiIHdpZHRoPSIxMzIiIGhlaWdodD0iMTQiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIgb3BhY2l0eT0iMC4zOCIvPgogIDxjaXJjbGUgY3g9IjE1OCIgY3k9IjM2IiByPSIxNiIgZmlsbD0iI0U1NzAwMCIvPgogIDxwb2x5bGluZSBwb2ludHM9IjE0OCwyOCAxNTcsMzYgMTQ4LDQ0IgogICAgICAgICAgICBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMuMiIKICAgICAgICAgICAgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHBvbHlsaW5lIHBvaW50cz0iMTYzLDI4IDE1NCwzNiAxNjMsNDQiCiAgICAgICAgICAgIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMy4yIgogICAgICAgICAgICBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+Cg==">
 <link rel="stylesheet"
   href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
   media="print" onload="this.media='all'">
@@ -843,7 +844,6 @@
   body.glass-theme #addEndpointForm > div,
   body.glass-theme #editEndpointForm > div,
   body.glass-theme #editPveHostForm > div,
-  body.glass-theme #restoreConfirmModal > div,
   body.glass-theme #deleteConfirmModal > div,
   body.glass-theme #rwModal > div,
   body.glass-theme #cwModal > div,
@@ -2274,6 +2274,10 @@ function applyI18n() {
           <span id="discoverSpinner" style="display:none" class="spinner"></span>
           <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>Detect &amp; Scan
         </button>
+        <button class="btn btn-ghost" onclick="scanSnapMirror()" title="Re-scan SnapMirror/SnapVault relationships only — faster than a full Detect &amp; Scan">
+          <span id="smScanSpinner" style="display:none" class="spinner"></span>
+          <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Rescan SnapMirror
+        </button>
       </div>
 
       <!-- ── All Datastores table ──────────────────────────────── -->
@@ -2316,11 +2320,22 @@ function applyI18n() {
         </div>
       </div>
 
-      <!-- Audit Log — disabled for now
       <div class="card table-scroll" style="margin-top:20px">
-        ...
+        <div class="card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <svg class="tab-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          <span>Audit Log</span>
+          <span id="audit_count" style="color:var(--muted);font-size:12px"></span>
+          <button class="btn btn-ghost btn-sm" onclick="loadAuditLog()">Refresh</button>
+        </div>
+        <table style="min-width:760px">
+          <thead><tr>
+            <th>Time</th><th>User</th><th>Action</th><th>Target</th><th>VMs</th><th>Result</th>
+          </tr></thead>
+          <tbody id="auditBody">
+            <tr><td colspan="6" class="empty"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
       </div>
-      -->
     </div>
 
     <!-- ════════════════════════ DISASTER RECOVERY ════════════════════════ -->
@@ -3050,7 +3065,6 @@ var _vsAllFiltered    = [];
 var _vsRowH           = 46;
 var _vsScrollAttached = false;
 var _vsSelectedKeys   = new Set();
-let _selectedRestoreSnap = null;  // active snapshot in the restore form
 
 // ── Personal timezone (Settings → Profile) ───────────────────────────────
 // Empty = fall back to the browser's own timezone (today's implicit behavior).
@@ -3142,7 +3156,7 @@ window.addEventListener('pageshow', function(evt) {
     'editPveHostForm','addPveHostForm','setupWizardModal','provWizModal',
     'bindWizModal','vmImportModal','drAddPlanModal','drAddEntryModal',
     'drAddGroupModal','drAddVmModal',
-    'drFailoverModal','drEditEntryModal','restoreConfirmModal',
+    'drFailoverModal','drEditEntryModal',
     'deleteConfirmModal','logViewModal','rwModal','cwModal','ncModal',
     'vmInfoModal','bulkMigrateModal','smConfigModal'
   ];
@@ -3315,13 +3329,29 @@ document.querySelectorAll('.subtab').forEach(function(t) {
       restore:   function(){ loadRcVmList(); },
       'instant-recovery': loadInstantRecoverySessions,
       storage:   loadStorageUnified,
-      jobs:      loadAllJobs,
+      jobs:      function(){ loadAllJobs(); loadAuditLog(); },
       settings:  function(){ loadEndpoints(); loadPveHosts(); loadSmtp(); loadReportConfig(); loadLdap(); loadUiSettings(); loadServerSettings(); loadAutoScanSetting(); loadDbBackupConfig(); loadJobRetention(); },
       dr:        drInit
     };
     if (loaders[t.dataset.tab]) loaders[t.dataset.tab]();
   });
 });
+
+// Per-tab help button, injected into the topbar (left of the userbar app.py
+// adds server-side) — showTabHelp() with no arg auto-detects the active tab.
+(function() {
+  var tb = document.querySelector('.topbar');
+  if (!tb) return;
+  var btn = document.createElement('button');
+  btn.id = 'tabHelpBtn';
+  btn.title = 'Help for this tab';
+  btn.textContent = '?';
+  btn.style.cssText = 'width:26px;height:26px;border-radius:50%;border:1px solid var(--border);'
+    + 'background:var(--card);color:var(--text);cursor:pointer;font-weight:700;font-size:13px;'
+    + 'line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+  btn.onclick = function(){ showTabHelp(); };
+  tb.insertBefore(btn, tb.firstChild);
+})();
 
 function sidebarToggleGroup(name) {
   var grp = document.getElementById('sidebarGroup' + (name || 'Protection'));
@@ -3819,75 +3849,6 @@ async function deletePveHost(id, name) {
 
 // ═══════════════════════════ DISCOVERY ════════════════════════════════════
 
-async function loadMappings() {
-  try {
-    var rows = await apiFetch('volume-mappings');
-    _mappingsCache = rows;
-    var tbody = document.getElementById('mappingsBody');
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty">'+t('empty_mappings')+'</td></tr>';
-      return;
-    }
-    // Track which pve_storage_ids are already in the provisioning tab
-    var provIds = {};
-    try {
-      var provData = await apiFetch('provisioning/datastores');
-      (provData.datastores || []).forEach(function(d){ provIds[d.pve_storage_id] = true; });
-    } catch(e) {}
-    var volumeMap = {};
-    rows.forEach(function(m) {
-      var key = m.volume_uuid || m.volume_name;
-      if (!volumeMap[key]) { volumeMap[key] = Object.assign({}, m, {_hosts: []}); }
-      volumeMap[key]._hosts.push(m.pve_host_name || m.pve_cluster_id);
-    });
-    tbody.innerHTML = Object.values(volumeMap).map(function(m) {
-      var hostsHtml = m._hosts.map(function(h){
-        return '<span class="badge badge-blue" style="font-size:10px">'+esc(h)+'</span>';
-      }).join(' ');
-      var isSan = m.storage_protocol && m.storage_protocol !== 'nfs';
-      var proto = (m.storage_protocol || 'nfs').toLowerCase();
-      var badgeBg = {nfs:'#0ea5e9', iscsi:'#f97316', nvme:'#a855f7'}[proto] || 'var(--info)';
-      var asaLabel = (m.san_optimized && isSan) ? ' ASA' : '';
-      var protoBadge = '<span class="badge" style="background:'+badgeBg+';color:#fff;font-size:10px">'+proto.toUpperCase()+asaLabel+'</span> ';
-      // col5: protocol badge + junction path (NFS) or VG name (SAN)
-      var col5 = isSan
-        ? protoBadge + '<span style="color:var(--muted);font-size:11px">VG: '+esc(m.lvm_vg_name||'')+'</span>'
-        : protoBadge + '<code>'+esc(m.junction_path||'')+'</code>';
-      // col6: NFS server IP (NFS) or snapmanifest status (SAN)
-      var snapBtn = '';
-      if (isSan) {
-        if (m.snapinfo_initialized) {
-          snapBtn = '<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:var(--success);color:#000;border:none;cursor:pointer" '
-            + 'onclick="snapmanifestCheck(\''+esc(m.id)+'\',\''+esc(m.pve_storage_id)+'\')" title="Re-check snapmanifest LV (click to verify)">'
-            + 'snapmanifest ✓ ready</button>';
-        } else {
-          snapBtn = '<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:var(--warning);color:#000" '
-            + 'onclick="snapmanifestInit(\''+esc(m.id)+'\',\''+esc(m.pve_storage_id)+'\')" title="Initialize snapmanifest LV">'
-            + 'Setup snapmanifest</button>';
-        }
-      }
-      var col6 = isSan ? snapBtn : esc(m.nfs_export_ip||'');
-      var delBtn = '<button class="btn btn-sm" style="font-size:11px;padding:2px 6px;background:none;border:1px solid var(--error);color:var(--error);cursor:pointer" '
-        + 'onclick="deleteMapping(\''+esc(m.id)+'\',\''+esc(m.pve_storage_id)+'\')" title="Remove mapping from database">✕</button>';
-      var importBtn = '';
-      if (!provIds[m.pve_storage_id]) {
-        importBtn = ' <button class="btn btn-sm" style="font-size:11px;padding:2px 6px;background:none;border:1px solid var(--info);color:var(--info);cursor:pointer" '
-          + 'onclick="importToProvisioning(\''+esc(m.id)+'\',\''+esc(m.pve_storage_id)+'\')" title="Add to Provisioning tab">+ Prov</button>';
-      }
-      return '<tr>' +
-        '<td>'+hostsHtml+'</td>' +
-        '<td><strong>'+esc(m.pve_storage_id)+'</strong></td>' +
-        '<td><code style="font-size:11px">'+esc(m.svm_name)+'</code></td>' +
-        '<td><code style="font-size:11px">'+esc(m.volume_name)+'</code></td>' +
-        '<td>'+col5+'</td>' +
-        '<td>'+col6+'</td>' +
-        '<td><code style="font-size:11px">'+esc(m.endpoint_name||'')+'</code></td>' +
-        '<td style="color:var(--muted)">'+fmtDateRel(m.discovered_at)+'</td>' +
-        '<td>'+delBtn+importBtn+'</td></tr>';
-    }).join('');
-  } catch(e) { toast(e.message,'error'); }
-}
-
 async function snapmanifestCheck(mappingId, storageId) {
   try {
     var r = await apiPost('san/snapmanifest-check', {mapping_id: mappingId});
@@ -4194,26 +4155,6 @@ async function loadVmsForMapping(mappingId) {
   } catch(e) {
     sel.innerHTML = '<option disabled>'+esc(e.message)+'</option>';
   }
-}
-
-function selectAllVms() {
-  var sel = document.getElementById('snap_vmids_select');
-  for (var i = 0; i < sel.options.length; i++) sel.options[i].selected = true;
-}
-
-async function loadProtectionSummary() {
-  var bar = document.getElementById('protSummaryBar');
-  if (!bar) return;
-  try {
-    var d = await apiFetch('snapshots/protection-summary');
-    var hasVms = d.total_vms > 0;
-    document.getElementById('psBadgeTotal').textContent   = d.total_vms + ' total';
-    document.getElementById('psBadgeRunning').textContent = '▶ ' + d.running_vms + ' running';
-    document.getElementById('psBadgeStopped').textContent = '■ ' + d.stopped_vms + ' stopped';
-    document.getElementById('psBadgeProt').textContent    = d.protected_datastores + ' / ' + d.total_datastores + ' protected';
-    document.getElementById('psBadgeScheds').textContent  = d.active_schedules + ' active schedule' + (d.active_schedules === 1 ? '' : 's');
-    bar.style.display = 'flex';
-  } catch(e) { /* silently skip if PVE unreachable */ }
 }
 
 async function loadSnapshots() {
@@ -4600,9 +4541,6 @@ async function deleteSnapshotNative(ontap_snap_uuid, mapping_id, name) {
   showDeleteConfirm(null, name, true, ontap_snap_uuid, mapping_id);
 }
 
-// ── Danger Modals: Restore Confirm ────────────────────────────────────────
-
-var _restoreConfirmData = null;
 var _currentLogJobId = null;
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -5204,21 +5142,29 @@ async function irLoadNextId() {
 
 async function irCheckVmid() {
   var vmid    = parseInt(document.getElementById('ir_new_vmid').value, 10);
+  var newName = document.getElementById('ir_new_name').value.trim();
   var warnEl  = document.getElementById('ir_vmid_warn');
   var btn     = document.getElementById('irStartSubmitBtn');
-  if (!vmid || !_irState.pveClusterId) { warnEl.style.display='none'; btn.disabled=false; return; }
+  if ((!vmid && !newName) || !_irState.pveClusterId) { warnEl.style.display='none'; btn.disabled=false; return; }
   try {
     var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_irState.pveClusterId));
-    var conflict = (d.vmids||[]).indexOf(vmid) !== -1;
+    var msgs = [];
+    if (vmid && (d.vmids||[]).indexOf(vmid) !== -1) {
+      msgs.push('VMID ' + esc(vmid) + ' is already in use on this cluster.');
+    }
+    if (newName && (d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(newName.toLowerCase()) !== -1) {
+      msgs.push('A VM named "' + esc(newName) + '" already exists on this cluster.');
+    }
+    var conflict = msgs.length > 0;
     if (conflict) {
-      warnEl.textContent = '⚠ VMID ' + vmid + ' is already in use on this cluster — choose a different ID.';
+      warnEl.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
       warnEl.style.display = 'block';
     } else {
       warnEl.style.display = 'none';
     }
     btn.disabled = conflict;
   } catch(e) {
-    // non-fatal — server still enforces this at start time
+    // non-fatal — server still enforces the VMID check at start time
     warnEl.style.display='none'; btn.disabled=false;
   }
 }
@@ -6313,20 +6259,27 @@ async function cwBuildSummary() {
   document.getElementById('cw_sum_net').textContent   = netIso ? 'Disconnected (link_down=1)' : 'Connected';
   document.getElementById('cw_sum_start').textContent = startA ? 'Yes' : 'No';
 
-  // Fresh, system-checked VMID-conflict warning — the server also rejects a
-  // colliding VMID at clone time, but flagging it here means the wizard
-  // catches it before the (potentially long) disk-copy even starts.
+  // Fresh, system-checked VMID- and name-conflict warning — the server also
+  // rejects a colliding VMID at clone time, but flagging it here means the
+  // wizard catches it before the (potentially long) disk-copy even starts.
   var conflictBox = document.getElementById('cw_sum_conflict');
-  var conflict = false;
+  var msgs = [];
+  var effName = (newName || ('clone-' + (_cwState.name || _cwState.vmid))).toLowerCase();
   if (newVmid && _cwState.pveClusterId) {
     try {
       var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_cwState.pveClusterId));
-      conflict = (d.vmids||[]).indexOf(parseInt(newVmid,10)) !== -1;
-    } catch(e) { /* non-fatal — server still enforces this at clone time */ }
+      if ((d.vmids||[]).indexOf(parseInt(newVmid,10)) !== -1) {
+        msgs.push('VMID ' + esc(newVmid) + ' is already in use on this cluster.');
+      }
+      if ((d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(effName) !== -1) {
+        msgs.push('A VM named "' + esc(newName||effName) + '" already exists on this cluster.');
+      }
+    } catch(e) { /* non-fatal — server still enforces the VMID check at clone time */ }
   }
+  var conflict = msgs.length > 0;
   if (conflict) {
     conflictBox.style.display = 'block';
-    conflictBox.textContent = '⚠ VMID ' + newVmid + ' is already in use on this cluster — choose a different ID.';
+    conflictBox.innerHTML = '⚠ ' + msgs.join('<br>⚠ ') + ' Choose a different ID/name.';
   } else {
     conflictBox.style.display = 'none';
   }
@@ -6709,102 +6662,6 @@ function _blastRadiusHtml(vmids, vmNames) {
   }).join(' ');
 }
 
-function showRestoreConfirm() {
-  var snap = _selectedRestoreSnap;
-  if (!snap) return;
-  var txtVisible = document.getElementById('restore_vmid_text').style.display !== 'none';
-  var vmid = txtVisible
-    ? parseInt(document.getElementById('restore_vmid_text').value)
-    : parseInt(document.getElementById('restore_vmid').value);
-  var method = document.getElementById('restore_method').value;
-  var dsSel = document.getElementById('restore_datastore');
-  var dsText = dsSel && dsSel.options[dsSel.selectedIndex] ? dsSel.options[dsSel.selectedIndex].text : snap.mapping_id;
-
-  _restoreConfirmData = { snap: snap, vmid: vmid, method: method };
-
-  var vmids = snap.vmids || [];
-  var vmNames = snap.vm_names || {};
-
-  document.getElementById('rcm_snap_name').textContent = snap.snap_name;
-  document.getElementById('rcm_datastore').textContent = dsText;
-  document.getElementById('rcm_method').textContent = method;
-  document.getElementById('rcm_vmid').textContent = vmid + (vmNames[String(vmid)] ? ' – ' + vmNames[String(vmid)] : '');
-  document.getElementById('rcm_blast_vms').innerHTML = _blastRadiusHtml(vmids, vmNames);
-  document.getElementById('rcm_expected').textContent = snap.snap_name;
-  document.getElementById('rcm_confirm_input').value = '';
-  document.getElementById('rcm_submit').disabled = true;
-  document.getElementById('rcm_safety').checked = true;
-
-  var modal = document.getElementById('restoreConfirmModal');
-  modal.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-  setTimeout(function(){ trapFocus(modal); document.getElementById('rcm_confirm_input').focus(); }, 80);
-}
-
-function hideRestoreConfirm() {
-  document.getElementById('restoreConfirmModal').style.display = 'none';
-  document.body.style.overflow = '';
-  _restoreConfirmData = null;
-}
-
-function rcmCheckInput() {
-  var expected = document.getElementById('rcm_expected').textContent;
-  var val = document.getElementById('rcm_confirm_input').value;
-  document.getElementById('rcm_submit').disabled = (val !== expected);
-}
-
-async function doRestoreConfirmed() {
-  if (!_restoreConfirmData) return;
-  var snap   = _restoreConfirmData.snap;
-  var vmid   = _restoreConfirmData.vmid;
-  var method = _restoreConfirmData.method;
-  var safety = document.getElementById('rcm_safety').checked;
-
-  var btn = document.getElementById('rcm_submit');
-  btn.disabled = true;
-  btn.textContent = 'Running…';
-
-  if (safety) {
-    try {
-      var today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      await apiPost('snapshots/create', {
-        mapping_id:  snap.mapping_id,
-        name:        'safety_pre_restore_' + today,
-        consistency: 'crash',
-        vmids:       [],
-      });
-    } catch(e) {
-      var cont = await uiConfirm(
-        'Safety snapshot could not be created:\n' + (e.message || e) +
-        '\n\nProceed with restore anyway?',
-        'Proceed', 'btn-danger'
-      );
-      if (!cont) {
-        btn.disabled = false;
-        btn.textContent = 'Start VM Restore';
-        return;
-      }
-    }
-  }
-
-  var isNative = snap.source === 'ontap_native';
-  var payload  = isNative
-    ? { native: true, mapping_id: snap.mapping_id, snap_name: snap.snap_name, vmid: vmid, method: method }
-    : { snapshot_id: snap.id, vmid: vmid, method: method };
-
-  try {
-    var d = await apiPost('restore/start', payload);
-    hideRestoreConfirm();
-    toast(t('msg_restore_started').replace('%s',''), 'success');
-    if (d.job_id) trackJob(d.job_id, 'Restore: ' + (snap ? snap.snap_name : ''));
-    actLogStart();
-  } catch(e) {
-    toast(e.message, 'error', e.detail);
-    btn.disabled = false;
-    btn.textContent = 'Start VM Restore';
-  }
-}
-
 // ── Danger Modals: Delete Confirm ────────────────────────────────────────
 
 var _deleteConfirmData = null;
@@ -6973,211 +6830,6 @@ async function doDeleteConfirmed() {
       btn.textContent = 'Delete Snapshot';
     }
   }
-}
-
-// ═══════════════════════════ CLONE ════════════════════════════════════════
-
-var _cloneSnap = null;
-
-async function loadCloneSnapshots() {
-  try { _allSnapshots = await apiFetch('snapshots'); } catch(e) {}
-  var done = _allSnapshots.filter(function(s){ return s.status === 'done'; });
-
-  var datastores = {};
-  done.forEach(function(s) {
-    var key = s.mapping_id;
-    if (!datastores[key]) {
-      datastores[key] = {
-        mapping_id: key,
-        label: (s.pve_storage_id || s.volume_name || key) + ' [' + _snapProtoLabel(s) + ']',
-      };
-    }
-  });
-
-  var dsSel = document.getElementById('clone_datastore');
-  var cur = dsSel ? dsSel.value : '';
-  if (dsSel) {
-    dsSel.innerHTML = '<option value="">— Select datastore —</option>' +
-      Object.values(datastores).map(function(d){
-        return '<option value="'+esc(d.mapping_id)+'">'+esc(d.label)+'</option>';
-      }).join('');
-    if (cur && datastores[cur]) {
-      dsSel.value = cur;
-      onCloneDatastoreChange();
-    } else {
-      var snapSel = document.getElementById('clone_snap');
-      snapSel.innerHTML = '<option value="">— select datastore first —</option>';
-      snapSel.disabled  = true;
-    }
-  }
-}
-
-function onCloneDatastoreChange() {
-  var mappingId = document.getElementById('clone_datastore').value;
-  var snapSel   = document.getElementById('clone_snap');
-
-  if (!mappingId) {
-    snapSel.innerHTML = '<option value="">— select datastore first —</option>';
-    snapSel.disabled  = true;
-    document.getElementById('cloneFormInfo').textContent = '';
-    return;
-  }
-
-  var done = _allSnapshots.filter(function(s){
-    return s.status === 'done' && s.mapping_id === mappingId;
-  });
-  // Plugin-managed first, native at the end (they carry an older manifest)
-  var pluginSnaps = done.filter(function(s){ return s.source !== 'ontap_native'; });
-  var nativeSnaps = done.filter(function(s){ return s.source === 'ontap_native'; });
-  var sorted = pluginSnaps.concat(nativeSnaps);
-  snapSel.innerHTML = sorted.length
-    ? '<option value="">'+t('snap_choose')+'</option>' +
-      sorted.map(function(s){
-        var prefix = s.source === 'ontap_native' ? '[ONTAP] ' : '';
-        return '<option value="'+s.id+'">'+prefix+esc(s.snap_name)+
-               ' &nbsp;('+fmtDate(s.created_at)+')</option>';
-      }).join('')
-    : '<option value="">— no snapshots —</option>';
-  snapSel.disabled = false;
-  document.getElementById('cloneFormInfo').textContent = '';
-}
-
-async function prepareCloneFromSelect() {
-  var snapId = document.getElementById('clone_snap').value;
-  if (!snapId) { _cloneSnap = null; document.getElementById('cloneFormInfo').textContent = ''; return; }
-  var snap = _allSnapshots.find(function(s){ return String(s.id) === String(snapId); });
-  if (!snap) return;
-  await _fillCloneForm(snap);
-}
-
-async function _fillCloneForm(snap) {
-  _cloneSnap = snap;
-  var proto = (snap.storage_protocol || 'nfs').toLowerCase();
-  var methodDesc = {
-    nvme:  'NVMe Clone: namespace clone → vgimportclone → LV-copy + new VMID + new MAC',
-    iscsi: 'iSCSI Clone: LUN clone → vgimportclone → LV-copy + new VMID + new MAC',
-    nfs:   'NFS Clone: ONTAP file clone (CoW) → new VMID + new MAC',
-  }[proto] || '';
-  document.getElementById('cloneFormInfo').textContent =
-    snap.snap_name + ' (' + (snap.volume_name||'') + ') — ' + methodDesc;
-  document.getElementById('clone_new_name').value = '';
-  document.getElementById('clone_new_vmid').value = '';
-  document.getElementById('clone_start_after').checked = false;
-
-  var srcSel  = document.getElementById('clone_src_vmid');
-  var txtSel  = document.getElementById('clone_src_vmid_text');
-  var hint    = document.getElementById('clone_manifest_hint');
-  txtSel.style.display = 'none';
-  hint.style.display   = 'none';
-  srcSel.style.display = '';
-  srcSel.innerHTML = '<option value="">'+t('hint_loading')+'</option>';
-
-  var vmids = snap.vmids || [];
-  var vmNames = snap.vm_names || {};
-
-  if (snap.source === 'ontap_native' || !vmids.length) {
-    try {
-      var m = await apiFetch(
-        'snapshots/manifest?snap_name='+encodeURIComponent(snap.snap_name)+
-        '&mapping_id='+encodeURIComponent(snap.mapping_id)
-      );
-      vmids = m.vmids || [];
-      vmNames = m.vm_names || {};
-      if (m.manifest_snap_name && m.manifest_snap_name !== snap.snap_name) {
-        hint.textContent = 'Manifest from "'+esc(m.manifest_snap_name)+'" used (most recent NaSnap snapshot in this ONTAP snapshot).';
-        hint.style.display = '';
-      }
-    } catch(e) {
-      // Manifest not available (e.g. native SAN snapshot) — fall back to manual input
-      vmids = [];
-    }
-  }
-
-  if (vmids.length) {
-    srcSel.innerHTML = vmids.map(function(v){
-      var n = (vmNames||{})[String(v)];
-      return '<option value="'+v+'">'+v+(n?' – '+esc(n):'')+'</option>';
-    }).join('');
-  } else {
-    srcSel.style.display = 'none';
-    txtSel.style.display = '';
-    hint.textContent = t('msg_no_manifest');
-    hint.style.display = '';
-  }
-
-  await _loadCloneNodes(snap.pve_cluster_id);
-  suggestNextId();
-}
-
-async function _loadCloneNodes(pveClusterId) {
-  var sel  = document.getElementById('clone_target_node');
-  var txt  = document.getElementById('clone_target_node_text');
-  sel.style.display = '';
-  txt.style.display = 'none';
-  sel.innerHTML = '<option value="">'+t('hint_loading')+'</option>';
-  var nodes = [];
-  try {
-    var d = await apiFetch('clone/nodes?pve_cluster_id='+encodeURIComponent(pveClusterId));
-    nodes = d.nodes || [];
-  } catch(e) {}
-  if (nodes.length) {
-    sel.innerHTML = nodes.map(function(n){ return '<option value="'+esc(n)+'">'+esc(n)+'</option>'; }).join('');
-    txt.style.display = 'none';
-  } else {
-    sel.style.display = 'none';
-    txt.style.display = '';
-    txt.value = '';
-  }
-}
-function _syncNodeText(v) {
-  /* keeps the hidden select in sync so startClone() reads the right value */
-  var sel = document.getElementById('clone_target_node');
-  var opt = sel.querySelector('option[value="'+v+'"]');
-  if (!opt) {
-    opt = document.createElement('option');
-    opt.value = v;
-    sel.appendChild(opt);
-  }
-  sel.value = v;
-}
-
-async function suggestNextId() {
-  if (!_cloneSnap) return;
-  try {
-    var d = await apiFetch('clone/nextid?pve_cluster_id='+encodeURIComponent(_cloneSnap.pve_cluster_id));
-    if (d.vmid) document.getElementById('clone_new_vmid').value = d.vmid;
-  } catch(e) {}
-}
-
-function onCloneSrcChange() { /* placeholder for future extensions */ }
-
-async function startClone() {
-  try {
-    if (!_cloneSnap) { toast(t('msg_no_snap'),'error'); return; }
-    var txtVisible  = document.getElementById('clone_src_vmid_text').style.display !== 'none';
-    var src_vmid    = txtVisible
-      ? parseInt(document.getElementById('clone_src_vmid_text').value)
-      : parseInt(document.getElementById('clone_src_vmid').value);
-    var new_vmid    = parseInt(document.getElementById('clone_new_vmid').value);
-    var target_node = document.getElementById('clone_target_node').value;
-    var new_name    = document.getElementById('clone_new_name').value.trim();
-    var start_after = document.getElementById('clone_start_after').checked;
-
-    if (!src_vmid)    { toast(t('msg_src_vm_req'),'error'); return; }
-    if (!new_vmid)    { toast(t('msg_vmid_req'),'error');   return; }
-    if (!target_node) { toast(t('msg_node_req'),'error');   return; }
-
-    var isNative = _cloneSnap.source === 'ontap_native';
-    var payload = isNative
-      ? { native: true, mapping_id: _cloneSnap.mapping_id, snap_name: _cloneSnap.snap_name,
-          src_vmid, new_vmid, target_node, new_name, start_after }
-      : { snapshot_id: _cloneSnap.id, src_vmid, new_vmid, target_node, new_name, start_after };
-    var d = await apiPost('clone/start', payload);
-    toast(t('msg_clone_started').replace('%s',''), 'success');
-    if (d.job_id) trackJob(d.job_id, 'Clone: VM ' + new_vmid);
-    actLogStart();
-    _cloneSnap = null;
-  } catch(e) { toast('Clone: ' + (e.message || e), 'error'); }
 }
 
 // ═══════════════════════════ SCHEDULES ════════════════════════════════════
@@ -7827,23 +7479,6 @@ function renderTimeline(filtered) {
   svgParts.push(dotsHtml.join(''));
   container.innerHTML = '<svg width="'+W+'" height="'+H+'" style="display:block;overflow:visible">'
     + svgParts.join('') + '</svg>';
-}
-
-function tlHoverKey(key, evt) {
-  var s = _tlSnapMap[key];
-  if (!s) return;
-  var tt = document.getElementById('tlTooltip');
-  if (!tt) return;
-  var isNative = s.source === 'ontap_native';
-  var vmHtml = (!isNative && s.vmids && s.vmids.length)
-    ? '<div style="margin-top:3px;color:#94a3b8">VMs: ' + s.vmids.map(String).join(', ') + '</div>'
-    : '';
-  tt.innerHTML = '<div style="font-weight:600;font-family:monospace;font-size:11px;word-break:break-all">' + esc(s.snap_name) + '</div>'
-    + '<div style="color:#94a3b8;margin-top:2px">' + esc(s.pve_storage_id || s.volume_name || '') + '</div>'
-    + '<div style="margin-top:2px">' + fmtDateRel(s.created_at) + '</div>'
-    + (isNative ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">ONTAP native</div>' : '')
-    + vmHtml;
-  _tlPositionTooltip(evt);
 }
 
 function tlHoverFuture(dateStr, evt) {
@@ -8595,186 +8230,6 @@ function _snapProtoLabel(s) {
   return _snapIsSan(s) ? 'SAN' : 'NFS';
 }
 
-async function loadSnapshotsForRestore() {
-  try { _allSnapshots = await apiFetch('snapshots'); } catch(e) {}
-  var done = _allSnapshots.filter(function(s){ return s.status === 'done'; });
-
-  var datastores = {};
-  done.forEach(function(s) {
-    var key = s.mapping_id;
-    if (!datastores[key]) {
-      var proto = _snapProtoLabel(s);
-      var asaTag = (s.san_optimized && _snapIsSan(s)) ? ' ASA' : '';
-      datastores[key] = {
-        mapping_id: key,
-        label: (s.pve_storage_id || s.volume_name || key) + ' [' + proto + asaTag + ']',
-        isSan: _snapIsSan(s),
-      };
-    }
-  });
-
-  var dsSel = document.getElementById('restore_datastore');
-  var cur = dsSel.value;
-  dsSel.innerHTML = '<option value="">— Select datastore —</option>' +
-    Object.values(datastores).map(function(d){
-      return '<option value="'+esc(d.mapping_id)+'">'+esc(d.label)+'</option>';
-    }).join('');
-  if (cur && datastores[cur]) {
-    dsSel.value = cur;
-    onRestoreDatastoreChange();
-  } else {
-    document.getElementById('restore_snap').innerHTML = '<option value="">— select datastore first —</option>';
-    document.getElementById('restore_snap').disabled = true;
-    document.getElementById('restore_vmid').innerHTML = '<option value="">—</option>';
-    document.getElementById('restore_vmid').disabled = true;
-  }
-}
-
-function onRestoreDatastoreChange() {
-  var mappingId = document.getElementById('restore_datastore').value;
-  var snapSel   = document.getElementById('restore_snap');
-  var vmSel     = document.getElementById('restore_vmid');
-
-  if (!mappingId) {
-    snapSel.innerHTML = '<option value="">— select datastore first —</option>';
-    snapSel.disabled  = true;
-    vmSel.innerHTML   = '<option value="">—</option>';
-    vmSel.disabled    = true;
-    document.getElementById('restore_method_hint').style.display = 'none';
-    return;
-  }
-
-  var done = _allSnapshots.filter(function(s){
-    return s.status === 'done' && s.mapping_id === mappingId;
-  });
-
-  // Rebuild method options based on protocol + platform of this datastore
-  var sample = done[0] || _allSnapshots.find(function(s){ return s.mapping_id === mappingId; });
-  var isSanDs = sample ? _snapIsSan(sample) : false;
-  var isNvme  = sample ? (sample.storage_protocol || '').toLowerCase() === 'nvme' : false;
-  var isAsa   = sample ? !!sample.san_optimized : false;
-  var canSingleVm = true; // ASA NVMe supported via volume clone CLI bridge
-
-  // Plugin-managed snaps first (they have manifests); ONTAP-native at the end.
-  // For SAN datastores, omit ONTAP-native entirely (no accessible manifest).
-  var pluginSnaps = done.filter(function(s){ return s.source !== 'ontap_native'; });
-  var nativeSnaps = isSanDs ? [] : done.filter(function(s){ return s.source === 'ontap_native'; });
-  var sorted = pluginSnaps.concat(nativeSnaps);
-
-  snapSel.innerHTML = sorted.length
-    ? sorted.map(function(s){
-        var prefix = s.source === 'ontap_native' ? '[ONTAP] ' : '';
-        return '<option value="'+s.id+'">'+prefix+esc(s.snap_name)+
-               ' &nbsp;('+fmtDate(s.created_at)+')</option>';
-      }).join('')
-    : '<option value="">— no snapshots —</option>';
-  snapSel.disabled = false;
-  var methodSel = document.getElementById('restore_method');
-  if (isSanDs) {
-    methodSel.innerHTML =
-      (canSingleVm ? '<option value="san_single">SAN – Single VM restore (LV-copy, target VM only)</option>' : '') +
-      '<option value="san">SAN – Volume Revert (all VMs, destructive)</option>';
-  } else {
-    methodSel.innerHTML =
-      '<option value="sfsr">SFSR – in-place (fast)</option>';
-  }
-  onRestoreMethodChange();
-  updateRestoreVmList();
-}
-
-function onRestoreMethodChange() {
-  var method = document.getElementById('restore_method').value;
-  var hint   = document.getElementById('restore_method_hint');
-  var msgs   = {
-    san:        '⚠ Volume Revert: all VMs on this datastore are rolled back to the snapshot. All data written after the snapshot is permanently lost.',
-    san_single: 'LV-Copy: only the selected VM is restored. Other VMs on the same datastore keep running.',
-    sfsr:       'SFSR: individual disk images are restored in-place (fast, NFS only).',
-  };
-  if (msgs[method]) {
-    hint.textContent = msgs[method];
-    hint.style.display = '';
-  } else {
-    hint.style.display = 'none';
-  }
-}
-
-async function updateRestoreVmList() {
-  var snapId   = document.getElementById('restore_snap').value;
-  var snap     = _allSnapshots.find(function(s){ return String(s.id) === String(snapId); });
-  _selectedRestoreSnap = snap || null;
-  var sel      = document.getElementById('restore_vmid');
-  var txt      = document.getElementById('restore_vmid_text');
-  var hint     = document.getElementById('restore_native_hint');
-  var isNative = snap && snap.source === 'ontap_native';
-
-  // Text input only as last fallback (no manifest found)
-  txt.style.display  = 'none';
-  hint.style.display = 'none';
-  sel.style.display  = '';
-  sel.disabled       = false;
-
-  if (!snap) { sel.innerHTML = '<option value="">–</option>'; sel.disabled = true; return; }
-
-  if (!isNative) {
-    // Plugin snapshot: VMIDs from cached entry
-    if (snap.vmids && snap.vmids.length) {
-      sel.innerHTML = snap.vmids.map(function(v){
-        var n = (snap.vm_names||{})[String(v)];
-        return '<option value="'+v+'">'+v+(n?' – '+esc(n):'')+'</option>';
-      }).join('');
-    } else {
-      sel.innerHTML = '<option value="">–</option>';
-    }
-    return;
-  }
-
-  // Native snapshot: read manifest on-demand from server
-  sel.innerHTML = '<option value="">'+t('hint_loading')+'</option>';
-  try {
-    var m = await apiFetch(
-      'snapshots/manifest?snap_name='+encodeURIComponent(snap.snap_name)+
-      '&mapping_id='+encodeURIComponent(snap.mapping_id)
-    );
-    // Merge manifest data into _selectedRestoreSnap (for startRestore)
-    _selectedRestoreSnap = Object.assign({}, snap, {
-      vmids:    m.vmids || [],
-      vm_names: m.vm_names || {},
-      _manifest_snap_name: m.manifest_snap_name,
-    });
-    if (m.vmids && m.vmids.length) {
-      sel.innerHTML = m.vmids.map(function(v){
-        var n = (m.vm_names||{})[String(v)];
-        return '<option value="'+v+'">'+v+(n?' – '+esc(n):'')+'</option>';
-      }).join('');
-      if (m.manifest_snap_name && m.manifest_snap_name !== snap.snap_name) {
-        hint.textContent = 'Manifest from "'+esc(m.manifest_snap_name)+'" used (most recent NaSnap snapshot in this ONTAP snapshot).';
-        hint.style.display = '';
-      }
-    } else {
-      sel.innerHTML = '<option value="">–</option>';
-      txt.style.display = '';
-      hint.textContent = t('msg_no_manifest');
-      hint.style.display = '';
-    }
-  } catch(e) {
-    sel.innerHTML = '<option value="">–</option>';
-    txt.style.display = '';
-    hint.textContent = t('msg_no_manifest');
-    hint.style.display = '';
-  }
-}
-
-async function startRestore() {
-  var txtVisible = document.getElementById('restore_vmid_text').style.display !== 'none';
-  var vmid       = txtVisible
-    ? parseInt(document.getElementById('restore_vmid_text').value)
-    : parseInt(document.getElementById('restore_vmid').value);
-
-  if (!_selectedRestoreSnap) { toast(t('msg_snap_req'),'error'); return; }
-  if (!vmid) { toast(t('msg_vmid_req2'),'error'); return; }
-  showRestoreConfirm();
-}
-
 var _allJobsCache = [];
 var _jobPage = 0;
 var _JOB_PAGE_SIZE = 20;
@@ -8894,7 +8349,7 @@ var _auditActionLabels = {
 
 async function loadAuditLog() {
   try {
-    var rows = await apiGet('audit/list?limit=200');
+    var rows = await apiFetch('audit/list?limit=200');
     renderAuditLog(Array.isArray(rows) ? rows : []);
   } catch(e) {
     document.getElementById('auditBody').innerHTML =
@@ -9084,12 +8539,14 @@ async function prepareCloneNative(uuid, mappingId, snapName) {
   document.getElementById('ncModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
 
+  document.getElementById('ncm_conflict_warn').style.display = 'none';
   ncmLoadManifest(snap);
   ncmLoadNodes(snap.pve_cluster_id || '');
   if (snap.pve_cluster_id) {
     apiFetch('clone/nextid?pve_cluster_id=' + encodeURIComponent(snap.pve_cluster_id))
       .then(function(d) { if (d.vmid) document.getElementById('ncm_new_vmid').value = d.vmid; })
-      .catch(function(){});
+      .catch(function(){})
+      .finally(function(){ ncmCheckConflicts(); });
   }
 }
 
@@ -9149,6 +8606,35 @@ async function ncmLoadNodes(pveClusterId) {
       sel.appendChild(o);
     });
   } catch(e) {}
+}
+
+async function ncmCheckConflicts() {
+  var vmid    = parseInt(document.getElementById('ncm_new_vmid').value, 10);
+  var newName = document.getElementById('ncm_new_name').value.trim();
+  var warnEl  = document.getElementById('ncm_conflict_warn');
+  var btn     = document.getElementById('ncm_submit');
+  var clusterId = _ncmSnap ? (_ncmSnap.pve_cluster_id || '') : '';
+  if ((!vmid && !newName) || !clusterId) { warnEl.style.display='none'; btn.disabled=false; return; }
+  try {
+    var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(clusterId));
+    var msgs = [];
+    if (vmid && (d.vmids||[]).indexOf(vmid) !== -1) {
+      msgs.push('VMID ' + esc(vmid) + ' is already in use on this cluster.');
+    }
+    if (newName && (d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(newName.toLowerCase()) !== -1) {
+      msgs.push('A VM named "' + esc(newName) + '" already exists on this cluster.');
+    }
+    var conflict = msgs.length > 0;
+    if (conflict) {
+      warnEl.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
+      warnEl.style.display = 'block';
+    } else {
+      warnEl.style.display = 'none';
+    }
+    btn.disabled = conflict;
+  } catch(e) {
+    warnEl.style.display='none'; btn.disabled=false;
+  }
 }
 
 function closeNativeCloneModal() {
@@ -9359,11 +8845,14 @@ async function runDetectAndScan() {
 }
 
 async function scanSnapMirror() {
+  var sp = document.getElementById('smScanSpinner');
+  if (sp) sp.style.display = 'inline-block';
   try {
     var r = await apiPost('snapmirror/scan', {});
-    toast(r.found + ' relationship(s) found' + (r.errors.length ? ' ('+r.errors.length+' error(s))' : ''), 'success');
+    toast(r.found + ' relationship(s) found' + ((r.errors||[]).length ? ' ('+r.errors.length+' error(s))' : ''), 'success');
     loadStorageUnified();
   } catch(e) { toast(e.message, 'error', e.detail); }
+  finally { if (sp) sp.style.display = 'none'; }
 }
 
 async function smUpdateNow(relId) {
@@ -14233,7 +13722,7 @@ function _renderStackChecks(h, idx) {
 function _renderPveHealth() {
   var hosts = _pveHealthData;
   var hasCleanup = hosts.some(function(h) {
-    return h.stale_nfs.length || h.sfr_dirs.length || h.nasnap_vgs.length || (h.orphan_nbds||[]).length || (h.orphan_nvme_subsys||[]).length;
+    return h.stale_nfs.length || (h.orphan_nfs_mounts||[]).length || h.sfr_dirs.length || h.nasnap_vgs.length || (h.orphan_nbds||[]).length || (h.orphan_nvme_subsys||[]).length;
   });
   var hasStackIssues = hosts.some(function(h) {
     return _pveStackIssues(h.stack).length > 0;
@@ -14246,7 +13735,8 @@ function _renderPveHealth() {
   hosts.forEach(function(h, idx) {
     h.orphan_nbds = h.orphan_nbds || [];
     h.orphan_nvme_subsys = h.orphan_nvme_subsys || [];
-    var cleanupTotal = h.stale_nfs.length + h.sfr_dirs.length + h.nasnap_vgs.length + h.orphan_nbds.length + h.orphan_nvme_subsys.length;
+    h.orphan_nfs_mounts = h.orphan_nfs_mounts || [];
+    var cleanupTotal = h.stale_nfs.length + h.orphan_nfs_mounts.length + h.sfr_dirs.length + h.nasnap_vgs.length + h.orphan_nbds.length + h.orphan_nvme_subsys.length;
     var stackIssues = _pveStackIssues(h.stack);
     if (!cleanupTotal && !stackIssues.length && !h.error) return;
     html += '<div style="border-top:1px solid var(--border);padding:12px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px" id="pveHealthHost' + idx + '">';
@@ -14260,6 +13750,13 @@ function _renderPveHealth() {
       html += '<div style="margin-bottom:5px"><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Stale NFS (' + h.stale_nfs.length + ')</span>';
       h.stale_nfs.forEach(function(mp) {
         html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(mp) + '</div>';
+      });
+      html += '</div>';
+    }
+    if (h.orphan_nfs_mounts.length) {
+      html += '<div style="margin-bottom:5px"><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--warning,#f59e0b)">Orphaned NFS Mounts (' + h.orphan_nfs_mounts.length + ')</span>';
+      h.orphan_nfs_mounts.forEach(function(mp) {
+        html += '<div style="font-family:monospace;font-size:11px;color:var(--muted);padding-left:10px">' + esc(mp) + ' <span style="color:var(--danger)" title="Mounted in the OS but not registered as a PVE storage — e.g. leftover from an Instant Recovery clone">[not in pvesm]</span></div>';
       });
       html += '</div>';
     }
@@ -14334,6 +13831,7 @@ async function pveCleanupHost(idx, btn) {
     var r = await apiPost('settings/pve-cleanup', {
       host_id:            h.host_id,
       stale_nfs:          h.stale_nfs,
+      orphan_nfs_mounts:  h.orphan_nfs_mounts,
       sfr_dirs:           h.sfr_dirs,
       nasnap_vgs:         h.nasnap_vgs,
       orphan_nbds:        h.orphan_nbds,
@@ -16186,50 +15684,6 @@ actLogPoll();
   </div>
 </div>
 
-
-<!-- ── Restore Confirm Modal (danger) ──────────────────────────────── -->
-<div id="restoreConfirmModal" role="dialog" aria-modal="true" aria-label="Confirm restore" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9100;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
-  <div style="max-width:540px;width:100%;margin:0 auto;background:var(--card);border:1px solid rgba(217,83,79,.4);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.55)">
-    <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid rgba(217,83,79,.25);background:rgba(217,83,79,.07)">
-      <svg width="20" height="20" fill="none" stroke="#d9534f" viewBox="0 0 24 24" style="flex-shrink:0"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-      <span style="font-size:15px;font-weight:700;color:#d9534f">Start VM Restore</span>
-      <button onclick="hideRestoreConfirm()" style="margin-left:auto;background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
-    </div>
-    <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
-      <table style="width:100%;font-size:13px;border-collapse:collapse">
-        <tr><td style="padding:4px 10px 4px 0;color:var(--muted);white-space:nowrap;width:90px">Snapshot</td>
-            <td style="padding:4px 0"><code id="rcm_snap_name" style="font-family:monospace;font-size:12px;background:rgba(0,0,0,.15);padding:1px 6px;border-radius:3px"></code></td></tr>
-        <tr><td style="padding:4px 10px 4px 0;color:var(--muted)">Datastore</td>
-            <td style="padding:4px 0"><span id="rcm_datastore"></span></td></tr>
-        <tr><td style="padding:4px 10px 4px 0;color:var(--muted)">Method</td>
-            <td style="padding:4px 0"><code id="rcm_method" style="font-family:monospace;font-size:12px;background:rgba(0,0,0,.15);padding:1px 6px;border-radius:3px"></code></td></tr>
-        <tr><td style="padding:4px 10px 4px 0;color:var(--muted)">Target VM</td>
-            <td style="padding:4px 0"><code id="rcm_vmid" style="font-family:monospace;font-size:12px;background:rgba(0,0,0,.15);padding:1px 6px;border-radius:3px"></code></td></tr>
-      </table>
-      <div style="border:1px solid rgba(217,83,79,.35);border-radius:6px;padding:10px 14px;background:rgba(217,83,79,.05)">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#d9534f;margin-bottom:8px;text-transform:uppercase">Affected VMs</div>
-        <div id="rcm_blast_vms" style="display:flex;flex-wrap:wrap;gap:4px"></div>
-      </div>
-      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
-        <input type="checkbox" id="rcm_safety" checked style="margin-top:2px;flex-shrink:0">
-        <span>
-          <strong>Create safety snapshot before restore</strong><br>
-          <span style="font-size:11px;opacity:.7">Creates <code>safety_pre_restore_YYYYMMDD</code> (crash-consistent) before the restore runs.</span>
-        </span>
-      </label>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label style="font-size:13px;font-weight:600;color:#d9534f">Type the snapshot name to confirm:</label>
-        <div style="font-size:12px;color:var(--muted)">Enter <code id="rcm_expected" style="font-family:monospace;background:rgba(0,0,0,.15);padding:1px 6px;border-radius:3px"></code> to continue</div>
-        <input id="rcm_confirm_input" oninput="rcmCheckInput()" placeholder="Type snapshot name …" style="border:1px solid rgba(217,83,79,.5);background:rgba(217,83,79,.04)">
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:4px">
-        <button class="btn btn-ghost _cancel-btn" onclick="hideRestoreConfirm()">Cancel</button>
-        <button id="rcm_submit" class="btn btn-danger" disabled onclick="doRestoreConfirmed()">Start VM Restore</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ── Delete Confirm Modal (danger) ───────────────────────────────── -->
 <div id="deleteConfirmModal" role="dialog" aria-modal="true" aria-label="Confirm delete" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9100;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center">
   <div style="max-width:480px;width:100%;margin:0 auto;background:var(--card);border:1px solid rgba(217,83,79,.4);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.55)">
@@ -16382,13 +15836,13 @@ actLogPoll();
         <div class="form-group">
           <label class="form-label">New VMID</label>
           <input id="ir_new_vmid" class="form-control" type="number" style="width:140px" oninput="irCheckVmid()">
-          <span id="ir_vmid_warn" style="display:none;color:var(--error);font-size:11px;margin-top:4px"></span>
         </div>
         <div class="form-group">
           <label class="form-label">New Name</label>
-          <input id="ir_new_name" class="form-control" style="width:100%">
+          <input id="ir_new_name" class="form-control" style="width:100%" oninput="irCheckVmid()">
         </div>
       </div>
+      <span id="ir_vmid_warn" style="display:none;color:var(--error);font-size:11px;margin-top:4px"></span>
       <div class="form-group" style="margin-top:10px">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
           <input type="checkbox" id="ir_network_isolated" checked style="width:15px;height:15px">
@@ -16788,13 +16242,14 @@ actLogPoll();
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="form-group">
           <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">New VM ID <span style="color:#d9534f">*</span></label>
-          <input type="number" id="ncm_new_vmid" class="form-input" placeholder="e.g. 200" min="100" max="999999999">
+          <input type="number" id="ncm_new_vmid" class="form-input" placeholder="e.g. 200" min="100" max="999999999" oninput="ncmCheckConflicts()">
         </div>
         <div class="form-group">
           <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">New Name <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></label>
-          <input type="text" id="ncm_new_name" class="form-input" placeholder="auto">
+          <input type="text" id="ncm_new_name" class="form-input" placeholder="auto" oninput="ncmCheckConflicts()">
         </div>
       </div>
+      <span id="ncm_conflict_warn" style="display:none;color:var(--error);font-size:11px"></span>
 
       <div class="form-group">
         <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">Target Host</label>
@@ -16982,25 +16437,6 @@ function _sfrOsIcon(os_id, qga_ok) {
   if (id.indexOf('windows') >= 0 || id === 'mswindows') return _sfrSvgWindows;
   if (id) return _sfrSvgLinux;
   return _sfrSvgNoAgent;
-}
-
-async function _sfrLoadVmOsInfo(vmid, mappingId) {
-  var key = vmid + '_' + mappingId;
-  if (_sfrOsCache[key] !== undefined) {
-    _sfrApplyOsInfo(key, _sfrOsCache[key]);
-    return;
-  }
-  try {
-    var r = await apiFetch(
-      'file-restore/sessions/vm-qga-info?vmid=' + encodeURIComponent(vmid)
-      + '&mapping_id=' + encodeURIComponent(mappingId)
-    );
-    _sfrOsCache[key] = r;
-    _sfrApplyOsInfo(key, r);
-  } catch(e) {
-    _sfrOsCache[key] = {qga_ok: false, guest_os: 'linux', os_name: 'Unavailable', os_id: ''};
-    _sfrApplyOsInfo(key, _sfrOsCache[key]);
-  }
 }
 
 async function _sfrLoadVmOsInfoBatch(vms) {
@@ -18020,7 +17456,7 @@ var _helpData = {
       + '<p>Click the ⋮ button on any row to open its actions menu:</p><ul>'
       + '<li>'+_hi('info')+'<strong>Info</strong> — Opens the VM Info panel: overview, disk layout, datastores in use, and snapshot history for this VM.</li>'
       + '<li>'+_hi('restore')+'<strong>Restore</strong> — Opens the restore wizard. Pick a snapshot from the visual timeline picker and confirm to roll the VM back in-place.</li>'
-      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Opens the clone wizard. Pick a snapshot from the timeline picker — or check <strong>Clone from live VM</strong> to clone the VM\'s current running state instead of a snapshot — then choose target PVE node, new VMID and name.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Opens the clone wizard. Pick a snapshot from the timeline picker — or check <strong>Clone from live VM</strong> to clone the VM\'s current running state instead of a snapshot — then choose target PVE node, new VMID and name. The summary step checks the chosen VMID <em>and</em> name against everything already on the target cluster and blocks starting the clone on a collision (PVE VMIDs share one numbering space across QEMU and LXC guests). The same check runs for the standalone "Clone" action on ONTAP-native snapshots in the Snapshots tab.</li>'
       + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Opens a file browser (Total Commander style) that mounts the snapshot disk and lets you copy individual files directly into the running VM via QEMU Guest Agent. Greyed out with a tooltip if the Guest Agent isn\'t running.</li>'
       + '</ul>'
       + '<h3>Snapshot timeline picker</h3>'
@@ -18039,7 +17475,7 @@ var _helpData = {
       + '<p>Klick auf ⋮ in einer Zeile öffnet das Aktionsmenü:</p><ul>'
       + '<li>'+_hi('info')+'<strong>Info</strong> — Öffnet das VM-Info-Panel: Übersicht, Datenträger-Layout, verwendete Datastores und Snapshot-Historie dieser VM.</li>'
       + '<li>'+_hi('restore')+'<strong>Restore</strong> — Öffnet den Wiederherstellungs-Assistenten. Snapshot in der visuellen Zeitleiste auswählen und bestätigen, um die VM zurückzusetzen.</li>'
-      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Öffnet den Klon-Assistenten. Snapshot in der Zeitleiste wählen — oder <strong>Clone from live VM</strong> aktivieren, um den aktuellen laufenden Zustand statt eines Snapshots zu klonen — dann Ziel-PVE-Node, neue VMID und Name festlegen.</li>'
+      + '<li>'+_hi('clone')+'<strong>Clone</strong> — Öffnet den Klon-Assistenten. Snapshot in der Zeitleiste wählen — oder <strong>Clone from live VM</strong> aktivieren, um den aktuellen laufenden Zustand statt eines Snapshots zu klonen — dann Ziel-PVE-Node, neue VMID und Name festlegen. Der Summary-Schritt prüft VMID <em>und</em> Name gegen alles bereits auf dem Zielcluster Vorhandene und blockiert den Klon-Start bei einer Kollision (PVE-VMIDs teilen sich einen Nummernraum über QEMU- und LXC-Gäste hinweg). Dieselbe Prüfung läuft auch bei der eigenständigen "Clone"-Aktion für ONTAP-native Snapshots im Snapshots-Tab.</li>'
       + '<li>'+_hiSfr+'<strong>Single File Restore</strong> — Öffnet einen Datei-Browser (Total Commander-Stil), der den Snapshot-Datenträger einbindet und das Kopieren einzelner Dateien direkt in die laufende VM via QEMU Guest Agent ermöglicht. Ausgegraut mit Tooltip, wenn der Guest Agent nicht läuft.</li>'
       + '</ul>'
       + '<h3>Snapshot-Zeitleiste</h3>'
@@ -18048,13 +17484,40 @@ var _helpData = {
       + '<p>Lädt die VM-Liste aus der Snapshot-Datenbank neu. Verwenden nach dem Erstellen neuer oder Löschen vorhandener Snapshots.</p>'
   },
 
+  'instant-recovery': {
+    title: { en: 'Instant Recovery', de: 'Instant Recovery' },
+    en: '<h3>Overview</h3>'
+      + '<p>Instant Recovery boots a VM straight off a NetApp FlexClone of a snapshot (or the live filesystem) — no data is copied up front, so the VM is available almost immediately. Test it, then either commit it permanently or discard it with no lasting footprint. NFS datastores only.</p>'
+      + '<h3>Starting a session</h3>'
+      + '<p>From the VM Restore &amp; Clone row menu, choose <strong>Instant Recovery</strong>. Pick a snapshot (or <strong>live</strong> for the VM\'s current state), a new VMID and name, and whether the clone should start network-disconnected (recommended — avoids IP/MAC conflicts with the source VM, which may still be running). The dialog checks the new VMID and name against everything already on the target cluster and blocks starting if either collides.</p>'
+      + '<h3>Session list &amp; actions</h3><ul>'
+      + '<li><strong>Storage Migrate</strong> — Moves the VM\'s disks from the temporary FlexClone onto a permanent datastore while it keeps running; only then is data actually copied. The FlexClone is removed automatically once migration finishes.</li>'
+      + '<li><strong>Discard</strong> — Stops and destroys the temporary VM and tears down the FlexClone immediately — nothing is kept.</li>'
+      + '<li><strong>Clean Up Clone</strong> — For a VM already migrated or removed manually in Proxmox: tears down the leftover FlexClone/temp storage without touching a VM.</li>'
+      + '</ul>'
+      + '<h3>If a session gets interrupted</h3>'
+      + '<p>Removing the temporary PVE storage only edits <code>storage.cfg</code> — Proxmox itself doesn\'t unmount the filesystem. If a session is interrupted mid-teardown, the mount can be left behind on the OS with no corresponding PVE storage entry. Settings → <strong>PVE Host Maintenance</strong> detects and cleans these up (see its help for details).</p>',
+    de: '<h3>Übersicht</h3>'
+      + '<p>Instant Recovery startet eine VM direkt aus einem NetApp-FlexClone eines Snapshots (oder des laufenden Dateisystems) — es werden vorab keine Daten kopiert, die VM steht fast sofort zur Verfügung. Testen, dann entweder dauerhaft übernehmen oder folgenlos verwerfen. Nur für NFS-Datastores.</p>'
+      + '<h3>Session starten</h3>'
+      + '<p>Im Zeilenmenü von VM Restore &amp; Clone <strong>Instant Recovery</strong> wählen. Snapshot (oder <strong>live</strong> für den aktuellen Zustand), neue VMID und Name festlegen sowie ob der Klon netzwerkgetrennt starten soll (empfohlen — vermeidet IP-/MAC-Konflikte mit der eventuell noch laufenden Quell-VM). Der Dialog prüft neue VMID und Name gegen alles bereits auf dem Zielcluster Vorhandene und blockiert den Start bei einer Kollision.</p>'
+      + '<h3>Sessionliste &amp; Aktionen</h3><ul>'
+      + '<li><strong>Storage Migrate</strong> — Verschiebt die Disks der VM vom temporären FlexClone auf einen dauerhaften Datastore, während sie weiterläuft; erst dabei werden Daten tatsächlich kopiert. Der FlexClone wird nach Abschluss automatisch entfernt.</li>'
+      + '<li><strong>Discard</strong> — Stoppt und löscht die temporäre VM und baut den FlexClone sofort ab — nichts bleibt erhalten.</li>'
+      + '<li><strong>Clean Up Clone</strong> — Für eine bereits manuell migrierte oder in Proxmox entfernte VM: baut den verbliebenen FlexClone/Temp-Storage ab, ohne eine VM anzufassen.</li>'
+      + '</ul>'
+      + '<h3>Bei einer unterbrochenen Session</h3>'
+      + '<p>Das Entfernen des temporären PVE-Storage ändert nur die <code>storage.cfg</code> — Proxmox hängt das Dateisystem dabei nicht selbst aus. Wird eine Session mitten im Abbau unterbrochen, kann der Mount im OS zurückbleiben, ohne dass PVE noch davon weiß. Einstellungen → <strong>PVE-Host-Wartung</strong> erkennt und bereinigt das (Details siehe dortige Hilfe).</p>'
+  },
+
   storage: {
     title: { en: 'Storage', de: 'Speicher' },
     en: '<h3>Overview</h3>'
       + '<p>The Storage tab shows all datastores known to NaSnap — both provisioned (created via the wizard) and auto-discovered (via Detect &amp; Scan).</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>+ Provision Wizard</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE. For new NFS volumes, optionally create a <strong>FlexGroup</strong> spanning multiple aggregates instead of a single-aggregate FlexVol. The last step can also set up SnapMirror/SnapVault replication to a second registered NetApp system.</li>'
-      + '<li><strong>Detect &amp; Scan / Run Discovery</strong> — Scans connected ONTAP systems and Proxmox VE hosts to discover existing datastores and volume mappings automatically.</li>'
+      + '<li><strong>+ Provision Wizard</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE. On the Resource step you can also pick an <strong>existing</strong> ONTAP volume instead of creating one — useful for adopting a volume migrated in from another hypervisor (e.g. an old VMware NFS datastore) so its VMs can be imported without duplicating disk data; the volume itself is never reformatted, and NaSnap grants the new PVE hosts NFS access on its existing export policy. For new NFS volumes, optionally create a <strong>FlexGroup</strong> spanning multiple aggregates instead of a single-aggregate FlexVol. A final <strong>Confirm</strong> step re-checks the chosen name/storage ID against every existing datastore before creating anything — the same duplicate check the "⇢ Mount existing Datastore" wizard (below) runs at its own confirm step.</li>'
+      + '<li><strong>⇢ Mount existing Datastore</strong> — Binds an already-existing ONTAP volume (e.g. a SnapMirror secondary, or one created outside NaSnap) onto Proxmox VE without provisioning anything new. Also checked for name/storage-ID duplicates before showing its confirm step.</li>'
+      + '<li><strong>Detect &amp; Scan / Run Discovery</strong> — Scans connected ONTAP systems and Proxmox VE hosts to discover existing datastores and volume mappings automatically, reconciles snapshot indexes, and removes any datastore/mapping whose Proxmox storage entry is confirmed gone from every host it was registered on (e.g. removed directly in <code>pvesm</code>) — keeping the list in sync with what Proxmox actually has mounted.</li>'
       + '</ul>'
       + '<h3>Datastore table columns</h3><ul>'
       + '<li><strong>Name / ID</strong> — The Proxmox VE storage ID (e.g. <code>netapp-nfs-01</code>).</li>'
@@ -18076,8 +17539,9 @@ var _helpData = {
     de: '<h3>Übersicht</h3>'
       + '<p>Der Speicher-Tab zeigt alle NaSnap bekannten Datastores — provisionierte (über den Assistenten erstellt) und automatisch erkannte (via Erkennung &amp; Scan).</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>+ Provisionierungs-Assistent</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE. Für neue NFS-Volumes optional als <strong>FlexGroup</strong> über mehrere Aggregate statt als Single-Aggregat-FlexVol. Im letzten Schritt kann zusätzlich SnapMirror/SnapVault-Replikation zu einem zweiten registrierten NetApp-System eingerichtet werden.</li>'
-      + '<li><strong>Erkennen &amp; Scannen / Discovery</strong> — Scannt verbundene ONTAP-Systeme und Proxmox-VE-Hosts auf vorhandene Datastores und Volume-Zuordnungen.</li>'
+      + '<li><strong>+ Provisionierungs-Assistent</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE. Im Ressourcen-Schritt kann auch ein <strong>bestehendes</strong> ONTAP-Volume gewählt werden statt eines neuen — nützlich, um ein von einem anderen Hypervisor übernommenes Volume (z.B. ein altes VMware-NFS-Datastore) einzubinden, damit dessen VMs importiert werden können, ohne Plattendaten zu duplizieren; das Volume wird dabei nie neu formatiert, NaSnap ergänzt lediglich die neuen PVE-Hosts in der bestehenden Export-Policy. Für neue NFS-Volumes optional als <strong>FlexGroup</strong> über mehrere Aggregate statt als Single-Aggregat-FlexVol. Ein abschließender <strong>Confirm</strong>-Schritt prüft Name/Storage-ID nochmal frisch gegen alle bestehenden Datastores, bevor irgendetwas angelegt wird — dieselbe Duplikat-Prüfung wie beim "⇢ Mount existing Datastore"-Assistenten (unten).</li>'
+      + '<li><strong>⇢ Mount existing Datastore</strong> — Bindet ein bereits vorhandenes ONTAP-Volume (z.B. ein SnapMirror-Sekundär oder ein außerhalb von NaSnap angelegtes) in Proxmox VE ein, ohne etwas Neues zu provisionieren. Ebenfalls mit Duplikat-Prüfung vor dem Confirm-Schritt.</li>'
+      + '<li><strong>Erkennen &amp; Scannen / Discovery</strong> — Scannt verbundene ONTAP-Systeme und Proxmox-VE-Hosts auf vorhandene Datastores und Volume-Zuordnungen, gleicht Snapshot-Indizes ab und entfernt Datastores/Zuordnungen, deren Proxmox-Storage-Eintrag auf allen zugehörigen Hosts nachweislich verschwunden ist (z.B. direkt per <code>pvesm</code> entfernt) — hält die Liste damit synchron zu dem, was Proxmox tatsächlich eingebunden hat.</li>'
       + '</ul>'
       + '<h3>Datastore-Tabellen-Spalten</h3><ul>'
       + '<li><strong>Name / ID</strong> — Die Proxmox-VE-Storage-ID (z.B. <code>netapp-nfs-01</code>).</li>'
@@ -18199,7 +17663,14 @@ var _helpData = {
       + '<h3>Automated Backup Schedule</h3>'
       + '<p>Automatically export the NaSnap database to SFTP, a CIFS/SMB share, or a local NFS datastore on a schedule. Configure frequency, target, credentials, subdirectory, and retention (how many backup files to keep). Use <strong>Browse &amp; Restore</strong> to list the backup files already stored on the configured remote target and restore directly from one of them, without downloading it manually first.</p>'
       + '<h3>PVE Host Maintenance</h3>'
-      + '<p>Scan all registered PVE hosts for leftover resources from interrupted operations: stale NFS mounts, SFR temporary directories, orphaned LVM volume groups. Click <strong>Scan</strong> to detect and <strong>Clean up</strong> to remove them safely. <strong>Check All Hosts</strong> additionally verifies the storage stack packages and services on each node (<code>nfs-common</code>, <code>open-iscsi</code> incl. <code>iscsid</code> and initiator name, <code>nvme-cli</code> incl. the <code>nvme_tcp</code> kernel module, <code>lvm2</code>, <code>qemu-utils</code>) — auto-triggered when a host is added, with a one-click Fix button for auto-fixable issues.</p>'
+      + '<p>Scan all registered PVE hosts for leftover resources from interrupted operations, and for the OS/PVE storage view falling out of sync:</p><ul>'
+      + '<li><strong>Stale NFS</strong> — mounts reporting a "Stale file handle" (the export on ONTAP is gone but the client still references the old mount).</li>'
+      + '<li><strong>Orphaned NFS Mounts</strong> — an NFS mount that\'s fully healthy at the OS level but has no matching entry in <code>pvesm status</code> anymore, so Proxmox itself no longer knows it exists. Typically left behind when an Instant Recovery session\'s temporary storage is torn down: removing a PVE storage only edits <code>storage.cfg</code>, it never unmounts the filesystem by itself.</li>'
+      + '<li><strong>SFR Temp Dirs</strong> / <strong>Leftover LVM VGs</strong> — leftovers from an interrupted Single File Restore session.</li>'
+      + '<li><strong>Orphaned NBD Devices</strong> — a <code>qemu-nbd</code>-backed block device whose serving process died without disconnecting cleanly.</li>'
+      + '<li><strong>Orphaned NVMe Subsystems</strong> — an NVMe-oF subsystem still registered in the kernel with no active controllers underneath it.</li>'
+      + '</ul>'
+      + '<p>Click <strong>Scan</strong> to detect and <strong>Clean up</strong> to remove them safely. <strong>Check All Hosts</strong> additionally verifies the storage stack packages and services on each node (<code>nfs-common</code>, <code>open-iscsi</code> incl. <code>iscsid</code> and initiator name, <code>nvme-cli</code> incl. the <code>nvme_tcp</code> kernel module, <code>lvm2</code>, <code>qemu-utils</code>) — auto-triggered when a host is added, with a one-click Fix button for auto-fixable issues.</p>'
       + '<h3>Plugin Update</h3>'
       + '<p>Check for and apply updates to the NaSnap plugin. The current and available versions are shown. Updates are downloaded and applied in-place; a container restart completes the process.</p>',
     de: '<h3>Übersicht</h3>'
@@ -18225,7 +17696,14 @@ var _helpData = {
       + '<h3>Automatischer Backup-Zeitplan</h3>'
       + '<p>Die NaSnap-Datenbank automatisch per Zeitplan auf SFTP, eine CIFS/SMB-Freigabe oder einen lokalen NFS-Datastore exportieren. Häufigkeit, Ziel, Zugangsdaten, Unterverzeichnis und Aufbewahrungsanzahl konfigurierbar. Mit <strong>Browse &amp; Restore</strong> die bereits auf dem konfigurierten Ziel liegenden Backup-Dateien auflisten und direkt daraus wiederherstellen, ohne sie manuell herunterzuladen.</p>'
       + '<h3>PVE-Host-Wartung</h3>'
-      + '<p>Alle registrierten PVE-Hosts auf verwaiste Ressourcen aus unterbrochenen Operationen scannen: veraltete NFS-Mounts, temporäre SFR-Verzeichnisse, verwaiste LVM-Volume-Groups. <strong>Scan</strong> zur Erkennung, <strong>Bereinigen</strong> zur sicheren Entfernung. <strong>Check All Hosts</strong> prüft zusätzlich die Storage-Stack-Pakete und -Dienste auf jedem Node (<code>nfs-common</code>, <code>open-iscsi</code> inkl. <code>iscsid</code> und Initiator-Name, <code>nvme-cli</code> inkl. Kernel-Modul <code>nvme_tcp</code>, <code>lvm2</code>, <code>qemu-utils</code>) — automatisch beim Hinzufügen eines Hosts ausgelöst, mit Ein-Klick-Fix-Button für automatisch behebbare Probleme.</p>'
+      + '<p>Alle registrierten PVE-Hosts auf verwaiste Ressourcen aus unterbrochenen Operationen scannen — und darauf, ob die OS- und die PVE-Sicht auf gemountete Storages auseinanderlaufen:</p><ul>'
+      + '<li><strong>Stale NFS</strong> — Mounts mit "Stale file handle" (die Freigabe auf ONTAP ist weg, der Client referenziert aber noch den alten Mount).</li>'
+      + '<li><strong>Orphaned NFS Mounts</strong> — ein NFS-Mount, der im OS völlig gesund ist, aber keinen passenden Eintrag mehr in <code>pvesm status</code> hat — Proxmox selbst weiß also nichts mehr davon. Entsteht typischerweise beim Abbau einer Instant-Recovery-Session: Das Entfernen eines PVE-Storage ändert nur die <code>storage.cfg</code>, es hängt das Dateisystem nie von selbst aus.</li>'
+      + '<li><strong>SFR Temp Dirs</strong> / <strong>Leftover LVM VGs</strong> — Reste einer unterbrochenen Single-File-Restore-Session.</li>'
+      + '<li><strong>Orphaned NBD Devices</strong> — ein <code>qemu-nbd</code>-Blockgerät, dessen bedienender Prozess beendet wurde, ohne sauber zu trennen.</li>'
+      + '<li><strong>Orphaned NVMe Subsystems</strong> — ein NVMe-oF-Subsystem, das noch im Kernel registriert ist, aber keine aktiven Controller mehr darunter hat.</li>'
+      + '</ul>'
+      + '<p><strong>Scan</strong> zur Erkennung, <strong>Bereinigen</strong> zur sicheren Entfernung. <strong>Check All Hosts</strong> prüft zusätzlich die Storage-Stack-Pakete und -Dienste auf jedem Node (<code>nfs-common</code>, <code>open-iscsi</code> inkl. <code>iscsid</code> und Initiator-Name, <code>nvme-cli</code> inkl. Kernel-Modul <code>nvme_tcp</code>, <code>lvm2</code>, <code>qemu-utils</code>) — automatisch beim Hinzufügen eines Hosts ausgelöst, mit Ein-Klick-Fix-Button für automatisch behebbare Probleme.</p>'
       + '<h3>Plugin-Update</h3>'
       + '<p>Updates für das NaSnap-Plugin prüfen und anwenden. Aktuelle und verfügbare Version werden angezeigt. Updates werden heruntergeladen und direkt angewendet; ein Container-Neustart schließt den Vorgang ab.</p>'
   }
