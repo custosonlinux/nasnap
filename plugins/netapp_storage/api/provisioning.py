@@ -3447,6 +3447,49 @@ def _detect_nfs_client_ip(pve, nfs_lif_ip, jlog=None):
 
 # ── NFS: provision ────────────────────────────────────────────────────────────
 
+def _grant_nfs_access(client, svm_name, policy_id, pve_host_ids, db, jlog):
+    """Adds RW export rules to `policy_id` for each PVE host's NFS VLAN IP, and
+    ensures the SVM root volume allows RO traversal from those IPs (ONTAP NFS
+    requires namespace traversal on '/' or every mount fails with "access
+    denied" even when the datastore volume's own policy is correct).
+
+    Used both when creating a brand-new volume (its freshly-created policy)
+    and when reusing an existing volume (its current policy) — a volume
+    imported from another hypervisor typically only has the OLD hosts in its
+    export policy, so this must run for both cases or the new PVE hosts
+    simply won't have access.
+    """
+    if not policy_id:
+        jlog.log("WARNING: no export policy id resolved — PVE hosts may not have "
+                 "access to this volume. Add export rules manually if the mount fails.")
+        return
+    client_ips_for_root = []
+    for hid in pve_host_ids:
+        try:
+            pve = build_pve_client(db, hid)
+            if not pve.nfs_ip:
+                raise RuntimeError(
+                    f"NFS IP not configured for host '{pve.host}'. "
+                    f"Set the NFS network IP in Hosts settings before provisioning NFS datastores."
+                )
+            client_ip = pve.nfs_ip
+            client.add_nfs_export_rule_rw(policy_id, client_ip)
+            jlog.log(f"Export rule added for {client_ip}")
+            client_ips_for_root.append(client_ip)
+        except Exception as exc:
+            jlog.log(f"  WARNING: export rule for host {hid}: {exc}")
+
+    if client_ips_for_root:
+        try:
+            added = client.ensure_svm_root_accessible(svm_name, client_ips_for_root)
+            if added:
+                jlog.log(f"SVM root volume: added RO rules for {', '.join(added)}")
+            else:
+                jlog.log("SVM root volume: RO access already configured.")
+        except Exception as exc:
+            jlog.log(f"  WARNING: could not check SVM root export policy: {exc}")
+
+
 def _provision_nfs(ds_id, params, db, jlog):
     endpoint_id    = params["endpoint_id"]
     svm_name       = params.get("svm_name", "")
@@ -3532,35 +3575,7 @@ def _provision_nfs(ds_id, params, db, jlog):
         # Add rw export rules using the configured NFS VLAN IP of each PVE host.
         # pve.nfs_ip must be set to the dedicated NFS network interface IP — using
         # any other IP (management, iSCSI, NVMe) will cause ONTAP to deny the mount.
-        if policy_id:
-            client_ips_for_root = []
-            for hid in pve_host_ids:
-                try:
-                    pve = build_pve_client(db, hid)
-                    if not pve.nfs_ip:
-                        raise RuntimeError(
-                            f"NFS IP not configured for host '{pve.host}'. "
-                            f"Set the NFS network IP in Hosts settings before provisioning NFS datastores."
-                        )
-                    client_ip = pve.nfs_ip
-                    client.add_nfs_export_rule_rw(policy_id, client_ip)
-                    jlog.log(f"Export rule added for {client_ip}")
-                    client_ips_for_root.append(client_ip)
-                except Exception as exc:
-                    jlog.log(f"  WARNING: export rule for host {hid}: {exc}")
-
-        # Ensure the SVM root volume ('/') allows RO traversal from all PVE host IPs.
-        # ONTAP requires namespace traversal access on the root volume; without it the
-        # mount fails with "access denied" even if the datastore volume's policy is correct.
-        if client_ips_for_root:
-            try:
-                added = client.ensure_svm_root_accessible(svm_name, client_ips_for_root)
-                if added:
-                    jlog.log(f"SVM root volume: added RO rules for {', '.join(added)}")
-                else:
-                    jlog.log("SVM root volume: RO access already configured.")
-            except Exception as exc:
-                jlog.log(f"  WARNING: could not check SVM root export policy: {exc}")
+        _grant_nfs_access(client, svm_name, policy_id, pve_host_ids, db, jlog)
 
         volume_uuid = client.create_volume_nfs(svm_name, volume_name, size_bytes,
                                                junction_path,
@@ -3584,14 +3599,24 @@ def _provision_nfs(ds_id, params, db, jlog):
             except Exception as _se:
                 jlog.log(f"WARNING: could not enable snapshot locking: {_se}")
     else:
+        # Reuse as-is — never recreated/reformatted. This is the path for volumes
+        # migrated in from another hypervisor (e.g. old VMware NFS datastores):
+        # mounting them here (instead of copying their VM disks onto a fresh
+        # volume) avoids duplicating that data during migration.
         vol_info       = client.get_volume(volume_uuid)
         volume_name    = vol_info.get("name", volume_name)
         snap_locking_enabled = 1 if (vol_info.get("snaplock") or {}).get("snapshot_locking_enabled") else 0
         export_info    = client.get_volume_export_info(volume_uuid)
         junction_path  = export_info.get("junction_path", junction_path)
+        policy_id      = export_info.get("export_policy_id", "")
         policy_name    = export_info.get("export_policy_name", "default")
         jlog.log(f"Using existing NFS volume: {volume_name}  junction={junction_path}"
                  + (" [snapshot locking enabled]" if snap_locking_enabled else ""))
+
+        # The volume's existing export policy typically only lists the OLD
+        # hosts (e.g. VMware ESXi) — grant the new PVE hosts access too, same
+        # as a freshly-created volume gets above.
+        _grant_nfs_access(client, svm_name, policy_id, pve_host_ids, db, jlog)
 
     # Persist ONTAP IDs
     db.execute(
