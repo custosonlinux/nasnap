@@ -5199,6 +5199,28 @@ async function irLoadNextId() {
   } catch(e) {
     toast('Could not auto-suggest a VMID — enter one manually', 'info');
   }
+  irCheckVmid();
+}
+
+async function irCheckVmid() {
+  var vmid    = parseInt(document.getElementById('ir_new_vmid').value, 10);
+  var warnEl  = document.getElementById('ir_vmid_warn');
+  var btn     = document.getElementById('irStartSubmitBtn');
+  if (!vmid || !_irState.pveClusterId) { warnEl.style.display='none'; btn.disabled=false; return; }
+  try {
+    var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_irState.pveClusterId));
+    var conflict = (d.vmids||[]).indexOf(vmid) !== -1;
+    if (conflict) {
+      warnEl.textContent = '⚠ VMID ' + vmid + ' is already in use on this cluster — choose a different ID.';
+      warnEl.style.display = 'block';
+    } else {
+      warnEl.style.display = 'none';
+    }
+    btn.disabled = conflict;
+  } catch(e) {
+    // non-fatal — server still enforces this at start time
+    warnEl.style.display='none'; btn.disabled=false;
+  }
 }
 
 async function submitInstantRecovery() {
@@ -6275,7 +6297,7 @@ async function cwSuggestId() {
   } catch(e) {}
 }
 
-function cwBuildSummary() {
+async function cwBuildSummary() {
   var snapDisplay = _cwState.isDR ? _cwState.snapName
     : (_cwState.source==='live' ? 'Live VM (current state)' : (_cwState.snap ? _cwState.snap.snap_name : '—'));
   var newName = document.getElementById('cw_new_name').value.trim();
@@ -6290,7 +6312,25 @@ function cwBuildSummary() {
   document.getElementById('cw_sum_node').textContent  = node;
   document.getElementById('cw_sum_net').textContent   = netIso ? 'Disconnected (link_down=1)' : 'Connected';
   document.getElementById('cw_sum_start').textContent = startA ? 'Yes' : 'No';
-  document.getElementById('cwSubmitBtn').disabled = !newVmid;
+
+  // Fresh, system-checked VMID-conflict warning — the server also rejects a
+  // colliding VMID at clone time, but flagging it here means the wizard
+  // catches it before the (potentially long) disk-copy even starts.
+  var conflictBox = document.getElementById('cw_sum_conflict');
+  var conflict = false;
+  if (newVmid && _cwState.pveClusterId) {
+    try {
+      var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_cwState.pveClusterId));
+      conflict = (d.vmids||[]).indexOf(parseInt(newVmid,10)) !== -1;
+    } catch(e) { /* non-fatal — server still enforces this at clone time */ }
+  }
+  if (conflict) {
+    conflictBox.style.display = 'block';
+    conflictBox.textContent = '⚠ VMID ' + newVmid + ' is already in use on this cluster — choose a different ID.';
+  } else {
+    conflictBox.style.display = 'none';
+  }
+  document.getElementById('cwSubmitBtn').disabled = !newVmid || conflict;
 }
 
 function cwNext() {
@@ -12126,7 +12166,7 @@ function _impRenderVmTable() {
   tbody.innerHTML = _impState.vms.map(function(vm) {
     var icon = vm.vmtype === 'lxc' ? '📦' : '🖥️';
     return '<tr data-vmid="'+vm.vmid+'">'
-      + '<td><input type="checkbox" class="impVmCb" value="'+vm.vmid+'" checked></td>'
+      + '<td><input type="checkbox" class="impVmCb" value="'+vm.vmid+'" checked onchange="impUpdateVmidPreview()"></td>'
       + '<td style="font-family:var(--mono)">' + esc(String(vm.vmid)) + '</td>'
       + '<td>' + icon + ' ' + esc(vm.name || ('VM ' + vm.vmid)) + '</td>'
       + '<td><span class="badge badge-gray" style="font-size:10px">'
@@ -12176,6 +12216,7 @@ function impUpdateVmidPreview() {
     });
   }
 
+  var selectedCount = 0, conflictCount = 0, seenNewIds = {};
   document.querySelectorAll('#impVmsTbody tr[data-vmid]').forEach(function(row) {
     var origId  = parseInt(row.dataset.vmid, 10);
     var cell    = row.querySelector('.impNewVmid');
@@ -12185,15 +12226,46 @@ function impUpdateVmidPreview() {
     else if (mode === 'offset') { newId = origId + offset; }
     else                        { newId = autoMap[origId] !== undefined ? autoMap[origId] : origId; }
     cell.textContent = String(newId);
+    var cb = row.querySelector('.impVmCb');
+    var isChecked = cb && cb.checked;
+    var isDup = isChecked && seenNewIds[newId] !== undefined;
+    if (isChecked) seenNewIds[newId] = true;
+    var isConflict = usedSet.has(newId) || isDup;
     // Colour: conflict=red, changed=info, unchanged=normal text
-    if (usedSet.has(newId))      { cell.style.color = 'var(--error)'; }
-    else if (newId !== origId)   { cell.style.color = 'var(--info)';  }
-    else                         { cell.style.color = 'var(--text)';  }
+    if (isConflict)             { cell.style.color = 'var(--error)'; }
+    else if (newId !== origId)  { cell.style.color = 'var(--info)';  }
+    else                        { cell.style.color = 'var(--text)';  }
+    if (isChecked) {
+      selectedCount++;
+      if (isConflict) conflictCount++;
+    }
   });
+
+  // Compact summary + system check, refreshed on every relevant change —
+  // shown right above the Import button so a would-be VMID clash is visible
+  // before the user clicks, not only as a submit-time block.
+  var sumEl = document.getElementById('impSummary');
+  if (sumEl) {
+    var dsLabel = (_impState.ds && _impState.ds.sid) || '—';
+    var lines = [
+      '📦 Datastore: <strong>'+esc(dsLabel)+'</strong>',
+      '📸 Snapshot: <strong>'+esc(_impState.snapName||'—')+'</strong>',
+      '✅ VMs selected: <strong>'+selectedCount+'</strong> of '+_impState.vms.length,
+    ];
+    sumEl.innerHTML = lines.join('<br>');
+    var warnEl = document.getElementById('impSummaryWarn');
+    if (conflictCount > 0) {
+      warnEl.style.display = 'block';
+      warnEl.textContent = '⚠ ' + conflictCount + ' selected VM(s) have a target VMID already in use — fix the mapping before importing.';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
 }
 
 function impToggleAll(checked) {
   document.querySelectorAll('.impVmCb').forEach(function(cb) { cb.checked = checked; });
+  impUpdateVmidPreview();
 }
 
 function _impAutodetectStorageId(r) {
@@ -15330,6 +15402,13 @@ actLogPoll();
           </label>
         </div>
 
+        <!-- Summary — refreshed live, system-checked against used VMIDs -->
+        <div style="margin-bottom:14px;padding:10px 14px;background:var(--bg);border-radius:6px">
+          <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">Summary</div>
+          <div id="impSummary" style="font-size:13px;line-height:1.7"></div>
+          <div id="impSummaryWarn" style="display:none;margin-top:8px;padding:8px 12px;border-radius:6px;background:rgba(240,80,80,.1);border:1px solid rgba(240,80,80,.35);color:var(--error);font-size:12px"></div>
+        </div>
+
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn btn-primary" id="impImportBtn" onclick="impDoImport()">
             Recover VMs <span id="impImportSpinner" class="spinner" style="display:none;margin-left:4px"></span>
@@ -16302,7 +16381,8 @@ actLogPoll();
       <div class="form-grid" style="margin-top:14px">
         <div class="form-group">
           <label class="form-label">New VMID</label>
-          <input id="ir_new_vmid" class="form-control" type="number" style="width:140px">
+          <input id="ir_new_vmid" class="form-control" type="number" style="width:140px" oninput="irCheckVmid()">
+          <span id="ir_vmid_warn" style="display:none;color:var(--error);font-size:11px;margin-top:4px"></span>
         </div>
         <div class="form-group">
           <label class="form-label">New Name</label>
@@ -16569,6 +16649,7 @@ actLogPoll();
           <tr><td style="color:var(--muted);padding:3px 12px 3px 0">Start after</td><td id="cw_sum_start"></td></tr>
         </table>
       </div>
+      <div id="cw_sum_conflict" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;background:rgba(240,80,80,.1);border:1px solid rgba(240,80,80,.35);color:var(--error);font-size:12px"></div>
     </div>
 
     <!-- Footer -->

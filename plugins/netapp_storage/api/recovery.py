@@ -459,25 +459,31 @@ def _recovery_restore_vms():
 
 
 def _recovery_used_vmids():
-    """Returns sorted list of VMIDs currently in use on the PVE hosts of a datastore.
+    """Returns sorted list of VMIDs currently in use on the PVE hosts of a datastore
+    (or of a single PVE cluster, for wizards that don't have a datastore id handy
+    — Clone/Instant Recovery operate on a mapping/pve_cluster_id instead).
 
-    Query params: ds_id
+    Query params: ds_id  OR  pve_cluster_id
     Returns: {vmids: [100, 101, ...]}
     """
     err = _require_admin()
     if err:
         return err
     from flask import request
-    ds_id = request.args.get("ds_id")
-    if not ds_id:
-        return {"error": "ds_id required"}, 400
+    ds_id          = request.args.get("ds_id")
+    pve_cluster_id = request.args.get("pve_cluster_id")
+    if not ds_id and not pve_cluster_id:
+        return {"error": "ds_id or pve_cluster_id required"}, 400
 
-    db  = get_db()
-    row = db.query_one("SELECT pve_host_ids FROM netapp_provisioned_datastores WHERE id=?", (ds_id,))
-    if not row:
-        return {"error": "Datastore not found"}, 404
+    db = get_db()
+    if ds_id:
+        row = db.query_one("SELECT pve_host_ids FROM netapp_provisioned_datastores WHERE id=?", (ds_id,))
+        if not row:
+            return {"error": "Datastore not found"}, 404
+        pve_host_ids = json.loads(dict(row).get("pve_host_ids") or "[]")
+    else:
+        pve_host_ids = [pve_cluster_id]
 
-    pve_host_ids = json.loads(dict(row).get("pve_host_ids") or "[]")
     from ..core.recovery_engine import get_used_vmids
     try:
         vmids = get_used_vmids(pve_host_ids, db)
