@@ -183,7 +183,15 @@ def get_used_vm_identities(pve_host_ids, db):
     VM/CT config currently on any of the given PVE hosts (first reachable host
     wins — /etc/pve is cluster-shared via pmxcfs). Used by the Clone/Instant
     Recovery/Restore wizards to flag a target VMID *or* VM name that would
-    collide with something already there, before the write happens."""
+    collide with something already there, before the write happens.
+
+    Every candidate host is tried before giving up — a single dangling/
+    unreachable host id (e.g. a mapping's pve_cluster_id pointing at a host
+    that was later removed from netapp_pve_hosts) must not make this look
+    like "nothing is in use" when other hosts in the same cluster can still
+    answer, since the caller uses an empty result as "no conflict" and lets
+    a colliding VMID/name straight through the pre-flight check."""
+    last_exc = None
     for hid in pve_host_ids:
         try:
             pve        = build_pve_client(db, hid)
@@ -210,8 +218,16 @@ def get_used_vm_identities(pve_host_ids, db):
                         "name": parts[2].strip() if len(parts) > 2 else "",
                     })
             return result
-        except Exception:
+        except Exception as exc:
+            last_exc = exc
+            log.warning(f"[netapp_storage] get_used_vm_identities: host '{hid}' unreachable ({exc}), trying next")
             continue
+    if last_exc is not None:
+        log.error(
+            f"[netapp_storage] get_used_vm_identities: no reachable host among "
+            f"{pve_host_ids} — returning empty (VMID/name pre-check will show no conflict). "
+            f"Last error: {last_exc}"
+        )
     return []
 
 

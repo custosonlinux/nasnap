@@ -483,7 +483,18 @@ def _recovery_used_vmids():
             return {"error": "Datastore not found"}, 404
         pve_host_ids = json.loads(dict(row).get("pve_host_ids") or "[]")
     else:
-        pve_host_ids = [pve_cluster_id]
+        # Same dangling-reference guard as pve_for_mapping(): a mapping's
+        # stored pve_cluster_id can point at a host later removed from
+        # netapp_pve_hosts. The actual Instant Recovery/Clone job falls back
+        # to any other configured host via pve_for_mapping() and still finds
+        # the VM (pmxcfs is cluster-shared) — this pre-flight check must have
+        # the same fallback, or a dangling id silently returns "nothing in
+        # use" here while the job itself still correctly detects and rejects
+        # the collision, leaving the Summary with no warning to show.
+        others = db.query(
+            "SELECT id FROM netapp_pve_hosts WHERE id!=? ORDER BY id LIMIT 10", (pve_cluster_id,)
+        )
+        pve_host_ids = [pve_cluster_id] + [r["id"] for r in (others or [])]
 
     from ..core.recovery_engine import get_used_vm_identities
     try:
