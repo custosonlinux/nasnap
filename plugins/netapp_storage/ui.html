@@ -5142,39 +5142,52 @@ async function irNext() {
   }
 }
 
+var _irFlagStyle = 'background:rgba(240,80,80,.15);color:var(--error);font-weight:700;border-radius:4px;padding:1px 6px';
+
 async function _irBuildSummary(live, newVmid, newName) {
   var netIso = document.getElementById('ir_network_isolated').checked;
   document.getElementById('ir_sum_src').textContent  = _irState.vmid + (_irState.name ? ' – ' + _irState.name : '');
   document.getElementById('ir_sum_from').textContent = live ? 'Live VM (current state)' : (_irState.snap ? _irState.snap.snap_name : '—');
-  document.getElementById('ir_sum_vmid').textContent = newVmid;
-  document.getElementById('ir_sum_name').textContent = newName || '(auto)';
   document.getElementById('ir_sum_net').textContent  = netIso ? 'Disconnected (link_down=1)' : 'Connected';
+  var vmidCell = document.getElementById('ir_sum_vmid');
+  var nameCell = document.getElementById('ir_sum_name');
+  vmidCell.textContent = newVmid; vmidCell.style.cssText = '';
+  nameCell.textContent = newName || '(auto)'; nameCell.style.cssText = '';
 
-  // Fresh, system-checked VMID/name conflict, re-run right before the
-  // summary is shown — the server also enforces this at start time, but
-  // catching it here means the wizard flags it before the FlexClone is
-  // even created, not after.
+  // Fresh, system-checked VMID/name conflict, re-run every time right
+  // before the summary is shown — never skipped and never fails open: if
+  // the check can't be verified for any reason, Start stays disabled
+  // rather than silently letting a possible duplicate through.
   var conflictBox = document.getElementById('ir_sum_conflict');
   var msgs = [];
+  var verified = false, vmidConflict = false, nameConflict = false;
   if (_irState.pveClusterId) {
     try {
       var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_irState.pveClusterId));
+      verified = true;
       if ((d.vmids||[]).indexOf(newVmid) !== -1) {
+        vmidConflict = true;
         msgs.push('VMID ' + esc(newVmid) + ' is already in use on this cluster.');
       }
       if (newName && (d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(newName.toLowerCase()) !== -1) {
+        nameConflict = true;
         msgs.push('A VM named "' + esc(newName) + '" already exists on this cluster.');
       }
-    } catch(e) { /* non-fatal — server still enforces this at start time */ }
+    } catch(e) {
+      msgs.push('Could not verify VMID/name against the cluster (' + esc(e.message||String(e)) + ') — try again.');
+    }
+  } else {
+    msgs.push('Could not determine the target PVE cluster to check for conflicts — cannot verify, so Start is disabled.');
   }
-  var conflict = msgs.length > 0;
-  if (conflict) {
+  if (vmidConflict) vmidCell.style.cssText = _irFlagStyle;
+  if (nameConflict) nameCell.style.cssText = _irFlagStyle;
+  if (msgs.length) {
     conflictBox.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
     conflictBox.style.display = 'block';
   } else {
     conflictBox.style.display = 'none';
   }
-  document.getElementById('irStartSubmitBtn').disabled = conflict;
+  document.getElementById('irStartSubmitBtn').disabled = !verified || vmidConflict || nameConflict;
 }
 
 function closeIrStartModal() {
@@ -6331,39 +6344,53 @@ async function cwBuildSummary() {
   var node    = _cwState.isDR ? 'auto (DR)' : (document.getElementById('cw_target_node').value||'auto');
   var netIso  = document.getElementById('cw_network_isolated').checked;
   var startA  = document.getElementById('cw_start_after').checked;
+  var vmidCell = document.getElementById('cw_sum_vmid');
+  var nameCell = document.getElementById('cw_sum_name');
   document.getElementById('cw_sum_src').textContent   = _cwState.vmid+(_cwState.name?' – '+_cwState.name:'');
   document.getElementById('cw_sum_snap').textContent  = snapDisplay;
-  document.getElementById('cw_sum_vmid').textContent  = newVmid||'—';
-  document.getElementById('cw_sum_name').textContent  = newName||'(auto)';
+  vmidCell.textContent = newVmid||'—'; vmidCell.style.cssText = '';
+  nameCell.textContent = newName||'(auto)'; nameCell.style.cssText = '';
   document.getElementById('cw_sum_node').textContent  = node;
   document.getElementById('cw_sum_net').textContent   = netIso ? 'Disconnected (link_down=1)' : 'Connected';
   document.getElementById('cw_sum_start').textContent = startA ? 'Yes' : 'No';
 
-  // Fresh, system-checked VMID- and name-conflict warning — the server also
-  // rejects a colliding VMID at clone time, but flagging it here means the
-  // wizard catches it before the (potentially long) disk-copy even starts.
+  // Fresh, system-checked VMID- and name-conflict warning, re-run every time
+  // right before the summary is shown — never skipped and never fails open:
+  // if the check can't be verified for any reason, Start stays disabled
+  // rather than silently letting a possible duplicate through.
   var conflictBox = document.getElementById('cw_sum_conflict');
   var msgs = [];
+  var verified = false, vmidConflict = false, nameConflict = false;
   var effName = (newName || ('clone-' + (_cwState.name || _cwState.vmid))).toLowerCase();
-  if (newVmid && _cwState.pveClusterId) {
-    try {
-      var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_cwState.pveClusterId));
-      if ((d.vmids||[]).indexOf(parseInt(newVmid,10)) !== -1) {
-        msgs.push('VMID ' + esc(newVmid) + ' is already in use on this cluster.');
+  if (newVmid) {
+    if (_cwState.pveClusterId) {
+      try {
+        var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_cwState.pveClusterId));
+        verified = true;
+        if ((d.vmids||[]).indexOf(parseInt(newVmid,10)) !== -1) {
+          vmidConflict = true;
+          msgs.push('VMID ' + esc(newVmid) + ' is already in use on this cluster.');
+        }
+        if ((d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(effName) !== -1) {
+          nameConflict = true;
+          msgs.push('A VM named "' + esc(newName||effName) + '" already exists on this cluster.');
+        }
+      } catch(e) {
+        msgs.push('Could not verify VMID/name against the cluster (' + esc(e.message||String(e)) + ') — try again.');
       }
-      if ((d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(effName) !== -1) {
-        msgs.push('A VM named "' + esc(newName||effName) + '" already exists on this cluster.');
-      }
-    } catch(e) { /* non-fatal — server still enforces the VMID check at clone time */ }
+    } else {
+      msgs.push('Could not determine the target PVE cluster to check for conflicts — cannot verify, so Start is disabled.');
+    }
   }
-  var conflict = msgs.length > 0;
-  if (conflict) {
+  if (vmidConflict) vmidCell.style.cssText = _irFlagStyle;
+  if (nameConflict) nameCell.style.cssText = _irFlagStyle;
+  if (msgs.length) {
     conflictBox.style.display = 'block';
-    conflictBox.innerHTML = '⚠ ' + msgs.join('<br>⚠ ') + ' Choose a different ID/name.';
+    conflictBox.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
   } else {
     conflictBox.style.display = 'none';
   }
-  document.getElementById('cwSubmitBtn').disabled = !newVmid || conflict;
+  document.getElementById('cwSubmitBtn').disabled = !newVmid || !verified || vmidConflict || nameConflict;
 }
 
 function cwNext() {
@@ -7917,6 +7944,27 @@ async function saveSchedule() {
     toast(t('msg_fill_required'), 'error');
     return;
   }
+  // The summary already flags a tamperproof lock that outlives retention
+  // with a red "exceeds max" note — this must also block Save, not just
+  // warn, since a lock that outlives retention leaves the snapshot
+  // undeletable when rotation tries to remove it.
+  var tpMax = _schedTamperproofMax();
+  var tpChk = document.getElementById('sched_tamperproof');
+  var tpDays = parseInt((document.getElementById('sched_tamperproof_days') || {value:'0'}).value) || 0;
+  if (tpChk && tpChk.checked && tpDays > tpMax) {
+    schedWizShowStep(6);
+    toast('Tamperproof lock (' + tpDays + 'd) exceeds the safe maximum (' + tpMax + 'd) for this retention/schedule.', 'error');
+    return;
+  }
+  if (_schedWizHasSM) {
+    var smTpChk  = document.getElementById('sched_sm_tamperproof');
+    var smTpDays = parseInt((document.getElementById('sched_sm_tamperproof_days') || {value:'0'}).value) || 0;
+    if (smTpChk && smTpChk.checked && smTpDays > tpMax) {
+      schedWizShowStep(6);
+      toast('Destination tamperproof lock (' + smTpDays + 'd) exceeds the safe maximum (' + tpMax + 'd).', 'error');
+      return;
+    }
+  }
   var editId = document.getElementById('sched_edit_id').value;
   var btn = document.getElementById('schedWizSaveBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
@@ -8610,7 +8658,7 @@ async function prepareCloneNative(uuid, mappingId, snapName) {
   document.getElementById('ncm_net_iso').checked = true;
   document.getElementById('ncm_start_after').checked = false;
   var btn = document.getElementById('ncm_submit');
-  btn.disabled = false; btn.textContent = 'Start Clone';
+  btn.disabled = true; btn.textContent = 'Start Clone';
 
   document.querySelectorAll('.subtab').forEach(function(x){ x.classList.remove('active'); });
   document.querySelectorAll('.tab-panel').forEach(function(x){ x.style.display='none'; });
@@ -8694,7 +8742,16 @@ async function ncmCheckConflicts() {
   var warnEl  = document.getElementById('ncm_conflict_warn');
   var btn     = document.getElementById('ncm_submit');
   var clusterId = _ncmSnap ? (_ncmSnap.pve_cluster_id || '') : '';
-  if ((!vmid && !newName) || !clusterId) { warnEl.style.display='none'; btn.disabled=false; return; }
+  if (!vmid) { warnEl.style.display='none'; btn.disabled=true; return; }
+  // Never fails open: if the check can't be verified for any reason
+  // (unknown cluster, request failure), Start stays disabled rather than
+  // silently letting a possible duplicate VMID/name through.
+  if (!clusterId) {
+    warnEl.innerHTML = '⚠ Could not determine the target PVE cluster to check for conflicts — cannot verify.';
+    warnEl.style.display = 'block';
+    btn.disabled = true;
+    return;
+  }
   try {
     var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(clusterId));
     var msgs = [];
@@ -8713,7 +8770,9 @@ async function ncmCheckConflicts() {
     }
     btn.disabled = conflict;
   } catch(e) {
-    warnEl.style.display='none'; btn.disabled=false;
+    warnEl.innerHTML = '⚠ Could not verify VMID/name against the cluster (' + esc(e.message||String(e)) + ') — try again.';
+    warnEl.style.display = 'block';
+    btn.disabled = true;
   }
 }
 
@@ -10709,19 +10768,25 @@ async function provWizBuildSummary(repl) {
   // failing after "Create Datastore" is clicked.
   var warn = '';
   var conflict = null;
+  var verified = false;
   try {
     var dsList = await apiFetch('provisioning/datastores');
+    verified = true;
     conflict = (dsList.datastores || []).find(function(d) {
       return (d.name || '').toLowerCase() === name.toLowerCase()
           || (d.pve_storage_id || '') === storageId;
     });
-  } catch (e) { /* non-fatal — server still enforces this at Create time */ }
+  } catch (e) { /* handled below — verified stays false, which blocks Create */ }
   if (conflict) {
     warn = '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(240,80,80,.1);'
       + 'border:1px solid rgba(240,80,80,.35);color:var(--error);font-size:12px">'
       + '⚠ A datastore named "' + esc(conflict.name) + '" (storage id "' + esc(conflict.pve_storage_id)
       + '") already exists. Creating this one would mount two volumes on the same Proxmox mountpoint. '
       + 'Go back and choose a different name/storage ID.</div>';
+  } else if (!verified) {
+    warn = '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(240,80,80,.1);'
+      + 'border:1px solid rgba(240,80,80,.35);color:var(--error);font-size:12px">'
+      + '⚠ Could not verify this name/storage ID against existing datastores — try again before creating.</div>';
   }
 
   var lines = [];
@@ -10791,7 +10856,7 @@ async function provWizBuildSummary(repl) {
 
   document.getElementById('provWizSummary').innerHTML = warn + lines.join('<br>');
   var submitBtn = document.getElementById('provSubmitBtn');
-  if (submitBtn) submitBtn.disabled = !!conflict;
+  if (submitBtn) submitBtn.disabled = !verified || !!conflict;
 }
 
 function provWizToggleReplication() {
@@ -11453,8 +11518,11 @@ async function rcvNext2() {
     }
   } catch (e) {
     console.error('rcvNext2 conflict check:', e);
-    // Don't block the wizard if the check itself fails (e.g. network hiccup) —
-    // the server still enforces this at Bind time.
+    // Never fails open: if the check itself can't complete, don't advance
+    // to the summary at all rather than silently letting an unverified
+    // name/storage-ID through to Bind Volume.
+    alert('Could not verify this Storage Name against existing datastores (' + (e.message||String(e)) + '). Please try again.');
+    return;
   } finally {
     if (nextBtn) nextBtn.disabled = false;
   }
@@ -11580,7 +11648,7 @@ function hideBindWizard() {
 
 // ── Recovery Tab — VM Import ──────────────────────────────────────────────────
 
-var _impState = { ds: null, snapName: '', vms: [], usedVmids: [], allDs: [] };
+var _impState = { ds: null, snapName: '', vms: [], usedVmids: [], usedVmidsVerified: false, allDs: [] };
 
 async function impLoadDatastores() {
   var sel = document.getElementById('impDs');
@@ -11606,7 +11674,7 @@ async function impLoadDatastores() {
     sel.innerHTML = '<option value="">Error: ' + esc(e.message) + '</option>';
   }
   // Reset steps 1+2
-  _impState.ds = null; _impState.snapName = ''; _impState.vms = []; _impState.usedVmids = [];
+  _impState.ds = null; _impState.snapName = ''; _impState.vms = []; _impState.usedVmids = []; _impState.usedVmidsVerified = false;
   document.getElementById('impVmsCard').style.display         = 'none';
   document.getElementById('impSnapRow').style.display          = 'none';
   document.getElementById('impSnapSanRow').style.display       = 'none';
@@ -11765,19 +11833,21 @@ async function impFetchUsedVmids() {
   var spinner = document.getElementById('impUsedSpinner');
   var infoEl  = document.getElementById('impUsedVmidsInfo');
   spinner.style.display = '';
+  _impState.usedVmidsVerified = false;
   try {
     var r = await apiFetch('provisioning/recovery/used-vmids?ds_id='
                            + encodeURIComponent(_impState.ds.id));
     _impState.usedVmids = r.vmids || [];
+    _impState.usedVmidsVerified = true;
     spinner.style.display = 'none';
     infoEl.textContent = _impState.usedVmids.length
       ? 'Used VMIDs on cluster: ' + _impState.usedVmids.join(', ')
       : 'No VMIDs currently in use on the cluster.';
-    impUpdateVmidPreview();
   } catch(e) {
     spinner.style.display = 'none';
-    infoEl.textContent = 'Could not fetch used VMIDs: ' + (e.message || String(e));
+    infoEl.textContent = 'Could not fetch used VMIDs: ' + (e.message || String(e)) + ' — Import stays disabled until this succeeds.';
   }
+  impUpdateVmidPreview();
 }
 
 function impUpdateVmidPreview() {
@@ -11839,10 +11909,17 @@ function impUpdateVmidPreview() {
     if (conflictCount > 0) {
       warnEl.style.display = 'block';
       warnEl.textContent = '⚠ ' + conflictCount + ' selected VM(s) have a target VMID already in use — fix the mapping before importing.';
+    } else if (!_impState.usedVmidsVerified) {
+      warnEl.style.display = 'block';
+      warnEl.textContent = '⚠ Used-VMID check has not been verified yet — Import stays disabled until it succeeds.';
     } else {
       warnEl.style.display = 'none';
     }
   }
+  // Never fails open: unverified used-VMID data or any detected conflict
+  // blocks Import, not just a positively confirmed collision.
+  var importBtn = document.getElementById('impImportBtn');
+  if (importBtn) importBtn.disabled = !_impState.usedVmidsVerified || conflictCount > 0 || selectedCount === 0;
 }
 
 function impToggleAll(checked) {

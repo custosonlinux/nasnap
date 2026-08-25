@@ -596,7 +596,7 @@ def _list_snapshots():
     # ── 1. Plugin-managed snapshots from DB ─────────────────────────────
     rows = db.query(
         "SELECT s.*, vm.pve_storage_id, vm.volume_name, vm.volume_uuid, vm.endpoint_id, "
-        "vm.storage_protocol, vm.lvm_vg_name, vm.svm_name, "
+        "vm.storage_protocol, vm.lvm_vg_name, vm.svm_name, vm.pve_cluster_id, "
         "ep.name AS endpoint_name, ep.san_optimized "
         "FROM netapp_snapshots s "
         "JOIN netapp_volume_mapping vm ON vm.id = s.mapping_id "
