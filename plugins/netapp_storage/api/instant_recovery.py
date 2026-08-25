@@ -12,6 +12,9 @@ Instant Recovery API (NFS)
                                           (VM already permanent, clone already gone — bookkeeping only)
   instant-recovery/discard       POST  – tear down: destroy the temp VM + FlexClone
   instant-recovery/status        GET   – job status (?job_id=...)
+  instant-recovery/orphan-clones        GET  – scan ONTAP for leftover FlexClone
+                                                volumes no active session still needs
+  instant-recovery/orphan-clones/delete POST – delete one, after explicit admin review
 """
 
 import json
@@ -348,6 +351,94 @@ def _status():
     return d
 
 
+def _scan_orphan_flexclones():
+    """Scans every ONTAP endpoint for Instant-Recovery FlexClone volumes
+    (name prefix 'nsir_', the convention _run_instant_recovery uses) that no
+    active session still needs — either nothing references them anymore, or
+    the referencing session is already discarded/done/erroring. Read-only;
+    deletion is a separate, explicit, per-volume step so a false positive
+    (e.g. a same-prefixed volume created outside NaSnap) can't be deleted
+    by accident.
+    """
+    err = _require_admin()
+    if err:
+        return err
+    from ..core._helpers import get_endpoint, build_ontap_client
+
+    db = get_db()
+    endpoints = db.query("SELECT id, name FROM netapp_endpoints") or []
+    orphans = []
+    for ep_row in endpoints:
+        ep = dict(ep_row)
+        try:
+            endpoint = get_endpoint(db, ep["id"])
+            client = build_ontap_client(endpoint)
+            vols = client.get_volumes()
+        except Exception as exc:
+            log.warning(f"[netapp_storage] orphan-flexclone scan: endpoint '{ep['name']}': {exc}")
+            continue
+        for v in (vols or []):
+            name = v.get("name", "")
+            uuid_ = v.get("uuid", "")
+            if not name.startswith("nsir_") or not uuid_:
+                continue
+            sess_row = db.query_one(
+                "SELECT id, status, error, new_vmid, new_name FROM netapp_instant_recovery_sessions "
+                "WHERE clone_volume_uuid=?", (uuid_,)
+            )
+            sess = dict(sess_row) if sess_row else None
+            still_active = sess and sess["status"] in ("running", "migrating", "discarding") and not sess["error"]
+            if still_active:
+                continue
+            orphans.append({
+                "endpoint_id":      ep["id"],
+                "endpoint_name":    ep["name"],
+                "svm_name":         (v.get("svm") or {}).get("name", ""),
+                "volume_uuid":      uuid_,
+                "volume_name":      name,
+                "session_id":       sess["id"]     if sess else "",
+                "session_status":   sess["status"] if sess else "",
+                "session_error":    sess["error"]  if sess else "",
+                "session_vmid":     sess["new_vmid"] if sess else 0,
+                "session_vm_name":  sess["new_name"] if sess else "",
+            })
+    return {"orphans": orphans}
+
+
+def _delete_orphan_flexclone():
+    """Deletes a single orphaned FlexClone volume by uuid, only after the
+    admin has reviewed and explicitly confirmed it in the UI."""
+    err = _require_admin()
+    if err:
+        return err
+    data        = request.get_json() or {}
+    endpoint_id = data.get("endpoint_id", "")
+    volume_uuid = data.get("volume_uuid", "")
+    if not endpoint_id or not volume_uuid:
+        return {"error": "endpoint_id and volume_uuid required"}, 400
+
+    from ..core._helpers import get_endpoint, build_ontap_client
+    db = get_db()
+    try:
+        endpoint = get_endpoint(db, endpoint_id)
+        client = build_ontap_client(endpoint)
+        try:
+            client.unmount_volume(volume_uuid)
+        except Exception:
+            pass  # may already be unmounted — the delete below is what matters
+        del_job = client.delete_volume(volume_uuid)
+        if del_job:
+            client.poll_job(del_job, timeout_s=120)
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+    db.execute(
+        "UPDATE netapp_instant_recovery_sessions SET status='discarded', error='' WHERE clone_volume_uuid=?",
+        (volume_uuid,),
+    )
+    return {"success": True}
+
+
 def register_routes():
     register_plugin_route(PLUGIN_ID, "instant-recovery/start", _start)
     register_plugin_route(PLUGIN_ID, "instant-recovery/start-live", _start_live)
@@ -358,3 +449,5 @@ def register_routes():
     register_plugin_route(PLUGIN_ID, "instant-recovery/dismiss", _dismiss)
     register_plugin_route(PLUGIN_ID, "instant-recovery/discard", _discard)
     register_plugin_route(PLUGIN_ID, "instant-recovery/status", _status)
+    register_plugin_route(PLUGIN_ID, "instant-recovery/orphan-clones", _scan_orphan_flexclones)
+    register_plugin_route(PLUGIN_ID, "instant-recovery/orphan-clones/delete", _delete_orphan_flexclone)

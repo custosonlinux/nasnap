@@ -27,6 +27,7 @@ import re
 import random
 import shlex
 import threading
+import time
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,7 @@ from ._helpers import (
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
     is_vmid_in_use, sanitize_vm_name,
 )
+from .ontap_client import OntapError
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
 from .restore_engine import (
     _load_manifest, _find_vm_in_manifest, _vm_start, _vm_stop, _resolve_node_host,
@@ -300,13 +302,23 @@ def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
 def _teardown_session_clone(db, sess, jlog):
     """Tears down a tracked session's temp storage + FlexClone (+ its ad-hoc
     source snapshot, if one was created just for this session). Shared by
-    the migrate-success path and the discard path."""
+    the migrate-success path and the discard path.
+
+    Returns True only if the storage/FlexClone teardown is actually clean —
+    callers must NOT report "discarded"/"done" on False, since that would
+    tell the user "no lasting footprint" while a mount or FlexClone volume
+    is still sitting there. On False, the caller should keep the session
+    visible (status 'running' + error) so it can be retried via "Clean Up
+    Clone" instead of silently losing track of the leftover.
+    """
     mapping = get_mapping(db, sess["mapping_id"])
     endpoint = get_endpoint(db, mapping["endpoint_id"])
     client = build_ontap_client(endpoint)
     mgr, _ = pve_for_mapping(db, mapping)
     pve_host = _resolve_node_host(mgr, sess["node"])
     pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
+
+    ok = True
 
     try:
         jlog.log(f"[{pve_host}] Removing temporary storage '{sess['temp_storage_id']}' …")
@@ -315,28 +327,64 @@ def _teardown_session_clone(db, sess, jlog):
                key_material=pve_key)
     except Exception as exc:
         jlog.log(f"WARNING: pvesm remove failed: {exc}")
+        ok = False
+
+    # pvesm remove only edits storage.cfg, never unmounts — do that explicitly
+    # or the mount survives with no PVE storage entry to find it by (see PVE
+    # Host Maintenance's orphan_nfs_mounts check). Retry a few times first:
+    # right after `qm destroy --purge` released the VM's disk files, the
+    # kernel can briefly still consider the mount busy.
+    temp_mp = shlex.quote(f"/mnt/pve/{sess['temp_storage_id']}")
+    unmounted = False
+    for attempt in range(3):
+        try:
+            out = ssh_run(pve_host, pve_user, pve_pass,
+                   f"mountpoint -q {temp_mp} && echo MOUNTED || echo GONE",
+                   capture=True, key_material=pve_key, timeout=10)
+            if "GONE" in (out or ""):
+                unmounted = True
+                break
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"umount {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
+        except Exception as exc:
+            jlog.log(f"WARNING: umount attempt {attempt + 1} failed: {exc}")
+        if attempt < 2:
+            time.sleep(2)
+    if not unmounted:
+        try:
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"umount -l {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
+            jlog.log(f"WARNING: '{temp_mp}' would not unmount cleanly after 3 attempts — "
+                     f"force-detached (umount -l). Check PVE Host Maintenance if it lingers.")
+            ok = False
+        except Exception as exc:
+            jlog.log(f"WARNING: force-unmount failed: {exc}")
+            ok = False
     try:
-        # pvesm remove only edits storage.cfg, never unmounts — do that
-        # explicitly or the mount survives with no PVE storage entry to
-        # find it by (see PVE Host Maintenance's orphan_nfs_mounts check).
-        temp_mp = shlex.quote(f"/mnt/pve/{sess['temp_storage_id']}")
         ssh_run(pve_host, pve_user, pve_pass,
-               f"umount {temp_mp} 2>/dev/null || umount -l {temp_mp} 2>/dev/null; "
-               f"rmdir {temp_mp} 2>/dev/null; true",
-               key_material=pve_key)
-    except Exception as exc:
-        jlog.log(f"WARNING: umount temp storage failed: {exc}")
+               f"rmdir {temp_mp} 2>/dev/null; true", key_material=pve_key, timeout=10)
+    except Exception:
+        pass
 
     if sess.get("clone_volume_uuid"):
         try:
             jlog.log(f"Deleting FlexClone volume '{sess['clone_volume_name']}' …")
-            client.unmount_volume(sess["clone_volume_uuid"])
-            del_job = client.delete_volume(sess["clone_volume_uuid"])
-            if del_job:
-                client.poll_job(del_job, timeout_s=120)
+            try:
+                client.unmount_volume(sess["clone_volume_uuid"])
+            except OntapError as exc:
+                if exc.status_code != 404:
+                    raise
+            try:
+                del_job = client.delete_volume(sess["clone_volume_uuid"])
+                if del_job:
+                    client.poll_job(del_job, timeout_s=120)
+            except OntapError as exc:
+                if exc.status_code != 404:  # already gone — fine on a retry
+                    raise
             jlog.log("FlexClone removed.")
         except Exception as exc:
             jlog.log(f"WARNING: FlexClone delete failed: {exc}")
+            ok = False
 
     if sess.get("ad_hoc_snapshot") and sess.get("snapshot_id"):
         try:
@@ -352,6 +400,8 @@ def _teardown_session_clone(db, sess, jlog):
             jlog.log("Temporary source snapshot removed.")
         except Exception as exc:
             jlog.log(f"WARNING: temporary snapshot cleanup failed: {exc}")
+
+    return ok
 
 
 # ── Commit: Storage Migrate ─────────────────────────────────────────────────
@@ -383,13 +433,21 @@ def _run_instant_recovery_migrate(job_id, session_id, target_storage_id, usernam
     jlog = JobLogger(job_id, db)
     if result and result["status"] == "done":
         jlog.log("All disks migrated — tearing down the FlexClone …")
-        try:
-            _teardown_session_clone(db, sess, jlog)
+        teardown_ok = _teardown_session_clone(db, sess, jlog)
+        if teardown_ok:
             db.execute("UPDATE netapp_instant_recovery_sessions SET status='done' WHERE id=?", (session_id,))
-        except Exception as exc:
-            jlog.log(f"WARNING: migrate succeeded but clone cleanup failed: {exc}")
-            db.execute("UPDATE netapp_instant_recovery_sessions SET status='done', error=? WHERE id=?",
-                      (str(exc), session_id))
+        else:
+            # The VM's disks are already safely on the permanent datastore —
+            # this is a leftover-cleanup concern, not a data-loss one — but
+            # still surface it instead of silently claiming a clean teardown.
+            jlog.log("WARNING: migrate succeeded but the FlexClone/temp storage teardown left something behind "
+                     "(see warnings above) — check PVE Host Maintenance, or retry via 'Clean Up Clone'.")
+            db.execute(
+                "UPDATE netapp_instant_recovery_sessions SET status='done', error=? WHERE id=?",
+                ("Migrate succeeded, but the FlexClone/temp storage teardown was incomplete. "
+                 "Retry with 'Clean Up Clone', or check PVE Host Maintenance for leftover mounts.",
+                 session_id),
+            )
     else:
         # Partial/failed migrate — session stays visible and retryable, not
         # silently stuck. The clone/temp storage are untouched.
@@ -424,21 +482,42 @@ def _run_instant_recovery_discard(job_id, session_id, username):
         pve_host = _resolve_node_host(mgr, sess["node"])
 
         jlog.log(f"Stopping and destroying temporary VM {sess['new_vmid']} …")
-        _vm_stop(mgr, sess["node"], sess["new_vmid"], sess["vm_type"])
-        ssh_run(pve_host, pve_user, pve_pass,
-               f"qm destroy {sess['new_vmid']} --purge 2>/dev/null "
-               f"|| pct destroy {sess['new_vmid']} --purge 2>/dev/null || true",
-               key_material=pve_key, timeout=60)
+        try:
+            _vm_stop(mgr, sess["node"], sess["new_vmid"], sess["vm_type"])
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"qm destroy {sess['new_vmid']} --purge 2>/dev/null "
+                   f"|| pct destroy {sess['new_vmid']} --purge 2>/dev/null || true",
+                   key_material=pve_key, timeout=60)
+        except Exception as exc:
+            # Never skip storage/FlexClone teardown just because destroying the
+            # VM hiccuped (e.g. a transient SSH error) — that used to leave the
+            # temp mount AND the FlexClone volume completely untouched.
+            jlog.log(f"WARNING: VM stop/destroy step failed ({exc}) — continuing with clone teardown anyway.")
 
-        _teardown_session_clone(db, sess, jlog)
+        teardown_ok = _teardown_session_clone(db, sess, jlog)
 
-        db.execute("UPDATE netapp_instant_recovery_sessions SET status='discarded' WHERE id=?", (session_id,))
-        _finish_job(db, job_id)
-        jlog.log("Instant Recovery session discarded — no lasting footprint.")
+        if teardown_ok:
+            db.execute("UPDATE netapp_instant_recovery_sessions SET status='discarded' WHERE id=?", (session_id,))
+            _finish_job(db, job_id)
+            jlog.log("Instant Recovery session discarded — no lasting footprint.")
+        else:
+            db.execute(
+                "UPDATE netapp_instant_recovery_sessions SET status='running', error=? WHERE id=?",
+                ("Discard could not fully clean up the temporary storage/FlexClone — "
+                 "retry with 'Clean Up Clone', or check PVE Host Maintenance for leftover mounts.",
+                 session_id),
+            )
+            _fail_job(db, job_id)
+            jlog.log("WARNING: Discard finished with leftovers (see warnings above) — "
+                     "retry with 'Clean Up Clone'.")
     except Exception as exc:
         log.error(f"[netapp_storage] Instant Recovery discard {session_id} failed: {exc}")
         jlog.log(f"ERROR: {exc}")
         _fail_job(db, job_id)
+        db.execute(
+            "UPDATE netapp_instant_recovery_sessions SET status='running', error=? WHERE id=?",
+            (str(exc), session_id),
+        )
     finally:
         _reg_unregister(job_id)
 
@@ -469,11 +548,20 @@ def _run_instant_recovery_cleanup(job_id, session_id, username):
         db.execute("UPDATE netapp_instant_recovery_sessions SET status='discarding' WHERE id=?", (session_id,))
 
         jlog.log(f"Cleaning up temporary clone for VM {sess['new_vmid']} — the VM itself is left untouched …")
-        _teardown_session_clone(db, sess, jlog)
+        teardown_ok = _teardown_session_clone(db, sess, jlog)
 
-        db.execute("UPDATE netapp_instant_recovery_sessions SET status='done' WHERE id=?", (session_id,))
-        _finish_job(db, job_id)
-        jlog.log("Clone cleaned up — VM was not touched.")
+        if teardown_ok:
+            db.execute("UPDATE netapp_instant_recovery_sessions SET status='done' WHERE id=?", (session_id,))
+            _finish_job(db, job_id)
+            jlog.log("Clone cleaned up — VM was not touched.")
+        else:
+            db.execute(
+                "UPDATE netapp_instant_recovery_sessions SET status='running', error=? WHERE id=?",
+                ("Clone cleanup incomplete — some resources may remain. Retry, or check "
+                 "PVE Host Maintenance for leftover mounts.", session_id),
+            )
+            _fail_job(db, job_id)
+            jlog.log("WARNING: Cleanup finished with leftovers (see warnings above) — retry.")
     except Exception as exc:
         log.error(f"[netapp_storage] Instant Recovery cleanup {session_id} failed: {exc}")
         jlog.log(f"ERROR: {exc}")

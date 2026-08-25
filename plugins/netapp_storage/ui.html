@@ -2903,6 +2903,22 @@ function applyI18n() {
         </div>
       </div>
 
+      <!-- ═══════════════ NETAPP CLONE CLEANUP ═══════════════ -->
+      <div class="sub-header" style="margin-top:16px">
+        <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>NetApp Clone Cleanup</span>
+        <button class="btn btn-ghost btn-sm" id="ncScanBtn" onclick="ncScanOrphanClones()">
+          <span id="ncScanSpinner" class="spinner" style="display:none;margin-right:4px"></span>
+          <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>Scan
+        </button>
+      </div>
+      <div class="card" id="ncOrphanCard" style="display:none">
+        <p class="hint" style="margin-bottom:10px">Instant Recovery FlexClone volumes (<code>nsir_*</code>) that no active session still needs — left behind by an interrupted Discard/Storage-Migrate. Review before deleting: this removes the actual ONTAP volume.</p>
+        <div id="ncOrphanEmpty" style="display:none;color:var(--success,#16a34a);font-size:13px;padding:4px 0">
+          ✓ No orphaned FlexClone volumes found.
+        </div>
+        <div id="ncOrphanList"></div>
+      </div>
+
       <!-- ═══════════════ PLUGIN UPDATE ═══════════════ -->
       <div class="sub-header" style="margin-top:16px">
         <span class="sub-header-title"><svg class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>Plugin Update</span>
@@ -13850,6 +13866,69 @@ async function pveCleanupHost(idx, btn) {
   }
 }
 
+// ── NetApp Clone Cleanup ─────────────────────────────────────────────────────
+var _ncOrphanData = [];
+
+async function ncScanOrphanClones() {
+  var btn  = document.getElementById('ncScanBtn');
+  var spin = document.getElementById('ncScanSpinner');
+  btn.disabled = true; spin.style.display = '';
+  document.getElementById('ncOrphanCard').style.display = '';
+  document.getElementById('ncOrphanList').innerHTML =
+    '<div style="padding:10px 0;color:var(--muted)"><span class="spinner" style="margin-right:6px"></span>Scanning ONTAP systems…</div>';
+  document.getElementById('ncOrphanEmpty').style.display = 'none';
+  try {
+    var r = await apiFetch('instant-recovery/orphan-clones');
+    _ncOrphanData = r.orphans || [];
+    _renderOrphanClones();
+  } catch(e) {
+    document.getElementById('ncOrphanList').innerHTML =
+      '<div style="color:var(--danger);padding:8px 0">Error: ' + esc(e.message || String(e)) + '</div>';
+  } finally { btn.disabled = false; spin.style.display = 'none'; }
+}
+
+function _renderOrphanClones() {
+  var list = document.getElementById('ncOrphanList');
+  document.getElementById('ncOrphanEmpty').style.display = _ncOrphanData.length ? 'none' : '';
+  if (!_ncOrphanData.length) { list.innerHTML = ''; return; }
+  list.innerHTML = _ncOrphanData.map(function(o, idx) {
+    var sessionInfo = o.session_id
+      ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">Linked session: VM ' + esc(String(o.session_vmid))
+        + (o.session_vm_name ? ' (' + esc(o.session_vm_name) + ')' : '') + ' — status <code>' + esc(o.session_status) + '</code>'
+        + (o.session_error ? ', error: ' + esc(o.session_error) : '') + '</div>'
+      : '<div style="font-size:11px;color:var(--muted);margin-top:2px">No session references this volume anymore.</div>';
+    return '<div style="border-top:1px solid var(--border);padding:10px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px">'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:600">' + esc(o.volume_name) + '</div>'
+      + '<div style="font-size:12px;color:var(--muted)">' + esc(o.endpoint_name) + (o.svm_name ? ' / ' + esc(o.svm_name) : '') + '</div>'
+      + sessionInfo
+      + '</div>'
+      + '<button class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="ncDeleteOrphanClone(' + idx + ',this)">Delete Volume</button>'
+      + '</div>';
+  }).join('');
+}
+
+async function ncDeleteOrphanClone(idx, btn) {
+  var o = _ncOrphanData[idx];
+  if (!o) return;
+  var ok = await uiConfirmDanger(
+    'Delete FlexClone volume "' + o.volume_name + '" on ' + o.endpoint_name + (o.svm_name ? ' / ' + o.svm_name : '') + '?\n\n'
+    + 'This permanently removes the ONTAP volume. Only confirm if you\'ve verified it\'s really an orphaned '
+    + 'Instant Recovery clone and not something else using the same naming convention.',
+    'I understand this deletes a real ONTAP volume'
+  );
+  if (!ok) return;
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    await apiPost('instant-recovery/orphan-clones/delete', { endpoint_id: o.endpoint_id, volume_uuid: o.volume_uuid });
+    toast('Volume "' + o.volume_name + '" deleted', 'success');
+    ncScanOrphanClones();
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Delete Volume';
+    toast('Delete failed: ' + esc(e.message || String(e)), 'error');
+  }
+}
+
 // ── Job Tracker ────────────────────────────────────────────────────────────
 var _activeJobs = {};
 
@@ -17671,6 +17750,8 @@ var _helpData = {
       + '<li><strong>Orphaned NVMe Subsystems</strong> — an NVMe-oF subsystem still registered in the kernel with no active controllers underneath it.</li>'
       + '</ul>'
       + '<p>Click <strong>Scan</strong> to detect and <strong>Clean up</strong> to remove them safely. <strong>Check All Hosts</strong> additionally verifies the storage stack packages and services on each node (<code>nfs-common</code>, <code>open-iscsi</code> incl. <code>iscsid</code> and initiator name, <code>nvme-cli</code> incl. the <code>nvme_tcp</code> kernel module, <code>lvm2</code>, <code>qemu-utils</code>) — auto-triggered when a host is added, with a one-click Fix button for auto-fixable issues.</p>'
+      + '<h3>NetApp Clone Cleanup</h3>'
+      + '<p>The Proxmox-side counterpart above only sees mounts/storage.cfg — it can\'t tell you whether the actual ONTAP FlexClone volume behind an Instant Recovery session is still there. This scans every registered ONTAP system for leftover <code>nsir_*</code> volumes that no active session still needs (interrupted Discard/Storage-Migrate can leave one behind even after a retry). Nothing is deleted automatically — each volume is listed with its linked session (if any) for review, and <strong>Delete Volume</strong> requires an explicit "I understand" confirmation before it removes the real ONTAP volume.</p>'
       + '<h3>Plugin Update</h3>'
       + '<p>Check for and apply updates to the NaSnap plugin. The current and available versions are shown. Updates are downloaded and applied in-place; a container restart completes the process.</p>',
     de: '<h3>Übersicht</h3>'
@@ -17704,6 +17785,8 @@ var _helpData = {
       + '<li><strong>Orphaned NVMe Subsystems</strong> — ein NVMe-oF-Subsystem, das noch im Kernel registriert ist, aber keine aktiven Controller mehr darunter hat.</li>'
       + '</ul>'
       + '<p><strong>Scan</strong> zur Erkennung, <strong>Bereinigen</strong> zur sicheren Entfernung. <strong>Check All Hosts</strong> prüft zusätzlich die Storage-Stack-Pakete und -Dienste auf jedem Node (<code>nfs-common</code>, <code>open-iscsi</code> inkl. <code>iscsid</code> und Initiator-Name, <code>nvme-cli</code> inkl. Kernel-Modul <code>nvme_tcp</code>, <code>lvm2</code>, <code>qemu-utils</code>) — automatisch beim Hinzufügen eines Hosts ausgelöst, mit Ein-Klick-Fix-Button für automatisch behebbare Probleme.</p>'
+      + '<h3>NetApp Clone Cleanup</h3>'
+      + '<p>Das Gegenstück oben sieht nur Mounts/storage.cfg auf der Proxmox-Seite — es kann nicht erkennen, ob das eigentliche ONTAP-FlexClone-Volume einer Instant-Recovery-Session noch existiert. Dieser Check durchsucht alle registrierten ONTAP-Systeme nach verbliebenen <code>nsir_*</code>-Volumes, die keine aktive Session mehr braucht (ein unterbrochener Discard/Storage-Migrate kann selbst nach einem Retry noch eines zurücklassen). Es wird nichts automatisch gelöscht — jedes Volume wird mit der verknüpften Session (falls vorhanden) zur Prüfung aufgelistet, und <strong>Delete Volume</strong> erfordert eine explizite "Ich verstehe"-Bestätigung, bevor das echte ONTAP-Volume entfernt wird.</p>'
       + '<h3>Plugin-Update</h3>'
       + '<p>Updates für das NaSnap-Plugin prüfen und anwenden. Aktuelle und verfügbare Version werden angezeigt. Updates werden heruntergeladen und direkt angewendet; ein Container-Neustart schließt den Vorgang ab.</p>'
   }
