@@ -31,7 +31,10 @@ from flask import request
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
-from ..core._helpers import get_endpoint, build_ontap_client, load_plugin_config, is_system_snapshot
+from ..core._helpers import (
+    get_endpoint, build_ontap_client, load_plugin_config, is_system_snapshot,
+    validate_safe_name, find_name_conflict,
+)
 from ..core.snapshot_engine import start_snapshot_job
 
 log = logging.getLogger(__name__)
@@ -77,6 +80,13 @@ def _add_endpoint():
             return {"error": f"Required field missing: {field}"}, 400
 
     db = get_db()
+    try:
+        ep_name = validate_safe_name(data["name"], "Endpoint name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_name_conflict(db, "netapp_endpoints", ep_name)
+    if conflict:
+        return {"error": f"An ONTAP endpoint named '{conflict['name']}' already exists."}, 409
     eid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -94,7 +104,7 @@ def _add_endpoint():
     db.execute(
         "INSERT INTO netapp_endpoints (id, name, host, username, password_encrypted, "
         "ssl_verify, skip_nfs, san_optimized, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (eid, data["name"], data["host"], data["username"],
+        (eid, ep_name, data["host"], data["username"],
          db._encrypt(data["password"]),
          1 if data.get("ssl_verify", True) else 0,
          1 if data.get("skip_nfs") else 0,
@@ -172,6 +182,13 @@ def _update_endpoint():
         return {"error": "Endpoint not found"}, 404
 
     name       = data.get("name", "").strip() or dict(row)["name"]
+    try:
+        name = validate_safe_name(name, "Endpoint name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_name_conflict(db, "netapp_endpoints", name, exclude_id=eid)
+    if conflict:
+        return {"error": f"An ONTAP endpoint named '{conflict['name']}' already exists."}, 409
     host       = data.get("host", "").strip() or dict(row)["host"]
     username   = data.get("username", "").strip() or dict(row)["username"]
     ssl_verify = bool(data["ssl_verify"]) if "ssl_verify" in data else bool(dict(row)["ssl_verify"])
@@ -236,12 +253,19 @@ def _add_pve_host():
         if not data.get(field):
             return {"error": f"Required field missing: {field}"}, 400
     db = get_db()
+    try:
+        host_name = validate_safe_name(data["name"], "PVE host name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_name_conflict(db, "netapp_pve_hosts", host_name)
+    if conflict:
+        return {"error": f"A PVE host named '{conflict['name']}' already exists."}, 409
     hid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     db.execute(
         "INSERT INTO netapp_pve_hosts (id, name, host, port, username, password_encrypted, "
         "ssl_verify, nfs_ip, cluster_group_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (hid, data["name"], data["host"],
+        (hid, host_name, data["host"],
          int(data.get("port", 8006)),
          data["username"],
          db._encrypt(data["password"]),
@@ -367,12 +391,19 @@ def _update_pve_host():
     row = db.query_one("SELECT password_encrypted FROM netapp_pve_hosts WHERE id=?", (hid,))
     if not row:
         return {"error": "PVE host not found"}, 404
+    try:
+        host_name = validate_safe_name(data["name"], "PVE host name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_name_conflict(db, "netapp_pve_hosts", host_name, exclude_id=hid)
+    if conflict:
+        return {"error": f"A PVE host named '{conflict['name']}' already exists."}, 409
     password = data.get("password", "").strip()
     enc = db._encrypt(password) if password else row["password_encrypted"]
     db.execute(
         "UPDATE netapp_pve_hosts SET name=?, host=?, port=?, username=?, "
         "password_encrypted=?, ssl_verify=?, nfs_ip=? WHERE id=?",
-        (data["name"], data["host"], int(data.get("port", 8006)),
+        (host_name, data["host"], int(data.get("port", 8006)),
          data["username"], enc,
          1 if data.get("ssl_verify", False) else 0,
          data.get("nfs_ip", "").strip(), hid),

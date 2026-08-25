@@ -5,6 +5,7 @@ Shared helpers for snapshot_engine, restore_engine, and clone_engine.
 import os
 import json
 import logging
+import re
 import subprocess
 import shlex
 import tempfile
@@ -64,6 +65,101 @@ def get_mapping(db, mapping_id):
     if not row:
         raise RuntimeError(f"Volume mapping '{mapping_id}' not found")
     return dict(row)
+
+
+_VM_NAME_RE = re.compile(r'[^A-Za-z0-9.-]')
+
+
+def sanitize_vm_name(name, fallback):
+    """Returns an ASCII-safe VM name/hostname (letters, digits, dot, dash only).
+
+    PVE's own `name:`/`hostname:` config keys already require this charset —
+    enforcing it here, BEFORE the value is spliced into a raw .conf file text
+    blob, also closes a config-injection hole: an unsanitized name containing
+    a newline could otherwise smuggle extra config lines/keys into the
+    written file.
+    """
+    name = (name or "").strip()
+    name = name.splitlines()[0] if name else ""  # drop everything after any embedded newline
+    safe = _VM_NAME_RE.sub('-', name).strip('-')
+    return safe or fallback
+
+
+def is_vmid_in_use(host, user, password, key_material, vmid, timeout=10):
+    """True if a VM or CT config already exists for this VMID anywhere in the
+    cluster. qemu-server and lxc share one VMID numbering space in PVE, so
+    both directories must be checked — checking only the guest type being
+    written would miss a same-numbered guest of the *other* type."""
+    qemu_path = f"/etc/pve/qemu-server/{vmid}.conf"
+    lxc_path  = f"/etc/pve/lxc/{vmid}.conf"
+    out = ssh_run(
+        host, user, password,
+        f"{{ [ -f {shlex.quote(qemu_path)} ] && echo QEMU; "
+        f"[ -f {shlex.quote(lxc_path)} ] && echo LXC; }} 2>/dev/null; true",
+        capture=True, key_material=key_material, timeout=timeout,
+    )
+    return bool((out or "").strip())
+
+
+_SAFE_NAME_RE = re.compile(r'^[A-Za-z0-9 ._-]+$')
+
+
+def validate_safe_name(name, field_label="Name"):
+    """Raises ValueError if `name` is empty or contains anything outside
+    plain ASCII letters/digits/space/dot/dash/underscore — blocks umlauts,
+    other unicode, and shell/path-special characters that have caused
+    mount-path and filename bugs elsewhere in this plugin. Returns the
+    trimmed name on success."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError(f"{field_label} is required")
+    if not _SAFE_NAME_RE.match(name):
+        raise ValueError(
+            f"{field_label} may only contain letters, numbers, spaces, dots, "
+            f"dashes and underscores (no umlauts or special characters): '{name}'"
+        )
+    return name
+
+
+def find_name_conflict(db, table, name, exclude_id=None, name_column="name"):
+    """Generic case-insensitive uniqueness check for a `name`-type column.
+
+    `table`/`name_column` are always caller-supplied string literals (never
+    request input), so building the SQL with an f-string here is safe.
+    Returns the conflicting row as a dict, or None.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    q = f"SELECT * FROM {table} WHERE LOWER({name_column})=LOWER(?)"
+    params = [name]
+    if exclude_id:
+        q += " AND id != ?"
+        params.append(exclude_id)
+    row = db.query_one(q, tuple(params))
+    return dict(row) if row else None
+
+
+def find_datastore_conflict(db, name, pve_storage_id=""):
+    """Returns the conflicting row (as dict) if a datastore with this display
+    name or this PVE storage id (i.e. the same /mnt/pve/<id> mountpoint) is
+    already registered, else None.
+
+    Any row present in netapp_provisioned_datastores — regardless of status
+    (provisioning/active/removing/error) — still owns its name/mountpoint
+    until it is actually deleted, so all statuses are checked.
+    """
+    name = (name or "").strip()
+    pve_storage_id = (pve_storage_id or "").strip()
+    if not name and not pve_storage_id:
+        return None
+    q = "SELECT id, name, pve_storage_id, status FROM netapp_provisioned_datastores WHERE LOWER(name)=LOWER(?)"
+    params = [name]
+    if pve_storage_id:
+        q += " OR pve_storage_id=?"
+        params.append(pve_storage_id)
+    row = db.query_one(q, tuple(params))
+    return dict(row) if row else None
 
 
 _SIZE_SUFFIX = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}

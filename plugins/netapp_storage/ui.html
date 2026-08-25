@@ -9306,6 +9306,8 @@ async function runDetectAndScan() {
       var msg = r.mappings_found + ' datastore(s) · ' + r.snapmirror_found + ' SnapMirror relationship(s) · '
           + r.snapshots_imported + ' snapshot(s) imported';
       if (r.snapshots_removed) msg += ' · ' + r.snapshots_removed + ' orphaned record(s) removed';
+      var removedTotal = (r.datastores_removed||0) + (r.mappings_removed||0);
+      if (removedTotal) msg += ' · ' + removedTotal + ' stale datastore(s) removed (no longer on Proxmox)';
       toast(msg, 'success');
     }
     loadStorageUnified();
@@ -11736,7 +11738,40 @@ async function rcvBind() {
 
 // ── Provisioning Tab — Bind Wizard toggle ────────────────────────────────────
 
+function rcvResetWizard() {
+  rcvState = {
+    endpoint_id:'', svm_name:'', protocol:'nfs',
+    volume_uuid:'', volume_name:'', volume_type:'rw',
+    sm_rel_uuid:'', has_sm:false,
+    vg_name:'', lvm_type:'linear', pool_name:'data',
+    storage_id:'', nfs_ip:'', junction_override:'',
+    pve_host_ids:[]
+  };
+  document.getElementById('rcvEndpoint').value = '';
+  document.getElementById('rcvSvm').innerHTML = '<option value="">— select endpoint first —</option>';
+  document.getElementById('rcvNfsLifRow').style.display = 'none';
+  document.getElementById('rcvNfsLif').innerHTML = '<option value="">— select endpoint/SVM first —</option>';
+  var nfsLifErr = document.getElementById('rcvNfsLifErr');
+  if (nfsLifErr) nfsLifErr.textContent = '';
+  var protoNfs = document.querySelector('input[name="rcvProto"][value="nfs"]');
+  if (protoNfs) protoNfs.checked = true;
+  document.getElementById('rcvVolumesTbody').innerHTML = '';
+  document.getElementById('rcvVolumeTableWrap').style.display = 'none';
+  document.getElementById('rcvScanErr').textContent = '';
+  document.getElementById('rcvStorageId').value = '';
+  document.getElementById('rcvVgName').value = '';
+  document.getElementById('rcvLvmType').value = 'linear';
+  document.getElementById('rcvPoolName').value = 'data';
+  document.getElementById('rcvJunctionPath').value = '';
+  document.getElementById('rcvPoolRow').style.display = 'none';
+  document.getElementById('rcvSmBreakRow').style.display = 'none';
+  document.getElementById('rcvSmBreak').checked = true;
+  document.getElementById('rcvBindErr').textContent = '';
+  rcvShowStep(1);
+}
+
 function showBindWizard() {
+  rcvResetWizard();
   document.getElementById('bindWizModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   rcvLoadEndpoints();
@@ -12041,6 +12076,25 @@ async function impDoImport() {
     var newId   = newCell ? parseInt(newCell.textContent, 10) : origId;
     vmid_map[origId] = newId;
   });
+
+  // Block submission if any selected VM's target VMID collides with one
+  // already in use on the cluster (same check the row highlighting uses) —
+  // the server rejects/skips these anyway, but catching it here avoids a
+  // failed job and a confusing partial import.
+  var usedSet = new Set(_impState.usedVmids);
+  var newIds  = Object.values(vmid_map);
+  var dupSet  = new Set();
+  newIds.forEach(function(id, i) { if (newIds.indexOf(id) !== i) dupSet.add(id); });
+  var conflicts = Object.keys(vmid_map).filter(function(origId) {
+    var newId = vmid_map[origId];
+    return usedSet.has(newId) || dupSet.has(newId);
+  });
+  if (conflicts.length) {
+    document.getElementById('impImportErr').textContent =
+      'Target VMID conflict for VM(s) ' + conflicts.join(', ') + ' — '
+      + 'choose a different offset/mapping or deselect them before importing.';
+    return;
+  }
 
   // Use the input value; if empty fall back to the placeholder (auto-detected ID)
   var oldInput   = document.getElementById('impStorageOld');

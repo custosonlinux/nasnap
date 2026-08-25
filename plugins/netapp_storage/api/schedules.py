@@ -21,7 +21,7 @@ from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
 log = logging.getLogger(__name__)
-from ..core._helpers import PLUGIN_ID  # noqa: F401
+from ..core._helpers import PLUGIN_ID, validate_safe_name, find_name_conflict  # noqa: F401
 
 _scheduler_thread = None
 _scheduler_stop = threading.Event()
@@ -506,6 +506,13 @@ def _add_schedule():
         vmids = []
 
     db = get_db()
+    try:
+        sched_name = validate_safe_name(data["name"], "Schedule name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_name_conflict(db, "netapp_snapshot_schedules", sched_name)
+    if conflict:
+        return {"error": f"A protection plan named '{conflict['name']}' already exists."}, 409
     sid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     username = request.session.get("user", "system")
@@ -518,7 +525,7 @@ def _add_schedule():
         "tamperproof_enabled, tamperproof_days, "
         "sm_tamperproof_enabled, sm_tamperproof_days, enabled, created_by, created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (sid, data["name"], primary_mapping_id, json.dumps(mapping_ids),
+        (sid, sched_name, primary_mapping_id, json.dumps(mapping_ids),
          json.dumps(vmids), data["cron_expr"], int(data.get("retention_count", 7)),
          data.get("consistency", "crash"), data.get("label", ""),
          data.get("pre_script", ""), data.get("post_script", ""),
@@ -546,6 +553,15 @@ def _update_schedule():
         return {"error": "id required"}, 400
 
     db = get_db()
+    if "name" in data:
+        try:
+            data["name"] = validate_safe_name(data.get("name"), "Schedule name")
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        conflict = find_name_conflict(db, "netapp_snapshot_schedules", data["name"], exclude_id=sid)
+        if conflict:
+            return {"error": f"A protection plan named '{conflict['name']}' already exists."}, 409
+
     fields = []
     values = []
     for col, val in [

@@ -24,6 +24,7 @@ from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
     build_ontap_client, build_pve_client,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
+    is_vmid_in_use, sanitize_vm_name,
 )
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
 from .restore_engine import (
@@ -136,7 +137,7 @@ def _run_clone(job_id, params, username):
         _set_progress(db, job_id, 70)
 
         # ── Build and write new VM config ──────────────────────────────
-        eff_name = new_name or f"clone-{vm_entry.get('name', src_vmid)}"
+        eff_name = sanitize_vm_name(new_name or f"clone-{vm_entry.get('name', src_vmid)}", f"vm-{new_vmid}")
         jlog.log(f"Building VM config … (name: {eff_name!r})")
         raw_conf = vm_entry.get("raw_config", {})
         conf_str = _build_clone_config(
@@ -157,16 +158,14 @@ def _run_clone(job_id, params, username):
                 stdin_data=conf_str.encode(), key_material=pve_key)
         jlog.log(f"Config written: {conf_path}")
 
-        if eff_name:
-            safe_name = re.sub(r'[^a-zA-Z0-9\-\.]', '-', eff_name).strip('-') or f"vm-{new_vmid}"
-            if vm_type == "qemu":
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"qm set {new_vmid} --name {shlex.quote(safe_name)}",
-                        key_material=pve_key)
-            else:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"pct set {new_vmid} --hostname {shlex.quote(safe_name)}",
-                        key_material=pve_key)
+        if vm_type == "qemu":
+            ssh_run(pve_host, pve_user, pve_pass,
+                    f"qm set {new_vmid} --name {shlex.quote(eff_name)}",
+                    key_material=pve_key)
+        else:
+            ssh_run(pve_host, pve_user, pve_pass,
+                    f"pct set {new_vmid} --hostname {shlex.quote(eff_name)}",
+                    key_material=pve_key)
 
         _set_progress(db, job_id, 90)
 
@@ -285,7 +284,7 @@ def _run_clone_live_nfs(job_id, params, username):
         _set_progress(db, job_id, 70)
 
         # ── Build and write new VM config ──────────────────────────────
-        eff_name = new_name or f"clone-{src_vmid}"
+        eff_name = sanitize_vm_name(new_name or f"clone-{src_vmid}", f"vm-{new_vmid}")
         jlog.log(f"Building VM config … (name: {eff_name!r})")
         conf_str = _build_clone_config(
             raw_conf, src_vmid, new_vmid,
@@ -305,15 +304,13 @@ def _run_clone_live_nfs(job_id, params, username):
                 stdin_data=conf_str.encode(), key_material=pve_key)
         jlog.log(f"Config written: {conf_path}")
 
-        if eff_name:
-            safe_name = re.sub(r'[^a-zA-Z0-9\-\.]', '-', eff_name).strip('-') or f"vm-{new_vmid}"
-            if vm_type == "qemu":
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"qm set {new_vmid} --name {shlex.quote(safe_name)}",
-                        key_material=pve_key)
-            else:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"pct set {new_vmid} --hostname {shlex.quote(safe_name)}",
+        if vm_type == "qemu":
+            ssh_run(pve_host, pve_user, pve_pass,
+                    f"qm set {new_vmid} --name {shlex.quote(eff_name)}",
+                    key_material=pve_key)
+        else:
+            ssh_run(pve_host, pve_user, pve_pass,
+                    f"pct set {new_vmid} --hostname {shlex.quote(eff_name)}",
                         key_material=pve_key)
 
         _set_progress(db, job_id, 90)
@@ -653,7 +650,7 @@ def _run_clone_san(job_id, params, username):
         temp_lun_uuid = temp_ns_uuid = temp_iscsi_clone_vol_uuid = temp_iscsi_serial = temp_igroup_uuid = ""
 
         # ── 8. Write VM config ─────────────────────────────────────────
-        eff_name = new_name or f"san-clone-{vm_entry.get('name', src_vmid)}"
+        eff_name = sanitize_vm_name(new_name or f"san-clone-{vm_entry.get('name', src_vmid)}", f"vm-{new_vmid}")
         jlog.log(f"Writing VM config … (name: {eff_name!r})")
         raw_conf = vm_entry.get("raw_config", {})
         conf_str = _build_clone_config(
@@ -674,16 +671,14 @@ def _run_clone_san(job_id, params, username):
                 stdin_data=conf_str.encode(), key_material=pve_key)
         jlog.log(f"Config written: {conf_path}")
 
-        if eff_name:
-            safe_name = re.sub(r'[^a-zA-Z0-9\-\.]', '-', eff_name).strip('-') or f"vm-{new_vmid}"
-            if vm_type == "qemu":
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"qm set {new_vmid} --name {shlex.quote(safe_name)}",
-                        key_material=pve_key)
-            else:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"pct set {new_vmid} --hostname {shlex.quote(safe_name)}",
-                        key_material=pve_key)
+        if vm_type == "qemu":
+            ssh_run(pve_host, pve_user, pve_pass,
+                    f"qm set {new_vmid} --name {shlex.quote(eff_name)}",
+                    key_material=pve_key)
+        else:
+            ssh_run(pve_host, pve_user, pve_pass,
+                    f"pct set {new_vmid} --hostname {shlex.quote(eff_name)}",
+                    key_material=pve_key)
 
         _set_progress(db, job_id, 92)
 
@@ -823,7 +818,17 @@ def _reserve_vmid(pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type, jlog
 
     Returns the config path so the error handler can remove it on failure.
     The real config written at the end of the job overwrites this placeholder.
+
+    Refuses to proceed if the VMID is already in use — qemu-server and lxc
+    share one numbering space in PVE, so both directories are checked, not
+    just the guest type being written. Without this, a colliding VMID would
+    silently clobber a real, possibly running, VM's config.
     """
+    if is_vmid_in_use(pve_host, pve_user, pve_pass, pve_key, new_vmid):
+        raise RuntimeError(
+            f"VMID {new_vmid} is already in use on this PVE cluster — "
+            f"choose a different target VMID."
+        )
     subdir = "qemu-server" if vm_type == "qemu" else "lxc"
     path   = f"/etc/pve/{subdir}/{new_vmid}.conf"
     ssh_run(pve_host, pve_user, pve_pass,
@@ -1286,7 +1291,7 @@ def _run_dr_clone_iscsi(job_id, params, username, db, jlog, mapping):
             log.warning(f"[netapp_storage] DR clone: vg rescan: {exc}")
 
         # ── 8. Write VM config ────────────────────────────────────────────────
-        eff_name = new_name or f"dr-clone-{vm_entry.get('name', src_vmid)}"
+        eff_name = sanitize_vm_name(new_name or f"dr-clone-{vm_entry.get('name', src_vmid)}", f"vm-{new_vmid}")
         jlog.log(f"Writing VM config … (name: {eff_name!r})")
         raw_conf = vm_entry.get("raw_config", {})
         conf_str = _build_clone_config(
@@ -1598,7 +1603,7 @@ def _run_dr_clone_nvme(job_id, params, username, db, jlog, mapping):
             log.warning(f"[netapp_storage] DR NVMe clone: vg rescan: {exc}")
 
         # ── 8. Write VM config ────────────────────────────────────────────────
-        eff_name = new_name or f"dr-clone-{vm_entry.get('name', src_vmid)}"
+        eff_name = sanitize_vm_name(new_name or f"dr-clone-{vm_entry.get('name', src_vmid)}", f"vm-{new_vmid}")
         jlog.log(f"Writing VM config … (name: {eff_name!r})")
         raw_conf = vm_entry.get("raw_config", {})
         conf_str = _build_clone_config(
@@ -1723,6 +1728,7 @@ def _run_dr_clone(job_id, params, username):
     cfg             = load_plugin_config()
     dr_mount_base   = cfg.get("flexclone_mount_base", "/mnt/nasnap-clone")
     dr_mount_point  = None
+    conf_path_reserved = ""
     pve_host        = ""
     pve_user        = "root"
     pve_pass        = ""
@@ -1821,6 +1827,10 @@ def _run_dr_clone(job_id, params, username):
 
         _re_set_progress(db, job_id, 25)
 
+        # ── Reserve VMID before the (potentially long) disk copy ────────
+        conf_path_reserved = _reserve_vmid(
+            pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type, jlog)
+
         # ── Copy disks with remapped VMID ───────────────────────────────
         total        = len(disks)
         new_disk_map = {}
@@ -1847,7 +1857,7 @@ def _run_dr_clone(job_id, params, username):
             _re_set_progress(db, job_id, 25 + int(i / max(total, 1) * 55))
 
         # ── Neue VM-Config ────────────────────────────────────────────
-        eff_name = new_name or f"dr-clone-{vm_entry.get('name', src_vmid)}"
+        eff_name = sanitize_vm_name(new_name or f"dr-clone-{vm_entry.get('name', src_vmid)}", f"vm-{new_vmid}")
         jlog.log(f"Building VM config … (name: {eff_name!r})")
         raw_conf = vm_entry.get("raw_config", {})
         conf_str = _build_clone_config(
@@ -1864,16 +1874,16 @@ def _run_dr_clone(job_id, params, username):
         ssh_run(pve_host, pve_user, pve_pass,
                 f"cat > {shlex.quote(conf_path)}",
                 stdin_data=conf_str.encode(), key_material=pve_key)
+        conf_path_reserved = ""  # real config now written — no placeholder left to clean up
         jlog.log(f"Config written: {conf_path}")
 
-        safe_name = re.sub(r'[^a-zA-Z0-9\-\.]', '-', eff_name).strip('-') or f"vm-{new_vmid}"
         if vm_type == "qemu":
             ssh_run(pve_host, pve_user, pve_pass,
-                    f"qm set {new_vmid} --name {shlex.quote(safe_name)}",
+                    f"qm set {new_vmid} --name {shlex.quote(eff_name)}",
                     key_material=pve_key)
         else:
             ssh_run(pve_host, pve_user, pve_pass,
-                    f"pct set {new_vmid} --hostname {shlex.quote(safe_name)}",
+                    f"pct set {new_vmid} --hostname {shlex.quote(eff_name)}",
                     key_material=pve_key)
 
         _re_set_progress(db, job_id, 90)
@@ -1906,6 +1916,13 @@ def _run_dr_clone(job_id, params, username):
                         key_material=pve_key)
             except Exception as e:
                 log.warning(f"[netapp_storage] DR-Clone cleanup failed: {e}")
+        if conf_path_reserved and pve_host:
+            try:
+                ssh_run(pve_host, pve_user, pve_pass,
+                        f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null || true",
+                        key_material=pve_key, timeout=10)
+            except Exception:
+                pass
         _reg_unregister(job_id)
 
     if not _re_job_failed(db, job_id):

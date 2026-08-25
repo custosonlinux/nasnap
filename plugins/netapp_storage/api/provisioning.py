@@ -21,6 +21,7 @@ from nasnap_core.core.db import get_db
 from ..core._helpers import (
     get_endpoint, build_ontap_client, build_pve_client,
     get_ssh_creds, JobLogger, ssh_run, load_plugin_config,
+    find_datastore_conflict, validate_safe_name,
 )
 from ..core.ontap_client import OntapError
 from ..core.san_helpers import (
@@ -124,6 +125,18 @@ def _prov_datastores():
         return {"error": f"Unknown protocol: {protocol}"}, 400
 
     db = get_db()
+    try:
+        ds_name = validate_safe_name(body["name"], "Datastore name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_datastore_conflict(db, ds_name, body.get("pve_storage_id", ""))
+    if conflict:
+        return {
+            "error": f"A datastore named '{conflict['name']}' (storage id "
+                     f"'{conflict['pve_storage_id']}') already exists — choose a "
+                     f"different name to avoid mounting two volumes on the same "
+                     f"Proxmox mountpoint.",
+        }, 409
     ds_id    = str(_uuid.uuid4())
     username = request.session.get("user", "unknown")
     now      = _now()
@@ -139,7 +152,7 @@ def _prov_datastores():
             pve_content, nfs_nconnect)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            ds_id, body["name"], body["endpoint_id"],
+            ds_id, ds_name, body["endpoint_id"],
             body.get("svm_name", ""), body.get("volume_uuid", ""),
             body.get("volume_name", ""), protocol,
             body.get("lun_uuid", ""), body.get("lun_path", ""),
@@ -559,6 +572,16 @@ def _prov_import():
 
     ds_id   = str(_uuid.uuid4())
     ds_name = name or pve_storage_id
+    try:
+        ds_name = validate_safe_name(ds_name, "Datastore name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_datastore_conflict(db, ds_name, pve_storage_id)
+    if conflict:
+        return {
+            "error": f"A datastore named '{conflict['name']}' (storage id "
+                     f"'{conflict['pve_storage_id']}') is already registered.",
+        }, 409
 
     # ── Detect existing snapmanifest before committing ────────────────────────
     # For SAN: SSH to any known PVE host and check if the LV already exists.
@@ -1271,15 +1294,21 @@ def _run_detect_and_scan(created_by):
         from ..core.gc import gc_stale_snapshots
         gc_result = gc_stale_snapshots(db, logger)
 
+        logger.log("Checking for datastores no longer present on Proxmox …")
+        from ..core.prune import prune_missing_datastores
+        prune_result = prune_missing_datastores(db, logger)
+
         from ..core.instant_recovery_engine import check_stale_sessions
         check_stale_sessions(db, logger)
 
         return {
-            "mappings_found":     len(mappings),
-            "snapmirror_found":   found,
-            "datastores_scanned": scan_result["total_datastores"],
-            "snapshots_imported": n_imported,
-            "snapshots_removed":  gc_result["removed"],
+            "mappings_found":       len(mappings),
+            "snapmirror_found":     found,
+            "datastores_scanned":   scan_result["total_datastores"],
+            "snapshots_imported":   n_imported,
+            "snapshots_removed":    gc_result["removed"],
+            "datastores_removed":   prune_result["datastores_removed"],
+            "mappings_removed":     prune_result["mappings_removed"],
         }
 
     return run_as_job(db, "discover_scan", created_by, _do)

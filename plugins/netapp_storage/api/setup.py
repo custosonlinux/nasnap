@@ -24,7 +24,9 @@ from flask import request, jsonify
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
-from ..core._helpers import PLUGIN_ID, JobLogger, ssh_run
+from ..core._helpers import (
+    PLUGIN_ID, JobLogger, ssh_run, validate_safe_name, find_name_conflict,
+)
 
 log = logging.getLogger(__name__)
 
@@ -657,9 +659,9 @@ def _import_pve_nodes():
 
     imported, skipped = [], []
     for node in node_names:
-        # Skip duplicates (same host OR same name)
+        # Skip duplicates (same host OR same name), case-insensitive
         existing = db.query_one(
-            "SELECT id FROM netapp_pve_hosts WHERE host=? OR name=?",
+            "SELECT id FROM netapp_pve_hosts WHERE LOWER(host)=LOWER(?) OR LOWER(name)=LOWER(?)",
             (node, node),
         )
         if existing:
@@ -751,6 +753,13 @@ def _add_ontap_system():
 
     if not name or not host or not admin_password or not new_password:
         return jsonify({"error": "name, host, admin_password and new_password are required"}), 400
+    try:
+        name = validate_safe_name(name, "Endpoint name")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    conflict = find_name_conflict(get_db(), "netapp_endpoints", name)
+    if conflict:
+        return jsonify({"error": f"An ONTAP endpoint named '{conflict['name']}' already exists."}), 409
 
     from ..core.ontap_client import OntapClient, OntapError
 

@@ -47,7 +47,7 @@ from flask import request, jsonify
 from nasnap_core.core.db import get_db
 from nasnap_core.api.plugins import register_plugin_route
 
-from ..core._helpers import PLUGIN_ID
+from ..core._helpers import PLUGIN_ID, validate_safe_name, find_name_conflict
 
 log = logging.getLogger(__name__)
 
@@ -210,6 +210,13 @@ def _create_dr_plan():
     if not name:
         return {"error": "name is required"}, 400
     db = get_db()
+    try:
+        name = validate_safe_name(name, "DR plan name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_name_conflict(db, "netapp_dr_plans", name)
+    if conflict:
+        return {"error": f"A DR plan named '{conflict['name']}' already exists."}, 409
     pid = str(uuid.uuid4())[:8]
     now = _now()
     username = request.session.get("user", "system")
@@ -261,6 +268,15 @@ def _update_dr_plan():
     db = get_db()
     if not plan_id or not db.query_one("SELECT id FROM netapp_dr_plans WHERE id=?", (plan_id,)):
         return {"error": "DR plan not found"}, 404
+    if "name" in data:
+        try:
+            data["name"] = validate_safe_name(data.get("name"), "DR plan name")
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        conflict = find_name_conflict(db, "netapp_dr_plans", data["name"], exclude_id=plan_id)
+        if conflict:
+            return {"error": f"A DR plan named '{conflict['name']}' already exists."}, 409
+
     updates, params = [], []
     for k in ("name", "notes"):
         if k in data:
@@ -486,6 +502,15 @@ def _create_vm_group():
     db = get_db()
     if not db.query_one("SELECT id FROM netapp_dr_plans WHERE id=?", (plan_id,)):
         return {"error": "DR plan not found"}, 404
+    try:
+        name = validate_safe_name(name, "VM group name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    if db.query_one(
+        "SELECT id FROM netapp_dr_vm_groups WHERE plan_id=? AND LOWER(name)=LOWER(?)",
+        (plan_id, name),
+    ):
+        return {"error": f"A VM group named '{name}' already exists in this plan."}, 409
     max_ord = db.query_one("SELECT MAX(sort_order) as m FROM netapp_dr_vm_groups WHERE plan_id=?", (plan_id,))
     sort_order = (max_ord["m"] or 0) + 1
     gid = str(uuid.uuid4())[:8]
@@ -511,6 +536,16 @@ def _update_vm_group():
     grp = db.query_one("SELECT * FROM netapp_dr_vm_groups WHERE id=?", (group_id,))
     if not grp:
         return {"error": "VM group not found"}, 404
+    if "name" in data:
+        try:
+            data["name"] = validate_safe_name(data.get("name"), "VM group name")
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        if db.query_one(
+            "SELECT id FROM netapp_dr_vm_groups WHERE plan_id=? AND LOWER(name)=LOWER(?) AND id != ?",
+            (grp["plan_id"], data["name"], group_id),
+        ):
+            return {"error": f"A VM group named '{data['name']}' already exists in this plan."}, 409
     updates, params = [], []
     for k in ("name", "start_mode", "startup_delay_sec", "max_parallel"):
         if k in data:

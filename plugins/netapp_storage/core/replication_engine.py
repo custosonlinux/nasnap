@@ -17,7 +17,7 @@ OntapError if they're missing.
 import uuid as _uuid
 from datetime import datetime, timezone
 
-from ._helpers import get_endpoint, build_ontap_client
+from ._helpers import get_endpoint, build_ontap_client, validate_safe_name
 from .ontap_client import OntapError
 
 
@@ -70,10 +70,8 @@ def resolve_policy(dest_client, dest_svm, policy_choice, jlog):
     if policy_choice.get("existing_name"):
         return policy_choice["existing_name"]
     new = policy_choice.get("new") or {}
-    name = new.get("name", "").strip()
+    name = validate_safe_name(new.get("name", ""), "Policy name")
     ptype = new.get("type", "mirror")
-    if not name:
-        raise ValueError("Policy name is required")
     if ptype == "mirror":
         # No custom policy object needed — ONTAP's built-in MirrorAllSnapshots
         # already provides this behavior on every SVM.

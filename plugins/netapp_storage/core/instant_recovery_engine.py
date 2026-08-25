@@ -37,6 +37,7 @@ from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
     build_ontap_client, pve_for_mapping,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
+    is_vmid_in_use, sanitize_vm_name,
 )
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
 from .restore_engine import (
@@ -126,7 +127,7 @@ def _run_instant_recovery(job_id, params, username):
     snapshot_id = params["snapshot_id"]
     src_vmid    = int(params["src_vmid"])
     new_vmid    = int(params["new_vmid"])
-    new_name    = params.get("new_name", "") or f"ir-{src_vmid}"
+    new_name    = sanitize_vm_name(params.get("new_name", "") or f"ir-{src_vmid}", f"ir-{src_vmid}")
     # Always started disconnected by default (grilled decision) — avoids
     # IP/MAC conflicts with a source VM that may still be running.
     network_isolated = params.get("network_isolated", True)
@@ -155,6 +156,12 @@ def _run_instant_recovery(job_id, params, username):
             raise RuntimeError("Could not determine a target PVE node")
         pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
         pve_host = _resolve_node_host(mgr, node)
+
+        if is_vmid_in_use(pve_host, pve_user, pve_pass, pve_key, new_vmid):
+            raise RuntimeError(
+                f"VMID {new_vmid} is already in use on this PVE cluster — "
+                f"choose a different target VMID."
+            )
 
         vm_types = json.loads(snap.get("vm_types_json") or "{}")
         vm_type = vm_types.get(str(src_vmid), "qemu")

@@ -397,15 +397,27 @@ def restore_vm_configs(manifest, pve_host_ids, vmid_offset,
                 su, sp, sk = get_ssh_creds(pve)
                 sh         = pve.host
 
-                # Skip if config already exists (idempotent)
+                # Skip if config already exists (idempotent). PVE VMIDs share one
+                # numbering space across qemu-server AND lxc, so both directories
+                # must be checked — not just this manifest entry's own guest type —
+                # or a same-numbered guest of the other type would be silently
+                # overwritten below.
+                other_dir  = "/etc/pve/qemu-server" if vm_type == "lxc" else "/etc/pve/lxc"
+                other_path = f"{other_dir}/{vmid_new}.conf"
                 check = ssh_run(
                     sh, su, sp,
-                    f"test -f {shlex.quote(conf_path)} && echo EXISTS || echo MISSING",
+                    f"{{ [ -f {shlex.quote(conf_path)} ] && echo OWN; "
+                    f"[ -f {shlex.quote(other_path)} ] && echo OTHER; }} 2>/dev/null; true",
                     capture=True, key_material=sk, timeout=10,
                 )
-                if "EXISTS" in check:
+                if "OWN" in check:
                     jlog.log(f"  VM {vmid_new} ({vm_type}): config already exists — skipping.")
                     written = True
+                    break
+                if "OTHER" in check:
+                    jlog.log(f"  ERROR: VMID {vmid_new} is already in use as a different "
+                             f"guest type on this host ({other_path}) — skipping to avoid "
+                             f"a VMID conflict. Choose a different target VMID/offset.")
                     break
 
                 # ── Rename disk files/LVs when VMID changes ───────────────────

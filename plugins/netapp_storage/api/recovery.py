@@ -40,7 +40,7 @@ from nasnap_core.core.db import get_db
 
 from ..core._helpers import (
     get_endpoint, build_ontap_client, build_pve_client,
-    get_ssh_creds, JobLogger, ssh_run,
+    get_ssh_creds, JobLogger, ssh_run, find_datastore_conflict, validate_safe_name,
 )
 from ..core._helpers import PLUGIN_ID  # noqa: F401
 
@@ -261,7 +261,19 @@ def _recovery_bind():
         return {"error": f"Unknown protocol: {protocol}"}, 400
     # vg_name is optional — auto-detected from device if not provided
 
-    db       = get_db()
+    db = get_db()
+    try:
+        ds_name = validate_safe_name(body["name"], "Datastore name")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    conflict = find_datastore_conflict(db, ds_name, body.get("pve_storage_id", ""))
+    if conflict:
+        return {
+            "error": f"A datastore named '{conflict['name']}' (storage id "
+                     f"'{conflict['pve_storage_id']}') already exists — choose a "
+                     f"different name/storage id to avoid mounting two volumes on "
+                     f"the same Proxmox mountpoint.",
+        }, 409
     username = request.session.get("user", "unknown")
     now      = _now()
     ds_id    = str(_uuid.uuid4())
@@ -277,7 +289,7 @@ def _recovery_bind():
             imported_from, created_by, created_at, updated_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            ds_id, body["name"], body["endpoint_id"],
+            ds_id, ds_name, body["endpoint_id"],
             body.get("svm_name", ""), body.get("volume_uuid", ""),
             body.get("volume_name", ""), protocol,
             "", "", "", "",
