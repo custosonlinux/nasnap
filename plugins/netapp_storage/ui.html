@@ -10572,7 +10572,7 @@ function showProvWizard() {
   provWizUpdateSanVolHint('provWizLunSize','provWizLunSizeUnit','provWizLunVolHint','LUN');
   provWizUpdateSanVolHint('provWizNsSize','provWizNsSizeUnit','provWizNsVolHint','namespace');
   document.getElementById('provOntapLoadErr').textContent='';
-  var r=document.querySelector('input[name="provProto"][value="iscsi"]');
+  var r=document.querySelector('input[name="provProto"][value="nfs"]');
   if(r) r.checked=true;
   provProtoChange();
   var btn = document.getElementById('provSubmitBtn');
@@ -10944,6 +10944,19 @@ function provWizVolumeChange() {
     provWizNsChange();
   } else if(proto==='nfs') {
     document.getElementById('provWizNfsSizeRow').style.display=isNew?'':'none';
+    var jEl=document.getElementById('provWizNfsJunction');
+    if(isNew) {
+      jEl.readOnly=false;
+      jEl.placeholder='e.g. /nfs-prod';
+      if(jEl.value===jEl.dataset.existingPath) jEl.value='';
+    } else {
+      var vol=(_provOntapRes.volumes||[]).find(function(v){ return v.uuid===volId; });
+      var jp=vol?(vol.junction_path||''):'';
+      jEl.dataset.existingPath=jp;
+      jEl.value=jp;
+      jEl.readOnly=true;
+      jEl.placeholder=jp?'':'(not mounted in ONTAP — mount it there first, or create a new volume instead)';
+    }
   }
 }
 
@@ -11000,9 +11013,11 @@ async function provWizNext2() {
     }
   } else if(proto==='nfs') {
     if(!document.getElementById('provWizNfsLif').value) return toast('Select an NFS LIF','error');
-    if(!document.getElementById('provWizNfsJunction').value.trim()) return toast('Enter a junction path','error');
     if(volId==='__new__') {
+      if(!document.getElementById('provWizNfsJunction').value.trim()) return toast('Enter a junction path','error');
       if(!parseInt(document.getElementById('provWizNfsSize').value)) return toast('Enter a valid volume size','error');
+    } else if(!document.getElementById('provWizNfsJunction').value.trim()) {
+      return toast('This volume is not mounted in ONTAP yet — mount it there first, or create a new volume instead.','error');
     }
   }
   try {
@@ -14466,13 +14481,13 @@ actLogPoll();
             <label>Protocol</label>
             <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
-                <input type="radio" name="provProto" value="iscsi" checked onchange="provProtoChange()"> iSCSI
+                <input type="radio" name="provProto" value="nfs" checked onchange="provProtoChange()"> NFS
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
+                <input type="radio" name="provProto" value="iscsi" onchange="provProtoChange()"> iSCSI
               </label>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
                 <input type="radio" name="provProto" value="nvme" onchange="provProtoChange()"> NVMe-oF
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
-                <input type="radio" name="provProto" value="nfs" onchange="provProtoChange()"> NFS
               </label>
             </div>
           </div>

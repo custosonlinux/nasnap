@@ -331,12 +331,16 @@ def _prov_ontap_resources():
 
     volumes = []
     try:
-        vols = client.get_volumes_san(svm_name=svm_name) if svm_name else client.get_volumes(svm_name=svm_name)
+        # SAN-optimized (ASA) platforms reject NAS fields (e.g. junction path)
+        # on this collection call — use the NAS-field-free variant only there,
+        # so NFS-capable platforms still get junction_path for existing volumes.
+        vols = client.get_volumes_san(svm_name=svm_name) if endpoint.get("san_optimized") else client.get_volumes(svm_name=svm_name)
         for v in vols:
             volumes.append({
                 "uuid": v.get("uuid", ""),
                 "name": v.get("name", ""),
                 "svm":  (v.get("svm") or {}).get("name", ""),
+                "junction_path": (v.get("nas") or {}).get("path", ""),
                 "snapshot_locking_enabled": bool((v.get("snaplock") or {}).get("snapshot_locking_enabled", False)),
             })
     except Exception as exc:
