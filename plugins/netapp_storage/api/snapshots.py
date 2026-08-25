@@ -420,6 +420,32 @@ def _delete_pve_host():
     if not hid:
         return {"error": "id required"}, 400
     db = get_db()
+
+    # Unlike endpoint delete, this never force-deletes dependents: a datastore
+    # can span multiple hosts, so removing one host is not necessarily safe to
+    # cascade into deleting the whole datastore. Block and point at the
+    # narrower, already-existing "Remove Host" per-datastore action instead.
+    blockers = []
+    ds_rows = db.query("SELECT name, pve_host_ids FROM netapp_provisioned_datastores") or []
+    ds_using = [dict(r)["name"] for r in ds_rows if hid in json.loads(dict(r).get("pve_host_ids") or "[]")]
+    if ds_using:
+        blockers.append(f"{len(ds_using)} managed datastore(s) ({', '.join(ds_using)})")
+
+    map_row = db.query_one("SELECT COUNT(*) AS cnt FROM netapp_volume_mapping WHERE pve_cluster_id=?", (hid,))
+    if map_row and map_row["cnt"]:
+        blockers.append(f"{map_row['cnt']} auto-discovered volume mapping(s)")
+
+    dr_rows = db.query("SELECT dr_pve_host_ids FROM netapp_dr_plan_entries") or []
+    dr_using = sum(1 for r in dr_rows if hid in json.loads(dict(r).get("dr_pve_host_ids") or "[]"))
+    if dr_using:
+        blockers.append(f"{dr_using} DR plan entr{'y' if dr_using == 1 else 'ies'}")
+
+    if blockers:
+        return {
+            "error": f"Cannot delete: this host is still used by {', '.join(blockers)}. "
+                     f"Remove it from those first (e.g. via a datastore's 'Remove Host' action).",
+        }, 409
+
     db.execute("DELETE FROM netapp_pve_hosts WHERE id=?", (hid,))
     return {"success": True}
 

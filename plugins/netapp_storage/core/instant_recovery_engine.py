@@ -38,7 +38,7 @@ from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
     build_ontap_client, pve_for_mapping,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
-    is_vmid_in_use, sanitize_vm_name,
+    reserve_vmid, sanitize_vm_name,
 )
 from .ontap_client import OntapError
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
@@ -137,6 +137,7 @@ def _run_instant_recovery(job_id, params, username):
     clone_vol_uuid  = ""
     clone_name      = ""
     temp_storage_id = ""
+    conf_path_reserved = ""
     pve_host = ""
     pve_user, pve_pass, pve_key = "root", "", ""
     mgr = None
@@ -159,15 +160,17 @@ def _run_instant_recovery(job_id, params, username):
         pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
         pve_host = _resolve_node_host(mgr, node)
 
-        if is_vmid_in_use(pve_host, pve_user, pve_pass, pve_key, new_vmid):
-            raise RuntimeError(
-                f"VMID {new_vmid} is already in use on this PVE cluster — "
-                f"choose a different target VMID."
-            )
-
         vm_types = json.loads(snap.get("vm_types_json") or "{}")
         vm_type = vm_types.get(str(src_vmid), "qemu")
         snap_name = snap["snap_name"]
+
+        # Reserve the VMID immediately, not just check it — a check-only
+        # gate here left the target VMID free for several seconds while the
+        # FlexClone got created and the temp storage registered, during
+        # which a second concurrent request (e.g. a double-submitted start)
+        # could grab the same VMID and only collide once this job reached
+        # its own config write, several minutes of wasted work later.
+        conf_path_reserved = reserve_vmid(pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type, jlog=jlog)
 
         jlog.log("Reading manifest …")
         manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key,
@@ -247,7 +250,8 @@ def _run_instant_recovery(job_id, params, username):
         jlog.log("Job cancelled by user")
         _cancel_job(db, job_id)
         _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
-                     clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog)
+                     clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog,
+                     conf_path_reserved=conf_path_reserved)
     except Exception as exc:
         log.error(f"[netapp_storage] Instant Recovery job {job_id} failed: {exc}")
         jlog.log(f"ERROR: {exc}")
@@ -256,15 +260,23 @@ def _run_instant_recovery(job_id, params, username):
         # failed *start* (unlike an active session, which is supposed to
         # persist until the user decides).
         _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
-                     clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog)
+                     clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog,
+                     conf_path_reserved=conf_path_reserved)
     finally:
         _reg_unregister(job_id)
 
 
 def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
-                  clone_vol_uuid, endpoint_id, db, jlog):
+                  clone_vol_uuid, endpoint_id, db, jlog, conf_path_reserved=""):
     """Best-effort cleanup with only the raw pieces (used when a session row
     was never created, i.e. the start job itself failed partway through)."""
+    if conf_path_reserved and pve_host:
+        try:
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null; true",
+                   key_material=pve_key, timeout=10)
+        except Exception as exc:
+            log.warning(f"[netapp_storage] cleanup reserved VMID conf: {exc}")
     if temp_storage_id and pve_host:
         try:
             ssh_run(pve_host, pve_user, pve_pass,

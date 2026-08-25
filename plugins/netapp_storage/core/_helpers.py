@@ -123,6 +123,38 @@ def is_vmid_in_use(host, user, password, key_material, vmid, timeout=10):
     return vmid_conf_status(host, user, password, key_material, vmid, "qemu", timeout) != "free"
 
 
+def reserve_vmid(host, user, password, key_material, vmid, vm_type,
+                  placeholder=b"name: reserved-in-progress\nlock: backup\n", jlog=None):
+    """Checks a VMID is free and immediately claims it by writing a
+    placeholder config — closing the gap between "confirmed free" and
+    "wrote the real config" that a check-only call leaves open.
+
+    Without this, a second concurrent job targeting the same VMID (a
+    double-submitted request, or an unrelated manual PVE action) can grab it
+    while this job is busy doing something slow in between (FlexClone
+    creation, a multi-GB disk copy, ...) — the eventual real config write
+    then either silently clobbers the other guest or fails outright once it
+    gets there, several minutes and a lot of wasted work later. Reserving
+    right after the check shrinks that window to essentially zero and fails
+    fast instead.
+
+    Returns the reserved config path so the caller can rm -f it on failure.
+    Raises RuntimeError if the VMID is already in use.
+    """
+    if is_vmid_in_use(host, user, password, key_material, vmid):
+        raise RuntimeError(
+            f"VMID {vmid} is already in use on this PVE cluster — choose a different target VMID."
+        )
+    subdir = "qemu-server" if vm_type == "qemu" else "lxc"
+    path   = f"/etc/pve/{subdir}/{vmid}.conf"
+    ssh_run(host, user, password,
+            f"cat > {shlex.quote(path)}",
+            stdin_data=placeholder, key_material=key_material)
+    if jlog:
+        jlog.log(f"VMID {vmid} reserved in PVE ({subdir})")
+    return path
+
+
 _SAFE_NAME_RE = re.compile(r'^[A-Za-z0-9 ._-]+$')
 
 

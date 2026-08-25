@@ -5107,10 +5107,74 @@ function openInstantRecoveryModal(vmid, name, dsName, mappingId) {
   irSourceChanged();
   irPopulateSnaps();
   irLoadNextId();
+  irShowStep(1);
   var modal = document.getElementById('irStartModal');
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
   setTimeout(function(){ trapFocus(modal); }, 80);
+}
+
+function irShowStep(n) {
+  document.getElementById('irStep1').style.display = n === 1 ? '' : 'none';
+  document.getElementById('irStep2').style.display = n === 2 ? '' : 'none';
+  document.getElementById('irBackBtn').style.display = n === 2 ? '' : 'none';
+  document.getElementById('irNextBtn').style.display = n === 1 ? '' : 'none';
+  document.getElementById('irStartSubmitBtn').style.display = n === 2 ? '' : 'none';
+}
+
+function irBack() { irShowStep(1); }
+
+async function irNext() {
+  var live    = (document.querySelector('input[name="ir_source"]:checked')||{}).value === 'live';
+  var newVmid = parseInt(document.getElementById('ir_new_vmid').value, 10);
+  var newName = document.getElementById('ir_new_name').value.trim();
+  if (!newVmid) { toast('Enter a new VMID', 'error'); return; }
+  if (!live && !_irState.snap) { toast('Select a snapshot', 'error'); return; }
+
+  var btn  = document.getElementById('irNextBtn');
+  var spin = document.getElementById('irNextSpinner');
+  btn.disabled = true; spin.style.display = 'inline-block';
+  try {
+    await _irBuildSummary(live, newVmid, newName);
+    irShowStep(2);
+  } finally {
+    btn.disabled = false; spin.style.display = 'none';
+  }
+}
+
+async function _irBuildSummary(live, newVmid, newName) {
+  var netIso = document.getElementById('ir_network_isolated').checked;
+  document.getElementById('ir_sum_src').textContent  = _irState.vmid + (_irState.name ? ' – ' + _irState.name : '');
+  document.getElementById('ir_sum_from').textContent = live ? 'Live VM (current state)' : (_irState.snap ? _irState.snap.snap_name : '—');
+  document.getElementById('ir_sum_vmid').textContent = newVmid;
+  document.getElementById('ir_sum_name').textContent = newName || '(auto)';
+  document.getElementById('ir_sum_net').textContent  = netIso ? 'Disconnected (link_down=1)' : 'Connected';
+
+  // Fresh, system-checked VMID/name conflict, re-run right before the
+  // summary is shown — the server also enforces this at start time, but
+  // catching it here means the wizard flags it before the FlexClone is
+  // even created, not after.
+  var conflictBox = document.getElementById('ir_sum_conflict');
+  var msgs = [];
+  if (_irState.pveClusterId) {
+    try {
+      var d = await apiFetch('provisioning/recovery/used-vmids?pve_cluster_id='+encodeURIComponent(_irState.pveClusterId));
+      if ((d.vmids||[]).indexOf(newVmid) !== -1) {
+        msgs.push('VMID ' + esc(newVmid) + ' is already in use on this cluster.');
+      }
+      if (newName && (d.names||[]).map(function(n){return n.toLowerCase();}).indexOf(newName.toLowerCase()) !== -1) {
+        msgs.push('A VM named "' + esc(newName) + '" already exists on this cluster.');
+      }
+    } catch(e) { /* non-fatal — server still enforces this at start time */ }
+  }
+  var conflict = msgs.length > 0;
+  if (conflict) {
+    conflictBox.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
+    conflictBox.style.display = 'block';
+  } else {
+    conflictBox.style.display = 'none';
+  }
+  document.getElementById('irStartSubmitBtn').disabled = conflict;
 }
 
 function closeIrStartModal() {
@@ -9452,10 +9516,15 @@ async function smShowChangePolicy() {
   } catch (e) { sel.innerHTML = '<option value="">— error loading policies —</option>'; }
 }
 
-function smSaveChangePolicy() {
+async function smSaveChangePolicy() {
   var relId = ((_smState.ds || {}).snapmirror || {}).id;
   var policyName = document.getElementById('smChangePolicySel').value;
   if (!relId || !policyName) return;
+  var ok = await uiConfirm(
+    'Change SnapMirror policy to "' + policyName + '"?\n\nThis changes retention/replication behavior for this relationship immediately.',
+    'Change Policy', 'btn-primary'
+  );
+  if (!ok) return;
   apiPost('provisioning/replication/update-policy', { relationship_id: relId, policy_name: policyName })
     .then(function(){
       document.getElementById('smActionMsg').textContent = 'Policy updated to ' + policyName + '.';
@@ -10981,8 +11050,11 @@ function showResizeDialog(dsId, dsName, currentBytes, protocol) {
         errEl.textContent='Shrink is not supported for '+protocol.toUpperCase()+' datastores.';
         return;
       }
-      if(!confirm('The new size ('+fmtBytes(sizeBytes)+') is smaller than the current size ('+fmtBytes(currentBytes)+').\n\nPlease verify that the VMs on this datastore have enough free space before continuing.\n\nProceed with shrink?'))
-        return;
+      var shrinkOk = await uiConfirm(
+        'The new size ('+fmtBytes(sizeBytes)+') is smaller than the current size ('+fmtBytes(currentBytes)+').\n\nPlease verify that the VMs on this datastore have enough free space before continuing.\n\nProceed with shrink?',
+        'Proceed', 'btn-danger'
+      );
+      if(!shrinkOk) return;
     }
     var btn=document.getElementById('resizeDlgOk');
     btn.disabled=true; btn.textContent='Resizing…';
@@ -11129,6 +11201,11 @@ async function importPluginData(input) {
   var file = input.files[0];
   if (!file) return;
   input.value = '';
+  var ok = await uiConfirm(
+    'Import "' + file.name + '"?\n\nThis will overwrite all current plugin configuration (endpoints, hosts, mappings, schedules, settings, user accounts). The page will reload after import.',
+    'Import', 'btn-danger'
+  );
+  if (!ok) return;
   var status = document.getElementById('importStatus');
   status.textContent = 'Importing…';
   status.style.color = 'var(--muted)';
@@ -12653,14 +12730,18 @@ function _renderDevBox(d) {
   document.getElementById('pluginApplyDevBtn').style.display = 'inline-flex';
 }
 
-function pluginApplyUpdate(branch) {
+async function pluginApplyUpdate(branch) {
   var isRel = (branch === 'main' &&
     document.querySelector('input[name="updateChannel"]:checked').value === 'main');
   var spinner = document.getElementById(isRel ? 'pluginApplyRelSpinner' : 'pluginApplyDevSpinner');
   var btn     = document.getElementById(isRel ? 'pluginApplyRelBtn'     : 'pluginApplyDevBtn');
   var errEl   = document.getElementById('pluginUpdateError');
 
-  if (!confirm('Apply update from branch \'' + branch + '\'?\n\nAll plugin files will be overwritten (config.json is kept).\nYou will need to restart PegaProx afterwards.')) return;
+  var ok = await uiConfirmDanger(
+    'Apply update from branch \'' + branch + '\'?\n\nAll plugin files will be overwritten (config.json is kept).\nYou will need to restart PegaProx afterwards.',
+    'I understand this overwrites all plugin files'
+  );
+  if (!ok) return;
 
   spinner.style.display = 'inline-block';
   btn.disabled = true;
@@ -13125,6 +13206,8 @@ async function drAddScannedVms() {
 }
 
 async function drRemoveVm(groupId,vmAssignmentId) {
+  var ok = await uiConfirm('Remove this VM from the DR group?', 'Remove', 'btn-danger');
+  if (!ok) return;
   try { await apiPost('dr/plans/groups/vms/delete',{plan_id:_drCurrentPlanId,group_id:groupId,vm_id:vmAssignmentId}); toast('VM removed','success'); drRefreshPlanDetail(); }
   catch(e){ toast(e.message,'error'); }
 }
@@ -13202,10 +13285,23 @@ async function drStartFailover() {
   if(!selectedIds.length){ toast('Select at least one datastore','error'); return; }
   var snapMap={};
   selectedIds.forEach(function(eid){ var sel=document.getElementById('drSnap-'+eid); if(sel&&sel.value) snapMap[eid]=sel.value; });
-  var warn=ftype==='emergency'
-    ?'⚠ EMERGENCY failover: SnapMirror will be broken WITHOUT a final sync. Data since last transfer may be lost. Continue?'
-    :'Start PLANNED failover? SnapMirror will be broken and storage mounted on the DR site.';
-  if(!await uiConfirm(warn)) return;
+
+  // Summary of exactly what will happen — restate the selection instead of
+  // just a generic warning string, since this is one of the most
+  // destructive actions in the app (breaks SnapMirror, can lose data in
+  // emergency mode).
+  var entryLines = selectedIds.map(function(eid) {
+    var entry = _drFailoverEntries.find(function(e){ return e.id === eid; });
+    var label = entry ? (entry.source_volume + ' → ' + entry.dr_volume) : eid;
+    var snap  = snapMap[eid] || 'latest available';
+    return '  • ' + label + '  (snapshot: ' + snap + ')';
+  }).join('\n');
+  var warn = (ftype==='emergency'
+    ? '⚠ EMERGENCY failover: SnapMirror will be broken WITHOUT a final sync. Data since last transfer may be lost.\n\n'
+    : 'Start PLANNED failover: SnapMirror will be broken and storage mounted on the DR site.\n\n')
+    + selectedIds.length + ' datastore(s) will fail over:\n' + entryLines + '\n\nContinue?';
+  var okBtnClass = ftype==='emergency' ? 'btn-danger' : 'btn-primary';
+  if(!await uiConfirm(warn, ftype==='emergency' ? 'Start Emergency Failover' : 'Start Failover', okBtnClass)) return;
   drHideModal('drFailover');
   try {
     var r=await apiPost('dr/plans/failover',{plan_id:_drCurrentPlanId,failover_type:ftype,entry_ids:selectedIds,snap_map:snapMap});
@@ -13842,6 +13938,20 @@ async function pveStackFix(hostId, hostIdx, fix, btn) {
 async function pveCleanupHost(idx, btn) {
   var h = _pveHealthData[idx];
   if (!h) return;
+  var items = [
+    ['Stale NFS mounts',        h.stale_nfs],
+    ['Orphaned NFS mounts',     h.orphan_nfs_mounts],
+    ['SFR temp dirs',           h.sfr_dirs],
+    ['Leftover LVM VGs',        h.nasnap_vgs],
+    ['Orphaned NBD devices',    h.orphan_nbds],
+    ['Orphaned NVMe subsystems', h.orphan_nvme_subsys],
+  ].filter(function(pair){ return (pair[1]||[]).length; })
+   .map(function(pair){ return '  • ' + pair[1].length + ' ' + pair[0]; });
+  var ok = await uiConfirm(
+    'Clean up ' + h.host_name + '?\n\n' + items.join('\n') + '\n\nThis removes the items above from the host.',
+    'Clean up', 'btn-danger'
+  );
+  if (!ok) return;
   btn.disabled = true; btn.textContent = 'Cleaning…';
   try {
     var r = await apiPost('settings/pve-cleanup', {
@@ -15894,7 +16004,7 @@ actLogPoll();
       </div>
       <button onclick="closeIrStartModal()" style="background:none;border:none;color:var(--text);opacity:.6;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1">✕</button>
     </div>
-    <div style="padding:20px">
+    <div id="irStep1" style="padding:20px">
       <div class="form-group">
         <label class="form-label">Source</label>
         <div style="display:flex;gap:16px;margin-top:6px">
@@ -15930,9 +16040,25 @@ actLogPoll();
       </div>
       <p class="hint" style="margin-top:10px">Boots the VM directly from a NetApp FlexClone — no data is copied yet. Test it, then either commit with <strong>Storage Migrate</strong> or <strong>Discard</strong> to remove the clone entirely, from the Instant Recovery tab.</p>
     </div>
+    <div id="irStep2" style="display:none;padding:20px">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+        <table style="font-size:13px;width:100%;border-collapse:collapse">
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0;white-space:nowrap">Source</td><td id="ir_sum_src"></td></tr>
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0">From</td><td id="ir_sum_from" style="font-family:monospace"></td></tr>
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0">New VM ID</td><td id="ir_sum_vmid" style="font-family:monospace"></td></tr>
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0">New Name</td><td id="ir_sum_name"></td></tr>
+          <tr><td style="color:var(--muted);padding:3px 12px 3px 0">Network</td><td id="ir_sum_net"></td></tr>
+        </table>
+      </div>
+      <div id="ir_sum_conflict" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;background:rgba(240,80,80,.1);border:1px solid rgba(240,80,80,.35);color:var(--error);font-size:12px"></div>
+    </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg)">
+      <button class="btn btn-ghost" id="irBackBtn" style="display:none;margin-right:auto" onclick="irBack()">← Back</button>
       <button class="btn btn-ghost" onclick="closeIrStartModal()">Cancel</button>
-      <button class="btn btn-primary" id="irStartSubmitBtn" onclick="submitInstantRecovery()">Start Instant Recovery</button>
+      <button class="btn btn-primary" id="irNextBtn" onclick="irNext()">
+        Next → <span id="irNextSpinner" class="spinner" style="display:none;margin-left:4px"></span>
+      </button>
+      <button class="btn btn-primary" id="irStartSubmitBtn" style="display:none" onclick="submitInstantRecovery()">Start Instant Recovery</button>
     </div>
   </div>
 </div>
@@ -17221,6 +17347,24 @@ async function sfrDoCopy() {
   if (!selPaths.length || !_sfr.sid) return;
   var dest = document.getElementById('sfrCopyDest').value.trim();
   if (!dest) { toast('Enter destination directory', 'error'); return; }
+
+  // copy-tar overwrites silently — warn first if anything selected would
+  // collide with a same-named entry already in the destination directory.
+  try {
+    var destList  = await apiFetch('file-restore/sessions/vm-ls?sid=' + encodeURIComponent(_sfr.sid) + '&path=' + encodeURIComponent(dest));
+    var destNames = (destList.entries || []).map(function(e){ return e.name; });
+    var selNames  = selPaths.map(function(p){ return p.split(/[\/\\]/).pop(); });
+    var collisions = selNames.filter(function(n){ return destNames.indexOf(n) !== -1; });
+    if (collisions.length) {
+      var ok = await uiConfirm(
+        'The following already exist in "' + dest + '" and will be overwritten:\n\n'
+        + collisions.map(function(n){ return '  • ' + n; }).join('\n')
+        + '\n\nContinue?', 'Overwrite', 'btn-danger'
+      );
+      if (!ok) return;
+    }
+  } catch(e) { /* destination may not exist yet, or listing failed — don't block on that */ }
+
   var statusEl  = document.getElementById('sfrCopyStatus');
   var progWrap  = document.getElementById('sfrCopyProgress');
   var progBar   = document.getElementById('sfrCopyBar2');
@@ -17335,7 +17479,8 @@ async function sfrMkdirConfirm() {
 
 async function sfrVmDelete() {
   if (!_sfr.vmSel || !_sfr.sid) return;
-  if (!confirm('Delete "' + _sfr.vmSel.name + '" in the live VM? This cannot be undone.')) return;
+  var ok = await uiConfirm('Delete "' + _sfr.vmSel.name + '" in the live VM? This cannot be undone.', 'Delete', 'btn-danger');
+  if (!ok) return;
   try {
     var r = await apiPost('file-restore/sessions/vm-delete',
                           { sid: _sfr.sid, path: _sfr.vmSel.fullPath });

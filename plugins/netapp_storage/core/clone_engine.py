@@ -24,7 +24,7 @@ from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
     build_ontap_client, build_pve_client,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
-    is_vmid_in_use, sanitize_vm_name,
+    reserve_vmid, sanitize_vm_name,
 )
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
 from .restore_engine import (
@@ -814,30 +814,8 @@ _DISK_KEY_PREFIXES = ("scsi", "virtio", "ide", "sata", "efidisk", "tpmstate", "r
 
 
 def _reserve_vmid(pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type, jlog=None):
-    """Write a placeholder config to block the VMID in PVE immediately.
-
-    Returns the config path so the error handler can remove it on failure.
-    The real config written at the end of the job overwrites this placeholder.
-
-    Refuses to proceed if the VMID is already in use — qemu-server and lxc
-    share one numbering space in PVE, so both directories are checked, not
-    just the guest type being written. Without this, a colliding VMID would
-    silently clobber a real, possibly running, VM's config.
-    """
-    if is_vmid_in_use(pve_host, pve_user, pve_pass, pve_key, new_vmid):
-        raise RuntimeError(
-            f"VMID {new_vmid} is already in use on this PVE cluster — "
-            f"choose a different target VMID."
-        )
-    subdir = "qemu-server" if vm_type == "qemu" else "lxc"
-    path   = f"/etc/pve/{subdir}/{new_vmid}.conf"
-    ssh_run(pve_host, pve_user, pve_pass,
-            f"cat > {shlex.quote(path)}",
-            stdin_data=b"name: clone-in-progress\nlock: clone\n",
-            key_material=pve_key)
-    if jlog:
-        jlog.log(f"VMID {new_vmid} reserved in PVE ({subdir})")
-    return path
+    return reserve_vmid(pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type,
+                        placeholder=b"name: clone-in-progress\nlock: clone\n", jlog=jlog)
 
 
 def _disks_from_pve(mgr, vmid, storage_id, node):

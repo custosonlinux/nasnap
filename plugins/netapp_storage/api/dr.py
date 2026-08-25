@@ -358,6 +358,14 @@ def _add_plan_entry():
     db = get_db()
     if not db.query_one("SELECT id FROM netapp_dr_plans WHERE id=?", (plan_id,)):
         return {"error": "DR plan not found"}, 404
+    if db.query_one(
+        "SELECT id FROM netapp_dr_plan_entries WHERE plan_id=? AND source_endpoint_id=? "
+        "AND LOWER(source_svm)=LOWER(?) AND LOWER(source_volume)=LOWER(?)",
+        (plan_id, source_endpoint_id, source_svm, source_volume),
+    ):
+        return {
+            "error": f"Volume '{source_volume}' (SVM '{source_svm}') is already in this plan.",
+        }, 409
 
     snapmirror_rel_uuid = (data.get("snapmirror_rel_uuid") or "").strip()
     dr_endpoint_id      = (data.get("dr_endpoint_id") or "").strip()
@@ -581,8 +589,20 @@ def _add_vm_assignment():
     if not group_id or vmid is None:
         return {"error": "group_id and vmid are required"}, 400
     db = get_db()
-    if not db.query_one("SELECT id FROM netapp_dr_vm_groups WHERE id=?", (group_id,)):
+    grp = db.query_one("SELECT id, plan_id FROM netapp_dr_vm_groups WHERE id=?", (group_id,))
+    if not grp:
         return {"error": "VM group not found"}, 404
+    # Check across every group in the plan, not just this one — a VM assigned
+    # to two groups in the same plan would get started/targeted twice during
+    # failover.
+    dup = db.query_one(
+        "SELECT g.name AS group_name FROM netapp_dr_vm_assignments a "
+        "JOIN netapp_dr_vm_groups g ON g.id = a.group_id "
+        "WHERE g.plan_id=? AND a.vmid=?",
+        (grp["plan_id"], int(vmid)),
+    )
+    if dup:
+        return {"error": f"VMID {vmid} is already assigned to group '{dup['group_name']}' in this plan."}, 409
     max_ord = db.query_one("SELECT MAX(start_order) as m FROM netapp_dr_vm_assignments WHERE group_id=?", (group_id,))
     start_order = (max_ord["m"] or 0) + 1
     aid = str(uuid.uuid4())[:8]
@@ -623,8 +643,17 @@ def _update_vm_assignment():
     # Move to different group
     if "group_id" in data:
         new_group = data["group_id"]
-        if not db.query_one("SELECT id FROM netapp_dr_vm_groups WHERE id=?", (new_group,)):
+        new_grp_row = db.query_one("SELECT id, plan_id FROM netapp_dr_vm_groups WHERE id=?", (new_group,))
+        if not new_grp_row:
             return {"error": "Target VM group not found"}, 404
+        dup = db.query_one(
+            "SELECT g.name AS group_name FROM netapp_dr_vm_assignments a "
+            "JOIN netapp_dr_vm_groups g ON g.id = a.group_id "
+            "WHERE g.plan_id=? AND a.vmid=? AND a.id != ?",
+            (new_grp_row["plan_id"], asn["vmid"], assignment_id),
+        )
+        if dup:
+            return {"error": f"VMID {asn['vmid']} is already assigned to group '{dup['group_name']}' in this plan."}, 409
         updates.append("group_id=?"); params.append(new_group)
     if not updates:
         return {"error": "No fields to update"}, 400
