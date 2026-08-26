@@ -2305,7 +2305,10 @@ function applyI18n() {
         <div class="card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <svg class="tab-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><span data-i18n="ct_jobs_history">Jobs &amp; History</span>
           <button class="btn btn-ghost btn-sm" onclick="loadAllJobs()" data-i18n="btn_refresh">Refresh</button>
-          <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="cleanupJobs()" data-i18n="btn_cleanup_jobs">Clean up completed</button>
+          <input id="jobs_filter_text" type="search" data-i18n-placeholder="filter_search" placeholder="Search …"
+                 style="width:200px;padding:5px 8px;font-size:13px;margin-left:auto"
+                 oninput="_jobsSearchInput(this.value)" title="Searches type, status, created by and log text">
+          <button class="btn btn-danger btn-sm" onclick="cleanupJobs()" data-i18n="btn_cleanup_jobs">Clean up completed</button>
         </div>
         <table style="min-width:860px">
           <thead><tr>
@@ -8364,6 +8367,32 @@ function _snapProtoLabel(s) {
 var _allJobsCache = [];
 var _jobPage = 0;
 var _JOB_PAGE_SIZE = 20;
+var _jobsFilterText = '';
+
+function _jobsSearchInput(v) {
+  _jobsFilterText = (v || '').trim().toLowerCase();
+  _jobPage = 0;
+  renderJobsPage();
+}
+
+function _filteredJobsCache() {
+  if (!_jobsFilterText) return _allJobsCache;
+  var q = _jobsFilterText;
+  return _allJobsCache.filter(function(j) {
+    if ((j.job_type||'').toLowerCase().indexOf(q) >= 0) return true;
+    if (String(j.vmid||'').toLowerCase().indexOf(q) >= 0) return true;
+    if ((j.node||'').toLowerCase().indexOf(q) >= 0) return true;
+    if ((j.status||'').toLowerCase().indexOf(q) >= 0) return true;
+    if ((j.created_by||'').toLowerCase().indexOf(q) >= 0) return true;
+    if (j.log && j.log.length) {
+      for (var i = 0; i < j.log.length; i++) {
+        var msg = (j.log[i] && (j.log[i].msg || String(j.log[i]))) || '';
+        if (msg.toLowerCase().indexOf(q) >= 0) return true;
+      }
+    }
+    return false;
+  });
+}
 
 async function loadAllJobs() {
   try {
@@ -8386,10 +8415,11 @@ async function loadAllJobs() {
 }
 
 function renderJobsPage() {
-  var total  = _allJobsCache.length;
+  var filtered = _filteredJobsCache();
+  var total  = filtered.length;
   var pages  = Math.max(1, Math.ceil(total / _JOB_PAGE_SIZE));
   if (_jobPage >= pages) _jobPage = pages - 1;
-  var page   = _allJobsCache.slice(_jobPage * _JOB_PAGE_SIZE, (_jobPage + 1) * _JOB_PAGE_SIZE);
+  var page   = filtered.slice(_jobPage * _JOB_PAGE_SIZE, (_jobPage + 1) * _JOB_PAGE_SIZE);
 
   document.getElementById('jobs_page_info').textContent =
     total ? tf('jobs_page', _jobPage+1, pages, total) : '';
@@ -8398,7 +8428,9 @@ function renderJobsPage() {
 
   var tbody = document.getElementById('jobsBody');
   if (!page.length) {
-    tbody.innerHTML = _emptyRow(8, _svgCog, 'No jobs yet', 'Job history appears here after a snapshot, restore, or clone operation runs.', null, null);
+    tbody.innerHTML = _jobsFilterText
+      ? _emptyRow(8, _svgCog, 'No matching jobs', 'No job matches "'+esc(_jobsFilterText)+'" — try a different search term.', null, null)
+      : _emptyRow(8, _svgCog, 'No jobs yet', 'Job history appears here after a snapshot, restore, or clone operation runs.', null, null);
     return;
   }
   tbody.innerHTML = page.map(function(j) {
@@ -9999,6 +10031,9 @@ function _jtClickBucket(bk, evt) {
 function _jtNavigateToJob(id) {
   var jobsTab = document.querySelector('[data-tab=jobs]');
   if (jobsTab) jobsTab.click();
+  _jobsFilterText = '';
+  var filterInput = document.getElementById('jobs_filter_text');
+  if (filterInput) filterInput.value = '';
   setTimeout(function() {
     var idx = _allJobsCache.findIndex(function(j){ return j.id === id; });
     if (idx < 0) { loadAllJobs().then(function(){ _jtScrollToJob(id); }); return; }
@@ -11426,10 +11461,15 @@ function rcvRenderVolumes(vols, proto) {
   var wrap  = document.getElementById('rcvVolumeTableWrap');
   var tbody = document.getElementById('rcvVolumesTbody');
   if (!vols.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">No volumes found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No volumes found</td></tr>';
     wrap.style.display = 'block';
     return;
   }
+  // A volume with meaningful used space wasn't provisioned fresh for this bind —
+  // it likely already holds data from prior use (e.g. an old VMware NFS datastore).
+  // Mounting it "as-is" via Mount Existing is fine, but the user may actually have
+  // wanted Provision New → "use existing volume" instead. Surface it, don't block it.
+  var USED_WARN_THRESHOLD = 100 * 1024 * 1024; // 100 MiB
   tbody.innerHTML = vols.map(function(v) {
     var sm = v.snapmirror || {};
     var typeBadge = v.type==='dp'
@@ -11441,24 +11481,36 @@ function rcvRenderVolumes(vols, proto) {
       : '<span style="color:var(--muted);font-size:11px">–</span>';
     var smRelUuid = encodeURIComponent(sm.relationship_uuid||'');
     var hasSmStr  = v.snapmirror ? 'true' : 'false';
+    var usedBytes = v.used_bytes||0;
+    var usedCell  = fmtBytes(usedBytes);
+    if (usedBytes > USED_WARN_THRESHOLD) {
+      usedCell = '<span style="color:var(--warning,#d9822b)" '
+        + 'title="This volume already contains data — it looks like it was used before '
+        + '(e.g. an old VMware NFS datastore), not a freshly provisioned volume. '
+        + 'That\'s fine for Mount Existing, but if you wanted NaSnap to set it up fresh, '
+        + 'use Provision New → &quot;use existing volume&quot; instead.">'
+        + '⚠ '+fmtBytes(usedBytes)+'</span>';
+    }
     return '<tr>'
       + '<td style="font-family:var(--mono);font-size:12px">'+esc(v.name)+'</td>'
       + '<td>'+typeBadge+'</td>'
       + '<td>'+fmtBytes(v.size_bytes||0)+'</td>'
+      + '<td>'+usedCell+'</td>'
       + '<td>'+smCell+'</td>'
       + '<td><button class="btn btn-primary btn-sm" onclick="rcvSelectVolume(\''
-        +esc(v.uuid)+'\',\''+esc(v.name)+'\',\''+esc(v.type)+'\',decodeURIComponent(\''+smRelUuid+'\'),'+hasSmStr+')">Select</button></td>'
+        +esc(v.uuid)+'\',\''+esc(v.name)+'\',\''+esc(v.type)+'\',decodeURIComponent(\''+smRelUuid+'\'),'+hasSmStr+','+usedBytes+')">Select</button></td>'
       + '</tr>';
   }).join('');
   wrap.style.display = 'block';
 }
 
-function rcvSelectVolume(uuid, name, type, smRelUuid, hasSm) {
+function rcvSelectVolume(uuid, name, type, smRelUuid, hasSm, usedBytes) {
   rcvState.volume_uuid  = uuid;
   rcvState.volume_name  = name;
   rcvState.volume_type  = type;
   rcvState.sm_rel_uuid  = smRelUuid || '';
   rcvState.has_sm       = !!hasSm;
+  rcvState.used_bytes   = usedBytes||0;
   rcvShowStep(2);
   // Update summary display
   document.getElementById('rcvSelVolumeName').textContent = name;
@@ -11564,6 +11616,13 @@ async function rcvNext2() {
   }
   lines.push('🖥️  PVE hosts: <strong>'+rcvState.pve_host_ids.length+'</strong> selected');
   if (smBreak) lines.push('⚡ SnapMirror® will be broken before mounting');
+  if ((rcvState.used_bytes||0) > 100*1024*1024) {
+    lines.push('<span style="color:var(--warning,#d9822b)">⚠ This volume already contains '
+      + fmtBytes(rcvState.used_bytes) + ' of data — it looks pre-existing (e.g. an old '
+      + 'VMware NFS datastore), not freshly provisioned. Mounting it as-is is fine if that\'s '
+      + 'intentional; if you meant to set it up fresh instead, cancel and use Provision New → '
+      + '&quot;use existing volume&quot;.</span>');
+  }
   document.getElementById('rcvSummary').innerHTML = lines.join('<br>');
   rcvShowStep(3);
 }
@@ -11607,7 +11666,7 @@ async function rcvBind() {
 function rcvResetWizard() {
   rcvState = {
     endpoint_id:'', svm_name:'', protocol:'nfs',
-    volume_uuid:'', volume_name:'', volume_type:'rw',
+    volume_uuid:'', volume_name:'', volume_type:'rw', used_bytes:0,
     sm_rel_uuid:'', has_sm:false,
     vg_name:'', lvm_type:'linear', pool_name:'data',
     storage_id:'', nfs_ip:'', junction_override:'',
@@ -14957,7 +15016,7 @@ actLogPoll();
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Select the volume to bind:</div>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>Volume</th><th>Type</th><th>Size</th><th>SnapMirror®</th><th></th></tr></thead>
+              <thead><tr><th>Volume</th><th>Type</th><th>Size</th><th>Used</th><th>SnapMirror®</th><th></th></tr></thead>
               <tbody id="rcvVolumesTbody"></tbody>
             </table>
           </div>

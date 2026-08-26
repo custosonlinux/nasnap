@@ -175,8 +175,16 @@ class OntapClient:
             raise
 
     def get_volume(self, volume_uuid):
-        return self._get(f"storage/volumes/{volume_uuid}",
-                         params={"fields": "uuid,name,svm,nas.path,state,space,snaplock.snapshot_locking_enabled"})
+        params = {"fields": "uuid,name,svm,nas.path,state,space,snaplock.snapshot_locking_enabled"}
+        try:
+            return self._get(f"storage/volumes/{volume_uuid}", params=params)
+        except OntapError as e:
+            # Some ONTAP systems (e.g. without a SnapLock license) reject this
+            # field even on the per-volume GET. Retry without it.
+            if "invalid" in str(e).lower() and "fields" in str(e).lower():
+                params["fields"] = "uuid,name,svm,nas.path,state,space"
+                return self._get(f"storage/volumes/{volume_uuid}", params=params)
+            raise
 
     # ── Snapshots ───────────────────────────────────────────────────────────
 
@@ -1212,7 +1220,13 @@ class OntapClient:
         params = {"fields": "uuid,name,svm.name,snaplock.snapshot_locking_enabled", "max_records": 500}
         if svm_name:
             params["svm.name"] = svm_name
-        return self._get_all_records("storage/volumes", params=params)
+        try:
+            return self._get_all_records("storage/volumes", params=params)
+        except OntapError as e:
+            if "invalid" in str(e).lower() and "fields" in str(e).lower():
+                params["fields"] = "uuid,name,svm.name"
+                return self._get_all_records("storage/volumes", params=params)
+            raise
 
     def enable_snapshot_locking(self, volume_uuid):
         """Enable snapshot locking on a volume (ONTAP 9.12.1+). Irreversible once set."""
@@ -2113,9 +2127,9 @@ class OntapClient:
     # ── Recovery / DR bind helpers ─────────────────────────────────────────────
 
     def get_volumes_recovery(self, svm_name=None):
-        """All volumes with type (rw/dp), size, and NAS path — for recovery scanning."""
+        """All volumes with type (rw/dp), size, used space, and NAS path — for recovery scanning."""
         params = {
-            "fields": "uuid,name,svm,type,nas.path,space.size",
+            "fields": "uuid,name,svm,type,nas.path,space.size,space.used",
             "max_records": 500,
         }
         if svm_name:

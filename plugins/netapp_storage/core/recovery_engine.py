@@ -57,7 +57,7 @@ def scan_volumes_for_recovery(client, svm_name):
     """Scans an SVM for volumes suitable for recovery binding.
 
     Returns a list of dicts:
-      uuid, name, type (rw/dp), size_bytes, junction, svm,
+      uuid, name, type (rw/dp), size_bytes, used_bytes, junction, svm,
       snapmirror: {relationship_uuid, state, healthy, source_path} or None
     """
     try:
@@ -73,7 +73,9 @@ def scan_volumes_for_recovery(client, svm_name):
             continue
 
         vol_type   = v.get("type", "rw").lower()
-        size_bytes = (v.get("space") or {}).get("size", 0)
+        space      = v.get("space") or {}
+        size_bytes = space.get("size", 0)
+        used_bytes = space.get("used", 0)
         junction   = (v.get("nas") or {}).get("path", "")
         svm        = (v.get("svm") or {}).get("name", svm_name)
 
@@ -97,6 +99,7 @@ def scan_volumes_for_recovery(client, svm_name):
             "name":       name,
             "type":       vol_type,
             "size_bytes": size_bytes,
+            "used_bytes": used_bytes,
             "junction":   junction,
             "svm":        svm,
             "snapmirror": sm_info,
@@ -687,6 +690,16 @@ def _bind_nfs(ds_id, params, db, jlog):
                 else:
                     jlog.log(f"[{sh}] PVE NFS storage already exists.")
                 pvesm_done = True
+                # Pre-create snapmanifest directory so NFS snapshots work
+                # immediately — mirrors Provision New's behavior. A volume
+                # bound in via Mount Existing otherwise never gets this dir
+                # until the first snapshot lazily creates .nasnap/index.json.
+                manifest_dir = shlex.quote(f"/mnt/pve/{pve_storage_id}/.netapp-snapmanifest")
+                try:
+                    ssh_run(sh, su, sp, f"mkdir -p {manifest_dir}", key_material=sk, timeout=15)
+                    jlog.log(f"[{sh}] Snapmanifest directory created.")
+                except Exception as md_exc:
+                    jlog.log(f"[{sh}] WARNING: could not create snapmanifest dir: {md_exc}")
             except Exception as exc:
                 jlog.log(f"[{sh}] WARNING: pvesm add nfs: {exc}")
                 continue
