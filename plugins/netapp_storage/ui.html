@@ -1108,6 +1108,7 @@ de:{
   db_vm_overview:'VM-Übersicht',db_total:'Gesamt',db_running:'Laufend',db_stopped:'Gestoppt',
   db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Schutzpläne aktiv',
   db_storage:'Storage-Übersicht',db_recent_jobs:'Letzte Jobs',db_no_ds:'Keine Datastores konfiguriert.',
+  db_ts_fresh:'aktuell %s',db_ts_stale:'Stand: %s',db_ts_title_fresh:'Zuletzt aktualisiert: %s',db_ts_title_stale:'Gecachte Daten – wird aktualisiert…',
   db_no_jobs:'Noch keine Jobs.',db_protected_badge:'Zeitplan aktiv',db_unprotected_badge:'Kein Zeitplan',
   db_all_ok:'Alle Systeme in Ordnung.',db_issues:'Probleme erkannt',db_systems:'Environment',
   sect_smtp:'E-Mail-Benachrichtigungen (SMTP)',
@@ -1233,6 +1234,7 @@ en:{
   db_vm_overview:'VM Overview',db_total:'Total',db_running:'Running',db_stopped:'Stopped',
   db_ds_overview:'Datastores',db_protected:'Protected',db_schedules_active:'Protection Plans',
   db_storage:'Storage Overview',db_recent_jobs:'Recent Jobs',db_no_ds:'No datastores configured.',
+  db_ts_fresh:'updated %s',db_ts_stale:'as of %s',db_ts_title_fresh:'Last updated: %s',db_ts_title_stale:'Cached data — refreshing…',
   db_no_jobs:'No jobs yet.',db_protected_badge:'Schedule active',db_unprotected_badge:'No schedule',
   db_all_ok:'All systems operational.',db_issues:'Issues detected',db_systems:'Environment',
   sect_smtp:'Email Notifications (SMTP)',
@@ -10244,8 +10246,8 @@ function _dbSetTimestamp(ts, stale) {
   if (!ts) { el.textContent = ''; return; }
   var d = new Date(ts);
   var hhmm = d.toLocaleTimeString([], _nsOpts({hour:'2-digit', minute:'2-digit'}));
-  el.textContent = stale ? ('Stand: ' + hhmm) : ('aktuell ' + hhmm);
-  el.title = stale ? 'Gecachte Daten – wird aktualisiert…' : 'Zuletzt aktualisiert: ' + d.toLocaleTimeString([], _nsOpts());
+  el.textContent = tf(stale ? 'db_ts_stale' : 'db_ts_fresh', hhmm);
+  el.title = stale ? t('db_ts_title_stale') : tf('db_ts_title_fresh', d.toLocaleTimeString([], _nsOpts()));
 }
 
 var _dbLoading = false;
