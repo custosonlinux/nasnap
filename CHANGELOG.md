@@ -8,10 +8,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.10.0] — 2026-08-26
+
+### Added
+
+- **Single "+ Add Datastore" entry point** — replaces the separate "Provision New" / "Mount existing" buttons with one button that asks what you want to do first (create a new volume, use an existing volume, or re-attach a SnapMirror/DR destination) and opens the right wizard. Both wizards and their backends are unchanged — Provision New and the Bind Wizard still have genuinely different capabilities (SnapMirror-break, DP volume handling) — this only removes the need to already know which one matches your situation.
+- **Provisioning Wizard — Confirm step** with a fresh server-side duplicate name/storage-ID check before creating a datastore, matching the pattern the Mount-existing wizard already had.
+- **Live VMID conflict checks** in the Clone Wizard, Instant Recovery, and Recover-VMs wizard — checked against the target cluster's actually-in-use VMIDs before you can start, not just rejected server-side after a (potentially long) job already started.
+- **NetApp Clone Cleanup** (Settings, next to PVE Host Maintenance) — scans every registered ONTAP system for leftover Instant Recovery FlexClone volumes with no active session and deletes them one at a time behind explicit confirmation.
+- **PVE Host Maintenance — Orphaned NFS Mounts check** — finds NFS mounts still present at the OS level with no matching Proxmox storage entry.
+- **Single File Restore — unified Download button** — a single selected file downloads as-is; a directory or multi-selection is automatically packed into an archive, `tar.gz` for Linux-sourced snapshots or **ZIP** for Windows-sourced ones (same detection as the OS badge), so it opens natively either way. Also fixes archiving to actually include the full multi-selection instead of only the last-clicked file.
+- **Dashboard — Jobs & History search** — filter the job list by type, status, creator, or log text; previously the only way to find a specific job among many was grepping the raw server log.
+- Favicon added to all served pages.
+- Reconnected three features that had lost their UI trigger in a past refactor without being removed: the bilingual **Tab Help** system (topbar "?" button; content updated for everything shipped since), the **Audit Log** table, and a manual **Rescan SnapMirror** button.
+
+### Fixed
+
+- **Datastore size never backfilled on ONTAP systems without a SnapLock license** — `get_volume()`/`get_volumes_san()` requested a SnapLock field with no fallback (unlike the equivalent volume-list call, which already had one), so every size lookup failed silently. Also: the backfill that *did* exist only ran against an endpoint the Storage tab no longer calls — extracted into one shared helper used everywhere a datastore list is rendered, so it now actually fires.
+- **Mount Existing never granted SVM-root NFS access** — could fail with "access denied" when adopting a volume whose SVM root export policy didn't yet list the new PVE hosts (e.g. one migrated in from elsewhere), even though its own volume policy was correct. Provision New's existing-volume path already handled this; Mount Existing now shares the same function. Also brought Mount Existing to parity with Provision New in pre-creating the `.netapp-snapmanifest` directory, and clarified in the UI (tooltips, wizard banner, Help) that Mount Existing is for re-attaching a volume that was already a Proxmox/NaSnap datastore — bringing one in from elsewhere is Provision New's existing-volume option instead.
+- **Dashboard Storage Overview "VMs" column showed nothing for datastores with live VMs** — it only counted VMIDs seen in NaSnap's own completed-snapshot history, so a freshly-provisioned datastore with real running VMs but no completed snapshot yet showed blank. Now sourced from the same background-refreshing, non-blocking Proxmox-backed cache already used for the VM Restore & Clone list's live-status badges, falling back to the old snapshot-history count (marked `≈`) only while that cache is still cold.
+- **Dashboard timestamp was hardcoded German** regardless of the selected UI language — routed through the app's normal translation system like everything else.
+- **App-wide: native `confirm()`/`alert()` calls replaced** with the app's own confirm dialogs — these don't work in this app's Proxmox-iframe context, so several destructive actions (most seriously, the plugin-update action, which overwrites every plugin file) had effectively no working confirmation gate.
+- **Duplicate name/VMID/datastore prevention closed app-wide**: datastore provisioning, mount-existing, PVE hosts, ONTAP endpoints, protection-plan schedules, DR plans/VM groups/entries, and SnapMirror/Vault policy names can no longer collide unnoticed. Every wizard's pre-flight conflict check now also fails closed (blocks Go) on a check error or unresolvable target cluster, not only on a confirmed conflict — and a disabled Go button is now visibly greyed out app-wide instead of just being functionally inert.
+- **Instant Recovery reliability**: a VMID race where a second concurrent request could grab the same VMID during the several-second window between check and config write (now check-then-reserve); a FlexClone's ONTAP volume UUID was never resolved after asynchronous volume creation, silently skipping its deletion on every teardown; temporary NFS storage was only unmounted on one cluster node instead of every node that had it mounted; teardown now honestly reports failure instead of always claiming a clean finish even when the mount or FlexClone were still there.
+- **Provisioning Wizard**: NFS is now the default protocol (was iSCSI, inconsistent with the Mount-existing wizard); selecting an existing NFS volume now shows and uses its real ONTAP junction path instead of forcing a manually-typed one that was silently discarded; the existing-volume path now also grants the new PVE hosts NFS export access (previously new-volume-only), fixing "access denied" when migrating a volume in from another hypervisor.
+- Consolidated three independently-drifted duplicate-check implementations (PVE host/endpoint conflict, VMID collision) into shared helpers; removed several confirmed-dead code paths (two legacy JS form clusters, an orphaned confirm modal, a handful of orphaned functions/routes).
+
 ### Changed
 
-- **Single File Restore — unified Download button** — the separate "↓ Download" (single file only) and "↓ tar.gz" buttons are now one **↓ Download** button: a single selected file downloads as-is, a directory or multi-selection is automatically packed into an archive — `tar.gz` for Linux-sourced snapshots, **ZIP** for Windows-sourced ones (detected the same way as the existing OS badge), so the result opens natively either way without extra tools. The archive download also now supports true multi-file selections (previously it silently archived only the last-clicked item, ignoring the rest of the selection). New `snap_zip_bytes()` builds ZIPs with Python's stdlib `zipfile` on the PVE host — no new host package dependency.
-- **Single File Restore — dropped "F7"/"F8" from the New Folder / Delete button labels** — those keys were never actually bound to anything (no keyboard handler existed), so the labels only implied a shortcut that didn't work; both actions have always been mouse-only.
+- Single File Restore: dropped the fake "F7"/"F8"/"F5" shortcut labels (never bound to a key) from the New Folder / Delete / Copy to VM buttons.
 
 ---
 

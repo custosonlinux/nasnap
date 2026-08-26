@@ -6,7 +6,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.9.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.10.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -1089,7 +1089,19 @@ DEBUG=1 .venv/bin/python app.py
 - **System snapshots (`vserverdr*`, `snapmirror.*`) filtered everywhere** — previously only the Snapshots tab excluded `snapmirror.`-prefixed snapshots, and not SVM-DR `vserverdr*` ones; DR-plan and SnapMirror-secondary snapshot browsing didn't filter either. Now centralized and applied consistently.
 - **Instant Recovery session list showed the wrong VM name** — the list displayed the *source* VM's name instead of the name actually assigned to the new VM in the wizard.
 
-### v1.10 — Planned
+### v1.10.0 — Released
+
+- **Single "+ Add Datastore" entry point** — one button asks what you want to do first (create a new volume, use an existing volume, or re-attach a SnapMirror/DR destination) and opens the right wizard, instead of requiring you to already know the difference between "Provision New" and "Mount existing".
+- **App-wide validation & confirmation hardening** — closed duplicate name/VMID/datastore collisions across every wizard (provisioning, mount-existing, PVE hosts, ONTAP endpoints, protection plans, DR plans/groups/entries, SnapMirror/Vault policies); every pre-flight conflict check now fails closed instead of letting Go stay clickable on a check error; native `confirm()`/`alert()` calls (which don't work in this app's Proxmox-iframe context — most seriously on the plugin-update action) replaced with the app's own dialogs.
+- **Instant Recovery reliability fixes** — VMID race closed (check-then-reserve), FlexClone volume UUID resolution after async ONTAP creation, cluster-wide unmount instead of single-node, honest teardown reporting instead of always claiming success.
+- **NetApp Clone Cleanup** (Settings) — finds and removes leftover Instant Recovery FlexClone volumes with no active session.
+- **Mount Existing / Provision New root-cause fixes** — datastore size backfill on SnapLock-less ONTAP, SVM-root NFS access on adopted volumes, Dashboard "VMs" column live from Proxmox again.
+- **Single File Restore — unified Download button** — auto tar.gz/ZIP based on selection and guest OS.
+- Jobs & History search, PVE Host Maintenance orphaned-NFS-mount check, favicon, reconnected Tab Help/Audit Log.
+
+See [Changelog](CHANGELOG.md#1100--2026-08-26) for the full list.
+
+### v1.11 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
