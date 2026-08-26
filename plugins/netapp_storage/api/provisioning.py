@@ -64,6 +64,29 @@ def _ds_to_dict(row):
     return d
 
 
+def _backfill_size_bytes(db, d):
+    """Lazily fetches+persists size_bytes from ONTAP for an active datastore
+    that doesn't have one yet (e.g. a Mount Existing bind whose post-bind size
+    fetch failed). Mutates d in place. Called from every list endpoint that
+    renders a datastore so it self-heals on the next load, wherever that is."""
+    if d.get("size_bytes") or not d.get("volume_uuid") or d.get("status") != "active":
+        return
+    try:
+        from ..core._helpers import get_endpoint, build_ontap_client
+        endpoint   = get_endpoint(db, d["endpoint_id"])
+        tmp_client = build_ontap_client(endpoint)
+        vol_info   = tmp_client.get_volume(d["volume_uuid"])
+        sz = (vol_info.get("space") or {}).get("size", 0)
+        if sz:
+            d["size_bytes"] = sz
+            db.execute(
+                "UPDATE netapp_provisioned_datastores SET size_bytes=? WHERE id=?",
+                (sz, d["id"]),
+            )
+    except Exception as e:
+        log.warning(f"[netapp_storage] size backfill failed for datastore {d.get('id')}: {e}")
+
+
 # ── Route handlers ────────────────────────────────────────────────────────────
 
 def _prov_datastores():
@@ -92,22 +115,7 @@ def _prov_datastores():
                         "UPDATE netapp_provisioned_datastores SET vg_name=? WHERE id=?",
                         (vg, d["id"]),
                     )
-            # Backfill size_bytes from ONTAP for active datastores that have none yet
-            if not d.get("size_bytes") and d.get("volume_uuid") and d.get("status") == "active":
-                try:
-                    from ..core._helpers import get_endpoint, build_ontap_client
-                    endpoint   = get_endpoint(db, d["endpoint_id"])
-                    tmp_client = build_ontap_client(endpoint)
-                    vol_info   = tmp_client.get_volume(d["volume_uuid"])
-                    sz = (vol_info.get("space") or {}).get("size", 0)
-                    if sz:
-                        d["size_bytes"] = sz
-                        db.execute(
-                            "UPDATE netapp_provisioned_datastores SET size_bytes=? WHERE id=?",
-                            (sz, d["id"]),
-                        )
-                except Exception:
-                    pass
+            _backfill_size_bytes(db, d)
             result.append(d)
         return {"datastores": result}
 
@@ -683,6 +691,7 @@ def _storage_unified():
     for r in (prov_rows or []):
         d = _ds_to_dict(r)
         d["source"] = "provisioned"
+        _backfill_size_bytes(db, d)
         # Filter out deleted PVE hosts so the host count stays accurate
         d["pve_host_ids"] = [h for h in (d.get("pve_host_ids") or []) if h in _valid_host_ids]
         _cids = set(d["pve_host_ids"])
