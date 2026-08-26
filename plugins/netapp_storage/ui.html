@@ -10315,9 +10315,15 @@ function hideAddDsRouter() {
   document.getElementById('addDsRouterModal').style.display = 'none';
   document.body.style.overflow = '';
 }
+// 'new' | 'existing' — which router card was clicked. Drives the Resource
+// step's default volume selection so the two choices actually behave
+// differently (previously both opened the wizard in the same default state).
+var _provWizIntent = 'new';
+
 function _addDsRouterChoose(which) {
   hideAddDsRouter();
   if (which === 'dr') { showBindWizard(); return; }
+  _provWizIntent = (which === 'existing') ? 'existing' : 'new';
   showProvWizard();
 }
 
@@ -10446,11 +10452,28 @@ async function provWizNext1() {
 function renderProvOntapRes() {
   var proto=(document.querySelector('input[name="provProto"]:checked')||{}).value||'iscsi';
   var volSel=document.getElementById('provWizVolume');
+  var existingVols = _provOntapRes.volumes||[];
   volSel.innerHTML='<option value="__new__">— create new volume —</option>'+
-    (_provOntapRes.volumes||[]).map(function(v){
+    existingVols.map(function(v){
       var lock=v.snapshot_locking_enabled?' 🔒':'';
       return '<option value="'+esc(v.uuid)+'">'+esc(v.name)+lock+'</option>';
     }).join('');
+  // Reflect the router's choice: "use an existing volume" should actually
+  // default to one, not silently fall back to "create new" like before.
+  var intentNote=document.getElementById('provWizIntentNote');
+  if (_provWizIntent === 'existing' && intentNote) {
+    if (existingVols.length) {
+      volSel.value = existingVols[0].uuid;
+      intentNote.style.cssText='display:block;margin-bottom:10px;padding:7px 10px;border-radius:6px;font-size:12px;background:rgba(88,166,255,.06);border:1px solid rgba(88,166,255,.2)';
+      intentNote.innerHTML='📦 Using an existing volume — pick one below (or switch to "create new volume" if you change your mind). '
+        + '<a href="javascript:void(0)" onclick="hideProvWizard();showAddDsRouter()" style="color:var(--accent)">← Not what you wanted?</a>';
+    } else {
+      intentNote.style.cssText='display:block;margin-bottom:10px;padding:7px 10px;border-radius:6px;font-size:12px;background:rgba(240,160,64,.08);border:1px solid rgba(240,160,64,.3);color:#f0a040';
+      intentNote.textContent='⚠ No existing volumes found in this SVM — you can create a new one below instead.';
+    }
+  } else if (intentNote) {
+    intentNote.style.display='none';
+  }
   var agSel=document.getElementById('provWizAggregate');
   var agMultiSel=document.getElementById('provWizAggregateMulti');
   var aggs=_provOntapRes.aggregates||[];
@@ -14630,6 +14653,8 @@ actLogPoll();
 
       <!-- Step 2: ONTAP resource — protocol-specific sections -->
       <div id="provWizStep2" style="display:none">
+
+        <div id="provWizIntentNote" style="display:none"></div>
 
         <!-- Common: Volume selector -->
         <div class="form-grid" style="margin-bottom:6px">
