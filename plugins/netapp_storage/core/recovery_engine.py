@@ -600,7 +600,7 @@ def _bind_nfs(ds_id, params, db, jlog):
     4. pvesm add nfs on every host
     5. DB: netapp_provisioned_datastores + netapp_volume_mapping
     """
-    from ..api.provisioning import _set_ds_status
+    from ..api.provisioning import _set_ds_status, _grant_nfs_access
 
     endpoint_id    = params["endpoint_id"]
     svm_name       = params.get("svm_name", "")
@@ -646,10 +646,14 @@ def _bind_nfs(ds_id, params, db, jlog):
     if not host_meta:
         raise RuntimeError("No PVE hosts accessible")
 
-    # ── Ensure export policy allows PVE hosts ──────────────────────────────────
+    # ── Ensure export policy allows PVE hosts (+ SVM root traversal) ────────────
+    # Shared with Provision New's existing-volume path — a volume bound in from
+    # elsewhere (e.g. another hypervisor, or a SnapMirror destination) typically
+    # only has the OLD hosts in its export policy, and ONTAP separately requires
+    # RO traversal on the SVM root volume or every mount fails with "access
+    # denied" even once the datastore volume's own policy is correct.
     export_policy_id = vol_export.get("export_policy_id", "")
-    if export_policy_id:
-        _ensure_nfs_export_rules(client, export_policy_id, pve_host_ids, db, jlog)
+    _grant_nfs_access(client, svm_name, export_policy_id, pve_host_ids, db, jlog)
 
     # ── Get NFS LIF IP ─────────────────────────────────────────────────────────
     nfs_ip = params.get("nfs_ip") or client.get_nfs_lif_for_svm(svm_name)
@@ -1414,25 +1418,6 @@ def _adopt_or_create_subsystem(client, svm_name, ns_uuid, volume_name, host_meta
         jlog.log(f"WARNING: subsystem NQN update: {exc}")
 
     return subsystem_uuid, subsystem_name
-
-
-def _ensure_nfs_export_rules(client, export_policy_id, pve_host_ids, db, jlog):
-    """Adds any missing NFS export rules for the PVE host IPs."""
-    try:
-        existing_rules   = client.list_nfs_export_rules(export_policy_id)
-        existing_clients = {c.get("match", "")
-                            for r in existing_rules
-                            for c in (r.get("clients") or [])}
-        if "0.0.0.0/0" in existing_clients:
-            return  # already open
-        for hid in pve_host_ids:
-            row = db.query_one("SELECT nfs_ip, host FROM netapp_pve_hosts WHERE id=?", (hid,))
-            ip  = dict(row or {}).get("nfs_ip") or dict(row or {}).get("host", "")
-            if ip and ip not in existing_clients:
-                client.add_nfs_export_rule_rw(export_policy_id, ip)
-                jlog.log(f"NFS export rule added for {ip}.")
-    except Exception as exc:
-        jlog.log(f"WARNING: NFS export rule update: {exc}")
 
 
 def _upsert_volume_mapping(db, endpoint_id, host_id, pve_storage_id, svm_name,
