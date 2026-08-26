@@ -839,6 +839,7 @@
 
   /* Wizard & modal inner panels — alle nutzen > div als direktes Kind des Overlays */
   body.glass-theme #setupWizardModal > div,
+  body.glass-theme #addDsRouterModal > div,
   body.glass-theme #provWizModal > div,
   body.glass-theme #bindWizModal > div,
   body.glass-theme #vmImportModal > div,
@@ -2271,8 +2272,7 @@ function applyI18n() {
     <div id="tab-storage" class="tab-panel" style="display:none">
 
       <div class="section-actions">
-        <button class="btn btn-primary" onclick="showProvWizard()" title="Create a new ONTAP volume, or adopt an existing one (e.g. migrated in from another hypervisor) into full NaSnap management — data is never reformatted.">+ Provision New</button>
-        <button class="btn btn-secondary" onclick="showBindWizard()" title="For volumes that were already a Proxmox/NaSnap datastore — e.g. re-mounting a SnapMirror/DR destination. To bring in a volume from elsewhere (an old VMware NFS export, a foreign NFS volume), use + Provision New → existing volume instead.">⇢ Mount existing</button>
+        <button class="btn btn-primary" onclick="showAddDsRouter()">+ Add Datastore</button>
         <button class="btn btn-ghost" onclick="runDetectAndScan()">
           <span id="discoverSpinner" style="display:none" class="spinner"></span>
           <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>Detect &amp; Scan
@@ -3180,7 +3180,7 @@ window.addEventListener('pageshow', function(evt) {
     'drAddGroupModal','drAddVmModal',
     'drFailoverModal','drEditEntryModal',
     'deleteConfirmModal','logViewModal','rwModal','cwModal','ncModal',
-    'vmInfoModal','bulkMigrateModal','smConfigModal'
+    'vmInfoModal','bulkMigrateModal','smConfigModal','addDsRouterModal'
   ];
   forms.forEach(function(id) {
     var el = document.getElementById(id);
@@ -3328,7 +3328,7 @@ document.querySelectorAll('.subtab').forEach(function(t) {
     // Close any open full-screen form overlays so they don't block the new tab
     ['createSnapshotForm','addScheduleForm','addEndpointForm','editEndpointForm',
      'addPveHostForm','editPveHostForm','setupWizardModal','provWizModal','bindWizModal',
-     'vmImportModal','smConfigModal'].forEach(function(fid) {
+     'vmImportModal','smConfigModal','addDsRouterModal'].forEach(function(fid) {
       var fe = document.getElementById(fid);
       if (fe && fe.style.display !== 'none') hideForm(fid);
     });
@@ -10301,6 +10301,26 @@ async function loadDashboard() {
   _dbLoadSystems();
 }
 
+// ── Add Datastore router — single entry point in front of the two wizards below.
+// Deliberately does not merge their internals: Provision New and the Bind
+// Wizard (Recovery/DR) have diverged capabilities (SnapMirror-break, DP
+// volume handling) that would need porting to safely combine into one code
+// path. This router just asks the right question up front so the user never
+// has to already know which of the two wizards matches their situation.
+function showAddDsRouter() {
+  document.getElementById('addDsRouterModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+function hideAddDsRouter() {
+  document.getElementById('addDsRouterModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+function _addDsRouterChoose(which) {
+  hideAddDsRouter();
+  if (which === 'dr') { showBindWizard(); return; }
+  showProvWizard();
+}
+
 function showProvWizard() {
   provWizShowStep(1);
   ['provWizName','provWizSvm','provWizVolName','provWizLunName','provWizVgName','provWizStorageId',
@@ -14521,6 +14541,36 @@ actLogPoll();
   </div><!-- /modal box -->
 </div><!-- /setupWizardModal -->
 
+<!-- ── Add Datastore Router (single entry point for both wizards below) ── -->
+<div id="addDsRouterModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center" onclick="if(event.target===this) hideAddDsRouter()">
+  <div style="max-width:560px;margin:60px auto 0;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg)">
+      <div style="font-size:16px;font-weight:700">+ Add Datastore</div>
+      <button class="btn btn-ghost btn-sm" onclick="hideAddDsRouter()" style="font-size:18px;padding:4px 10px;line-height:1">✕</button>
+    </div>
+    <div style="padding:20px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px">What do you want to do?</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label onclick="_addDsRouterChoose('new')"
+               style="cursor:pointer;padding:14px 16px;border:2px solid var(--border);border-radius:8px;display:block">
+          <div style="font-weight:700;font-size:13.5px">🆕 Create a new volume</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:3px">NaSnap creates a fresh ONTAP volume (or LUN/namespace) sized and configured by you, and registers it with Proxmox VE.</div>
+        </label>
+        <label onclick="_addDsRouterChoose('existing')"
+               style="cursor:pointer;padding:14px 16px;border:2px solid var(--border);border-radius:8px;display:block">
+          <div style="font-weight:700;font-size:13.5px">📦 Use an existing volume</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Bring an already-existing ONTAP volume into Proxmox — e.g. migrated in from another hypervisor (an old VMware NFS export), or any volume NaSnap didn't create. Data is never reformatted.</div>
+        </label>
+        <label onclick="_addDsRouterChoose('dr')"
+               style="cursor:pointer;padding:14px 16px;border:2px solid var(--border);border-radius:8px;display:block">
+          <div style="font-weight:700;font-size:13.5px">🔄 Re-attach a SnapMirror/DR destination</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Mount a volume that was already a Proxmox/NaSnap datastore — typically re-mounting a SnapMirror or SnapVault destination on a DR cluster after a break. Supports breaking the SnapMirror relationship as part of the mount.</div>
+        </label>
+      </div>
+    </div>
+  </div>
+</div><!-- /addDsRouterModal -->
+
 <!-- ── Provision New Datastore Modal ─────────────────────────────── -->
 <div id="provWizModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;padding:24px 16px;overflow-y:auto;align-items:flex-start;justify-content:center" onclick="provWizBackdropClick(event)">
   <div style="max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)">
@@ -17919,8 +17969,11 @@ var _helpData = {
     en: '<h3>Overview</h3>'
       + '<p>The Storage tab shows all datastores known to NaSnap — both provisioned (created via the wizard) and auto-discovered (via Detect &amp; Scan).</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>+ Provision Wizard</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE. On the Resource step you can also pick an <strong>existing</strong> ONTAP volume instead of creating one — useful for adopting a volume migrated in from another hypervisor (e.g. an old VMware NFS datastore) so its VMs can be imported without duplicating disk data; the volume itself is never reformatted, and NaSnap grants the new PVE hosts NFS access on its existing export policy. (NFS only — for SAN, picking an existing volume places a brand-new LUN inside it; any pre-existing LUN data in that volume is not imported.) For new NFS volumes, optionally create a <strong>FlexGroup</strong> spanning multiple aggregates instead of a single-aggregate FlexVol. A final <strong>Confirm</strong> step re-checks the chosen name/storage ID against every existing datastore before creating anything — the same duplicate check the "⇢ Mount existing Datastore" wizard (below) runs at its own confirm step.</li>'
-      + '<li><strong>⇢ Mount existing Datastore</strong> — For a volume that was already a Proxmox/NaSnap datastore, e.g. re-mounting a SnapMirror/SnapVault destination on a DR cluster after a break. <strong>Not</strong> the path for bringing in a volume from somewhere else (an old VMware NFS export, a foreign NFS volume) — use the Provision Wizard\'s existing-volume option above for that; the data isn\'t touched either way, but that path also runs a host-reachability check and exposes NFS options up front. Also checked for name/storage-ID duplicates before showing its confirm step.</li>'
+      + '<li><strong>+ Add Datastore</strong> — Single entry point, asks what you want to do first:<ul style="margin:6px 0 0 18px">'
+        + '<li><strong>Create a new volume</strong> — Step-by-step wizard to create a new managed NFS or SAN (iSCSI/NVMe) datastore on ONTAP and register it with Proxmox VE. For new NFS volumes, optionally create a <strong>FlexGroup</strong> spanning multiple aggregates instead of a single-aggregate FlexVol.</li>'
+        + '<li><strong>Use an existing volume</strong> — Opens the same wizard, but on the Resource step you pick an <strong>existing</strong> ONTAP volume instead of creating one — useful for adopting a volume migrated in from another hypervisor (e.g. an old VMware NFS datastore) so its VMs can be imported without duplicating disk data; the volume itself is never reformatted, and NaSnap grants the new PVE hosts NFS access on its existing export policy. (NFS only — for SAN, picking an existing volume places a brand-new LUN inside it unless you also pick an existing LUN there; any pre-existing LUN data outside that LUN is not imported.) A final <strong>Confirm</strong> step re-checks the chosen name/storage ID against every existing datastore before creating anything.</li>'
+        + '<li><strong>Re-attach a SnapMirror/DR destination</strong> — Opens the Bind Wizard: for a volume that was already a Proxmox/NaSnap datastore, e.g. re-mounting a SnapMirror/SnapVault destination on a DR cluster after a break, optionally breaking the SnapMirror relationship as part of the mount. <strong>Not</strong> the path for bringing in a volume from somewhere else — use "Use an existing volume" above for that. Also checked for name/storage-ID duplicates before its confirm step.</li>'
+        + '</ul></li>'
       + '<li><strong>Detect &amp; Scan / Run Discovery</strong> — Scans connected ONTAP systems and Proxmox VE hosts to discover existing datastores and volume mappings automatically, reconciles snapshot indexes, and removes any datastore/mapping whose Proxmox storage entry is confirmed gone from every host it was registered on (e.g. removed directly in <code>pvesm</code>) — keeping the list in sync with what Proxmox actually has mounted.</li>'
       + '</ul>'
       + '<h3>Datastore table columns</h3><ul>'
@@ -17943,8 +17996,11 @@ var _helpData = {
     de: '<h3>Übersicht</h3>'
       + '<p>Der Speicher-Tab zeigt alle NaSnap bekannten Datastores — provisionierte (über den Assistenten erstellt) und automatisch erkannte (via Erkennung &amp; Scan).</p>'
       + '<h3>Toolbar</h3><ul>'
-      + '<li><strong>+ Provisionierungs-Assistent</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE. Im Ressourcen-Schritt kann auch ein <strong>bestehendes</strong> ONTAP-Volume gewählt werden statt eines neuen — nützlich, um ein von einem anderen Hypervisor übernommenes Volume (z.B. ein altes VMware-NFS-Datastore) einzubinden, damit dessen VMs importiert werden können, ohne Plattendaten zu duplizieren; das Volume wird dabei nie neu formatiert, NaSnap ergänzt lediglich die neuen PVE-Hosts in der bestehenden Export-Policy. (Nur NFS — bei SAN wird in das bestehende Volume eine neue LUN gelegt; bereits vorhandene LUN-Daten in diesem Volume werden nicht übernommen.) Für neue NFS-Volumes optional als <strong>FlexGroup</strong> über mehrere Aggregate statt als Single-Aggregat-FlexVol. Ein abschließender <strong>Confirm</strong>-Schritt prüft Name/Storage-ID nochmal frisch gegen alle bestehenden Datastores, bevor irgendetwas angelegt wird — dieselbe Duplikat-Prüfung wie beim "⇢ Mount existing Datastore"-Assistenten (unten).</li>'
-      + '<li><strong>⇢ Mount existing Datastore</strong> — Für ein Volume, das schon einmal ein Proxmox/NaSnap-Datastore war, z.B. das Wiedereinbinden eines SnapMirror-/SnapVault-Ziels auf einem DR-Cluster nach einem Break. <strong>Nicht</strong> der richtige Weg, um ein Volume von woanders (ein altes VMware-NFS-Export, ein fremdes NFS-Volume) einzubinden — dafür die "Bestehendes Volume"-Option im Provisionierungs-Assistenten oben nutzen; die Daten bleiben in beiden Fällen unangetastet, dieser Weg prüft aber zusätzlich die Erreichbarkeit der Hosts und zeigt NFS-Optionen vorab an. Ebenfalls mit Duplikat-Prüfung vor dem Confirm-Schritt.</li>'
+      + '<li><strong>+ Add Datastore</strong> — Einziger Einstiegspunkt, fragt zuerst, was du vorhast:<ul style="margin:6px 0 0 18px">'
+        + '<li><strong>Neues Volume anlegen</strong> — Schritt-für-Schritt-Assistent zum Erstellen eines neuen NFS- oder SAN-Datastores (iSCSI/NVMe) auf ONTAP und zur Registrierung bei Proxmox VE. Für neue NFS-Volumes optional als <strong>FlexGroup</strong> über mehrere Aggregate statt als Single-Aggregat-FlexVol.</li>'
+        + '<li><strong>Bestehendes Volume verwenden</strong> — Öffnet denselben Assistenten, aber im Ressourcen-Schritt wird ein <strong>bestehendes</strong> ONTAP-Volume gewählt statt eines neuen — nützlich, um ein von einem anderen Hypervisor übernommenes Volume (z.B. ein altes VMware-NFS-Datastore) einzubinden, damit dessen VMs importiert werden können, ohne Plattendaten zu duplizieren; das Volume wird dabei nie neu formatiert, NaSnap ergänzt lediglich die neuen PVE-Hosts in der bestehenden Export-Policy. (Nur NFS — bei SAN wird in das bestehende Volume eine neue LUN gelegt, außer es wird zusätzlich eine bestehende LUN gewählt; bereits vorhandene LUN-Daten außerhalb dieser LUN werden nicht übernommen.) Ein abschließender <strong>Confirm</strong>-Schritt prüft Name/Storage-ID nochmal frisch gegen alle bestehenden Datastores, bevor irgendetwas angelegt wird.</li>'
+        + '<li><strong>SnapMirror-/DR-Ziel wieder anbinden</strong> — Öffnet den Bind-Assistenten: für ein Volume, das schon einmal ein Proxmox/NaSnap-Datastore war, z.B. das Wiedereinbinden eines SnapMirror-/SnapVault-Ziels auf einem DR-Cluster nach einem Break, optional inklusive Auflösen der SnapMirror-Beziehung als Teil des Mounts. <strong>Nicht</strong> der richtige Weg, um ein Volume von woanders einzubinden — dafür "Bestehendes Volume verwenden" oben nutzen. Ebenfalls mit Duplikat-Prüfung vor dem Confirm-Schritt.</li>'
+        + '</ul></li>'
       + '<li><strong>Erkennen &amp; Scannen / Discovery</strong> — Scannt verbundene ONTAP-Systeme und Proxmox-VE-Hosts auf vorhandene Datastores und Volume-Zuordnungen, gleicht Snapshot-Indizes ab und entfernt Datastores/Zuordnungen, deren Proxmox-Storage-Eintrag auf allen zugehörigen Hosts nachweislich verschwunden ist (z.B. direkt per <code>pvesm</code> entfernt) — hält die Liste damit synchron zu dem, was Proxmox tatsächlich eingebunden hat.</li>'
       + '</ul>'
       + '<h3>Datastore-Tabellen-Spalten</h3><ul>'
