@@ -24,7 +24,7 @@ from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
     build_ontap_client, build_pve_client,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
-    reserve_vmid, sanitize_vm_name,
+    reserve_vmid, sanitize_vm_name, cleanup_reserved_vmid,
 )
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
 from .restore_engine import (
@@ -179,22 +179,12 @@ def _run_clone(job_id, params, username):
     except JobCancelledError:
         jlog.log("Job cancelled by user")
         _cancel_job(db, job_id)
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     except Exception as exc:
         log.error(f"[netapp_storage] Clone job {job_id} failed: {exc}")
         _fail_job(db, job_id)
         jlog.log(f"ERROR: {exc}")
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     finally:
         _reg_unregister(job_id)
 
@@ -325,22 +315,12 @@ def _run_clone_live_nfs(job_id, params, username):
     except JobCancelledError:
         jlog.log("Job cancelled by user")
         _cancel_job(db, job_id)
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     except Exception as exc:
         log.error(f"[netapp_storage] Live-clone (NFS) job {job_id} failed: {exc}")
         _fail_job(db, job_id)
         jlog.log(f"ERROR: {exc}")
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     finally:
         _reg_unregister(job_id)
 
@@ -714,12 +694,7 @@ def _run_clone_san(job_id, params, username):
                     flush_iscsi_clone_device(pve_host, pve_user, pve_pass, pve_key, temp_iscsi_serial)
                 except Exception as ce:
                     log.warning(f"[netapp_storage] flush multipath on cancel failed: {ce}")
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     except Exception as exc:
         log.error(f"[netapp_storage] SAN clone job {job_id} failed: {exc}")
         _fail_job(db, job_id)
@@ -746,12 +721,7 @@ def _run_clone_san(job_id, params, username):
                     flush_iscsi_clone_device(pve_host, pve_user, pve_pass, pve_key, temp_iscsi_serial)
                 except Exception as ce:
                     log.warning(f"[netapp_storage] flush multipath on error failed: {ce}")
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)}", key_material=pve_key)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     finally:
         _reg_unregister(job_id)
 
@@ -1305,7 +1275,7 @@ def _run_dr_clone_iscsi(job_id, params, username, db, jlog, mapping):
         _dr_clone_iscsi_cleanup(secondary_client, temp_igroup_uuid, temp_clone_vol_uuid,
                                 pve_host, pve_user, pve_pass, pve_key,
                                 temp_vg_name, temp_iscsi_serial, sec_portal, sec_target_iqn,
-                                conf_path_reserved)
+                                conf_path_reserved, jlog=jlog)
         _reg_unregister(job_id)
         return
     except Exception as exc:
@@ -1315,7 +1285,7 @@ def _run_dr_clone_iscsi(job_id, params, username, db, jlog, mapping):
         _dr_clone_iscsi_cleanup(secondary_client, temp_igroup_uuid, temp_clone_vol_uuid,
                                 pve_host, pve_user, pve_pass, pve_key,
                                 temp_vg_name, temp_iscsi_serial, sec_portal, sec_target_iqn,
-                                conf_path_reserved)
+                                conf_path_reserved, jlog=jlog)
         _reg_unregister(job_id)
         return
 
@@ -1327,7 +1297,7 @@ def _run_dr_clone_iscsi(job_id, params, username, db, jlog, mapping):
 def _dr_clone_iscsi_cleanup(secondary_client, temp_igroup_uuid, temp_clone_vol_uuid,
                              pve_host, pve_user, pve_pass, pve_key,
                              temp_vg_name, temp_iscsi_serial, sec_portal, sec_target_iqn,
-                             conf_path_reserved=""):
+                             conf_path_reserved="", jlog=None):
     """Best-effort cleanup after DR iSCSI clone error or cancel."""
     from .san_helpers import (cleanup_restore_vg, flush_iscsi_clone_device,
                                disconnect_iscsi_target)
@@ -1357,13 +1327,7 @@ def _dr_clone_iscsi_cleanup(secondary_client, temp_igroup_uuid, temp_clone_vol_u
                 secondary_client.poll_job(del_job, timeout_s=60)
         except Exception as exc:
             log.warning(f"[netapp_storage] DR clone cleanup clone volume: {exc}")
-    if conf_path_reserved and pve_host:
-        try:
-            ssh_run(pve_host, pve_user, pve_pass,
-                    f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null || true",
-                    key_material=pve_key, timeout=10)
-        except Exception:
-            pass
+    cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
 
 
 def _run_dr_clone_nvme(job_id, params, username, db, jlog, mapping):
@@ -1616,7 +1580,7 @@ def _run_dr_clone_nvme(job_id, params, username, db, jlog, mapping):
         _cancel_job(db, job_id)
         _dr_clone_nvme_cleanup(secondary_client, temp_subsystem_uuid, temp_clone_vol_uuid,
                                pve_host, pve_user, pve_pass, pve_key,
-                               temp_vg_name, temp_subsystem_name, conf_path_reserved)
+                               temp_vg_name, temp_subsystem_name, conf_path_reserved, jlog=jlog)
         _reg_unregister(job_id)
         return
     except Exception as exc:
@@ -1625,7 +1589,7 @@ def _run_dr_clone_nvme(job_id, params, username, db, jlog, mapping):
         jlog.log(f"ERROR: {exc}")
         _dr_clone_nvme_cleanup(secondary_client, temp_subsystem_uuid, temp_clone_vol_uuid,
                                pve_host, pve_user, pve_pass, pve_key,
-                               temp_vg_name, temp_subsystem_name, conf_path_reserved)
+                               temp_vg_name, temp_subsystem_name, conf_path_reserved, jlog=jlog)
         _reg_unregister(job_id)
         return
 
@@ -1636,7 +1600,7 @@ def _run_dr_clone_nvme(job_id, params, username, db, jlog, mapping):
 
 def _dr_clone_nvme_cleanup(secondary_client, temp_subsystem_uuid, temp_clone_vol_uuid,
                             pve_host, pve_user, pve_pass, pve_key,
-                            temp_vg_name, temp_subsystem_name, conf_path_reserved=""):
+                            temp_vg_name, temp_subsystem_name, conf_path_reserved="", jlog=None):
     """Best-effort cleanup after DR NVMe clone error or cancel."""
     from .san_helpers import cleanup_restore_vg, nvme_disconnect_by_subsystem_name
     if temp_vg_name and pve_host:
@@ -1666,13 +1630,7 @@ def _dr_clone_nvme_cleanup(secondary_client, temp_subsystem_uuid, temp_clone_vol
                 secondary_client.poll_job(del_job, timeout_s=60)
         except Exception as exc:
             log.warning(f"[netapp_storage] DR NVMe clone cleanup volume: {exc}")
-    if conf_path_reserved and pve_host:
-        try:
-            ssh_run(pve_host, pve_user, pve_pass,
-                    f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null || true",
-                    key_material=pve_key, timeout=10)
-        except Exception:
-            pass
+    cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
 
 
 def _run_dr_clone(job_id, params, username):
@@ -1894,13 +1852,7 @@ def _run_dr_clone(job_id, params, username):
                         key_material=pve_key)
             except Exception as e:
                 log.warning(f"[netapp_storage] DR-Clone cleanup failed: {e}")
-        if conf_path_reserved and pve_host:
-            try:
-                ssh_run(pve_host, pve_user, pve_pass,
-                        f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null || true",
-                        key_material=pve_key, timeout=10)
-            except Exception:
-                pass
+        cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
         _reg_unregister(job_id)
 
     if not _re_job_failed(db, job_id):

@@ -155,6 +155,42 @@ def reserve_vmid(host, user, password, key_material, vmid, vm_type,
     return path
 
 
+def cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=None):
+    """Removes a placeholder conf written by reserve_vmid() and VERIFIES it's
+    actually gone, instead of trusting a bare `rm -f` (which callers routinely
+    ran with its errors swallowed — `except Exception: pass` or a bare
+    `2>/dev/null || true` — so a failed removal looked identical to a clean
+    one). A placeholder left behind carries `lock: backup`, so it shows up in
+    Proxmox as a stuck, locked, empty VM with no trace in the job log the
+    operator actually reads. On failure this logs a WARNING (to jlog if given,
+    always to the server log) with the manual recovery command, instead of
+    staying silent.
+    """
+    if not (conf_path_reserved and pve_host):
+        return
+    def _log(msg):
+        if jlog:
+            jlog.log(msg)
+        log.warning(f"[netapp_storage] {msg}")
+    try:
+        ssh_run(pve_host, pve_user, pve_pass,
+               f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null; true",
+               key_material=pve_key, timeout=10)
+        still_there = ssh_run(pve_host, pve_user, pve_pass,
+               f"test -f {shlex.quote(conf_path_reserved)} && echo STILL_THERE || echo GONE",
+               capture=True, key_material=pve_key, timeout=10)
+        if "STILL_THERE" in (still_there or ""):
+            _log(f"WARNING: could not remove reserved VMID placeholder '{conf_path_reserved}' — "
+                 f"it may still show as an empty/locked VM in Proxmox. Manually run "
+                 f"'qm unlock <vmid> && qm destroy <vmid> --purge' (or 'pct destroy' for LXC) "
+                 f"on {pve_host}, or delete {conf_path_reserved} directly.")
+    except Exception as exc:
+        _log(f"WARNING: cleanup of reserved VMID placeholder '{conf_path_reserved}' failed: {exc} — "
+             f"it may still show as an empty/locked VM in Proxmox. Manually run "
+             f"'qm unlock <vmid> && qm destroy <vmid> --purge' (or 'pct destroy' for LXC) "
+             f"on {pve_host}, or delete {conf_path_reserved} directly.")
+
+
 _SAFE_NAME_RE = re.compile(r'^[A-Za-z0-9 ._-]+$')
 
 

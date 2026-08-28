@@ -1795,7 +1795,19 @@ def _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_k
     best = None
 
     def _has_vm(m):
-        return vmid is None or any(e.get("vmid") == vmid for e in (m or {}).get("vms", []))
+        if vmid is None:
+            return True
+        # A manifest entry must carry actual disks to count as "found" — index-import
+        # manifests (ONTAP-native snapshots reconciled from the datastore's
+        # .nasnap/index.json, source='index_import') list every VM's vmid/name but
+        # never its disks (see _reconcile_index_into_db in provisioning.py). Treating
+        # a disk-less match as sufficient here short-circuited the whole fallback
+        # chain before it ever reached the live-PVE-config tier below, which is the
+        # one tier that actually CAN supply a real disk layout for these snapshots.
+        for e in (m or {}).get("vms", []):
+            if e.get("vmid") == vmid:
+                return bool(e.get("disks"))
+        return False
 
     def _log(msg):
         if jlog:

@@ -38,7 +38,7 @@ from ._helpers import (
     load_plugin_config, get_endpoint, get_mapping, get_snapshot_record,
     build_ontap_client, build_pve_client, pve_for_mapping, cluster_sibling_host_ids,
     get_ssh_creds, ssh_run, JobLogger, JobCancelledError, check_cancel,
-    reserve_vmid, sanitize_vm_name,
+    reserve_vmid, sanitize_vm_name, cleanup_reserved_vmid,
 )
 from .ontap_client import OntapError
 from ._job_registry import register as _reg_register, unregister as _reg_unregister
@@ -365,13 +365,7 @@ def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                   pve_host_id=""):
     """Best-effort cleanup with only the raw pieces (used when a session row
     was never created, i.e. the start job itself failed partway through)."""
-    if conf_path_reserved and pve_host:
-        try:
-            ssh_run(pve_host, pve_user, pve_pass,
-                   f"rm -f {shlex.quote(conf_path_reserved)} 2>/dev/null; true",
-                   key_material=pve_key, timeout=10)
-        except Exception as exc:
-            log.warning(f"[netapp_storage] cleanup reserved VMID conf: {exc}")
+    cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
     if temp_storage_id and pve_host:
         try:
             ssh_run(pve_host, pve_user, pve_pass,
