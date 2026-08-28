@@ -95,6 +95,12 @@ class NaSnapDB:
                 role       TEXT NOT NULL DEFAULT 'viewer',
                 expires_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS np_user_activity (
+                username      TEXT PRIMARY KEY,
+                auth_source   TEXT NOT NULL DEFAULT 'local',
+                last_role     TEXT NOT NULL DEFAULT 'viewer',
+                last_login_at TEXT NOT NULL DEFAULT ''
+            );
             CREATE TABLE IF NOT EXISTS np_settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT ''

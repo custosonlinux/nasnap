@@ -42,13 +42,23 @@ def verify_password(stored: str, password: str) -> bool:
     return False
 
 
-def create_session(username: str, role: str = ROLE_ADMIN) -> str:
+def create_session(username: str, role: str = ROLE_ADMIN, auth_source: str = 'local') -> str:
     from db import get_db
     token = secrets.token_urlsafe(32)
-    expires = (datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)).isoformat()
+    now = datetime.now(timezone.utc)
+    expires = (now + timedelta(hours=SESSION_HOURS)).isoformat()
     get_db().execute(
         "INSERT OR REPLACE INTO np_sessions (token, username, role, expires_at) VALUES (?,?,?,?)",
         (token, username, role, expires)
+    )
+    # Tracks every successful login (local or LDAP) so User Management can list
+    # LDAP users too — they never get a np_users row (see ldap_authenticate),
+    # so without this they'd be invisible there despite being able to log in.
+    get_db().execute(
+        "INSERT INTO np_user_activity (username, auth_source, last_role, last_login_at) VALUES (?,?,?,?) "
+        "ON CONFLICT(username) DO UPDATE SET auth_source=excluded.auth_source, "
+        "last_role=excluded.last_role, last_login_at=excluded.last_login_at",
+        (username, auth_source, role, now.isoformat())
     )
     return token
 
@@ -96,9 +106,46 @@ def ensure_default_admin():
 
 
 def list_users() -> list:
+    """Local accounts (np_users) plus every LDAP user who has ever logged in
+    (tracked in np_user_activity — they have no np_users row of their own).
+    Adds auth_source ('local'/'ldap'), last_login_at, and online (has a
+    currently non-expired session) to every row."""
     from db import get_db
-    rows = get_db().query("SELECT username, role, created_at FROM np_users ORDER BY username")
-    return [dict(r) for r in rows]
+    now = datetime.now(timezone.utc).isoformat()
+    local_rows    = get_db().query("SELECT username, role, created_at FROM np_users")
+    activity_rows = get_db().query("SELECT username, auth_source, last_role, last_login_at FROM np_user_activity")
+    online_rows   = get_db().query("SELECT DISTINCT username FROM np_sessions WHERE expires_at > ?", (now,))
+    activity = {r['username']: dict(r) for r in activity_rows}
+    online   = {r['username'] for r in online_rows}
+
+    result = []
+    for r in local_rows:
+        u = dict(r)
+        a = activity.get(u['username'])
+        u['auth_source']   = 'local'
+        u['last_login_at'] = a['last_login_at'] if a else ''
+        u['online']        = u['username'] in online
+        result.append(u)
+    seen = {u['username'] for u in result}
+    for username, a in activity.items():
+        if username in seen or a['auth_source'] != 'ldap':
+            continue
+        result.append({
+            'username':      username,
+            'role':          a['last_role'],
+            'created_at':    '',
+            'auth_source':   'ldap',
+            'last_login_at': a['last_login_at'],
+            'online':        username in online,
+        })
+
+    result.sort(key=lambda u: u['username'].lower())
+    return result
+
+
+def is_local_user(username: str) -> bool:
+    from db import get_db
+    return get_db().query_one("SELECT 1 FROM np_users WHERE username=?", (username,)) is not None
 
 
 def create_user(username: str, password: str, role: str = 'viewer') -> None:
@@ -110,8 +157,12 @@ def create_user(username: str, password: str, role: str = 'viewer') -> None:
 
 
 def delete_user(username: str) -> None:
+    """Removes a local account entirely. For an LDAP-only entry (no np_users
+    row — see list_users), this just clears its tracked activity/sessions;
+    they reappear automatically the next time they log in via LDAP."""
     from db import get_db
     get_db().execute("DELETE FROM np_users WHERE username=?", (username,))
+    get_db().execute("DELETE FROM np_user_activity WHERE username=?", (username,))
     get_db().execute("DELETE FROM np_sessions WHERE username=?", (username,))
 
 

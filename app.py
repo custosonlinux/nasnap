@@ -13,7 +13,7 @@ from db import get_db
 from auth import (
     verify_password, create_session, delete_session,
     ensure_default_admin, get_session, ROLE_ADMIN, SESSION_HOURS,
-    list_users, create_user, delete_user, change_password,
+    list_users, create_user, delete_user, change_password, is_local_user,
     require_admin, require_auth, ldap_authenticate,
     get_user_timezone, set_user_timezone,
 )
@@ -74,7 +74,7 @@ def create_app():
         if row:
             if not verify_password(row['password_hash'], password):
                 return jsonify({'error': 'Invalid credentials'}), 401
-            token = create_session(username, row['role'])
+            token = create_session(username, row['role'], auth_source='local')
             resp = jsonify({'ok': True, 'username': username, 'role': row['role']})
             resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax',
                             max_age=SESSION_HOURS * 3600)
@@ -83,7 +83,7 @@ def create_app():
         # No local account — try LDAP/AD if configured
         role = ldap_authenticate(username, password)
         if role:
-            token = create_session(username, role)
+            token = create_session(username, role, auth_source='ldap')
             resp = jsonify({'ok': True, 'username': username, 'role': role})
             resp.set_cookie('nasnap_session', token, httponly=True, samesite='Lax',
                             max_age=SESSION_HOURS * 3600)
@@ -147,6 +147,8 @@ def create_app():
     @app.route('/api/auth/users/<username>/password', methods=['POST'])
     @require_admin
     def _users_change_password(username):
+        if not is_local_user(username):
+            return jsonify({'error': 'This user authenticates via LDAP/AD — there is no local password to change'}), 400
         data = request.get_json() or {}
         password = data.get('password') or ''
         if len(password) < 6:

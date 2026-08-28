@@ -154,7 +154,19 @@
     }
     .role-badge.admin  { background:rgba(0,94,184,.2);color:#49afd9;border:1px solid rgba(0,94,184,.4); }
     .role-badge.viewer { background:rgba(114,139,154,.15);color:var(--muted);border:1px solid var(--border); }
+    .source-badge {
+      display:inline-flex;align-items:center;
+      padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;
+    }
+    .source-badge.local { background:rgba(114,139,154,.15);color:var(--muted);border:1px solid var(--border); }
+    .source-badge.ldap  { background:rgba(39,174,96,.15);color:var(--success);border:1px solid rgba(39,174,96,.4); }
     .td-date { color:var(--muted);font-size:12px; }
+    .online-dot {
+      display:inline-block;width:7px;height:7px;border-radius:50%;
+      background:var(--success);margin-right:5px;flex-shrink:0;
+      box-shadow:0 0 0 2px rgba(39,174,96,.25);
+    }
+    .td-lastlogin { display:flex;align-items:center;color:var(--muted);font-size:12px; }
     .actions { display:flex;gap:6px; }
     .empty { padding:40px 20px;text-align:center;color:var(--muted);font-size:13px; }
 
@@ -356,6 +368,8 @@
           <tr>
             <th data-col="username" onclick="sortBy('username')">Username<span class="sort-icon"></span></th>
             <th data-col="role"     onclick="sortBy('role')">Role<span class="sort-icon"></span></th>
+            <th data-col="auth_source" onclick="sortBy('auth_source')">Source<span class="sort-icon"></span></th>
+            <th data-col="last_login_at" onclick="sortBy('last_login_at')">Last Login<span class="sort-icon"></span></th>
             <th data-col="created_at" onclick="sortBy('created_at')">Created<span class="sort-icon"></span></th>
             <th style="cursor:default">Actions</th>
           </tr>
@@ -550,7 +564,8 @@ function sortBy(col) {
 function renderTable() {
   var q = (document.getElementById('search').value || '').toLowerCase();
   var rows = _users.filter(function(u) {
-    return u.username.toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
+    return u.username.toLowerCase().includes(q) || u.role.toLowerCase().includes(q) ||
+           (u.auth_source || '').toLowerCase().includes(q);
   });
   rows.sort(function(a, b) {
     var va = (a[_sortCol] || '').toLowerCase();
@@ -579,21 +594,26 @@ function renderTable() {
     var initials = u.username.substring(0, 2).toUpperCase();
     var createdFmt = u.created_at ? u.created_at.substring(0, 10) : '—';
     var isSelf = (u.username === _me);
+    var isLdap = u.auth_source === 'ldap';
+    var lastLoginFmt = u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never';
+    var pwTitle = isLdap ? 'LDAP users have no local password' : 'Change password';
     return '<tr>' +
       '<td><div class="td-user">' +
         '<div class="avatar">' + initials + '</div>' +
         '<span>' + esc(u.username) + (isSelf ? ' <span style="font-size:10px;color:var(--muted)">(you)</span>' : '') + '</span>' +
       '</div></td>' +
       '<td><span class="role-badge ' + esc(u.role) + '">' + esc(u.role) + '</span></td>' +
+      '<td><span class="source-badge ' + (isLdap ? 'ldap' : 'local') + '">' + (isLdap ? 'LDAP' : 'Local') + '</span></td>' +
+      '<td class="td-lastlogin">' + (u.online ? '<span class="online-dot" title="Online now"></span>Online now' : esc(lastLoginFmt)) + '</td>' +
       '<td class="td-date">' + createdFmt + '</td>' +
       '<td><div class="actions">' +
-        '<button class="btn-icon" title="Change password" onclick="openPwModal(\'' + esc(u.username) + '\')">' +
+        '<button class="btn-icon" title="' + pwTitle + '" ' + (isLdap ? 'disabled' : 'onclick="openPwModal(\'' + esc(u.username) + '\')"') + '>' +
           '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
             '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>' +
             '<path d="M7 11V7a5 5 0 0110 0v4"/>' +
           '</svg>' +
         '</button>' +
-        '<button class="btn-icon danger" title="Delete user" ' + (isSelf ? 'disabled' : 'onclick="deleteUser(\'' + esc(u.username) + '\')"') + '>' +
+        '<button class="btn-icon danger" title="' + (isLdap ? 'Remove from list' : 'Delete user') + '" ' + (isSelf ? 'disabled' : 'onclick="deleteUser(\'' + esc(u.username) + '\',' + (isLdap ? 'true' : 'false') + ')"') + '>' +
           '<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
             '<polyline points="3 6 5 6 21 6"/>' +
             '<path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>' +
@@ -606,19 +626,54 @@ function renderTable() {
   }).join('');
 }
 
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString(undefined, {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  } catch(e) { return iso.replace('T',' ').substring(0,16); }
+}
+
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-function deleteUser(username) {
-  if (!confirm('Delete user "' + username + '"?\nAll their active sessions will be terminated.')) return;
-  fetch('/api/auth/users/' + encodeURIComponent(username), {
-    method: 'DELETE', credentials: 'include'
-  }).then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.ok) { toast('User deleted', 'success'); loadUsers(); }
-      else       { toast(d.error || 'Delete failed', 'error'); }
-    });
+// Self-contained confirm dialog — native confirm()/alert() don't work inside
+// this app's Proxmox-iframe context (see CHANGELOG v1.10.0), which would
+// otherwise make deleteUser() below fire with zero confirmation.
+function uiConfirm(msg) {
+  return new Promise(function(resolve) {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:9500;display:flex;align-items:center;justify-content:center';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;min-width:280px;max-width:460px;word-break:break-word';
+    box.innerHTML = '<div style="margin-bottom:16px;white-space:pre-line">' + esc(msg) + '</div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+      '<button class="_uc-cancel btn btn-ghost">Cancel</button>' +
+      '<button class="_uc-ok btn btn-danger">Delete</button></div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    function done(v) { document.body.removeChild(overlay); resolve(v); }
+    box.querySelector('._uc-cancel').onclick = function() { done(false); };
+    box.querySelector('._uc-ok').onclick     = function() { done(true); };
+    overlay.addEventListener('keydown', function(ev) { if (ev.key === 'Escape') done(false); });
+    setTimeout(function() { box.querySelector('._uc-ok').focus(); }, 50);
+  });
+}
+
+function deleteUser(username, isLdap) {
+  var msg = isLdap
+    ? 'Remove "' + username + '" from the list?\nThey are authenticated via LDAP and will reappear automatically next time they log in.'
+    : 'Delete user "' + username + '"?\nAll their active sessions will be terminated.';
+  uiConfirm(msg).then(function(ok) {
+    if (!ok) return;
+    fetch('/api/auth/users/' + encodeURIComponent(username), {
+      method: 'DELETE', credentials: 'include'
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) { toast(isLdap ? 'User removed' : 'User deleted', 'success'); loadUsers(); }
+        else       { toast(d.error || 'Delete failed', 'error'); }
+      });
+  });
 }
 
 function openAddModal() {
