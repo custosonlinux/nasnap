@@ -371,7 +371,25 @@ def create_app():
         _write_server_conf(conf)
         return jsonify({'ok': True})
 
+    from functools import wraps
     from nasnap_core.api.plugins import get_all_routes, make_view
+
+    def _require_session(view):
+        # Baseline auth gate for every generically-registered plugin route.
+        # Handlers may layer their own _require_admin()-style role check on
+        # top, but this is the one place that guarantees NO plugin route is
+        # reachable with a missing/expired session — individual handlers
+        # forgetting their own check (as dashboard/systems did — it had zero
+        # auth check and kept serving live cluster/PVE data regardless of
+        # session state) previously meant "logged out" wasn't actually
+        # enforced everywhere.
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not getattr(g, '_nasnap_session', {}):
+                return jsonify({'error': 'Unauthorized'}), 401
+            return view(*args, **kwargs)
+        return wrapped
+
     for path, handler in get_all_routes('netapp_storage').items():
         if path in _NS_ROUTE_SKIP:
             continue
@@ -379,7 +397,7 @@ def create_app():
         endpoint = 'plugin_netapp_' + path.replace('/', '_').replace('-', '__')
         app.add_url_rule(
             route, endpoint=endpoint,
-            view_func=make_view(handler),
+            view_func=_require_session(make_view(handler)),
             methods=['GET', 'POST', 'DELETE', 'PUT'],
         )
 
