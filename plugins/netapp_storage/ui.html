@@ -1019,7 +1019,7 @@ de:{
   lbl_start_after:'VM nach dem Klonen starten',lbl_mgmt_ip:'Cluster-Management-IP / FQDN',
   ct_create_snapshot:'Snapshot erstellen',ct_new_schedule:'Neuer Schutzplan',
   ct_edit_schedule:'Schutzplan bearbeiten',ct_start_restore:'Single-VM Restore',
-  ct_clone_vm:'VM klonen',ct_jobs_history:'Jobs & Verlauf',
+  ct_clone_vm:'VM klonen',
   ct_new_endpoint:'Neuer ONTAP-Endpoint',ct_new_pve_host:'Neuer PVE-Host',
   th_name:'Name',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Zeitplan',th_label:'Label',
   th_retention:'Retention',th_status:'Status',th_last_run:'Letzter Lauf',th_actions:'Aktionen',
@@ -1146,7 +1146,7 @@ en:{
   lbl_start_after:'Start VM after cloning',lbl_mgmt_ip:'Cluster Management IP / FQDN',
   ct_create_snapshot:'Create Snapshot',ct_new_schedule:'New Protection Plan',
   ct_edit_schedule:'Edit Protection Plan',ct_start_restore:'Single VM Restore',
-  ct_clone_vm:'Clone VM',ct_jobs_history:'Jobs & History',
+  ct_clone_vm:'Clone VM',
   ct_new_endpoint:'New ONTAP Endpoint',ct_new_pve_host:'New PVE Host',
   th_name:'Name',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Schedule',th_label:'Label',
   th_retention:'Retention',th_status:'Status',th_last_run:'Last Run',th_actions:'Actions',
@@ -1272,7 +1272,7 @@ fr:{
   lbl_start_after:'Démarrer la VM après le clonage',lbl_mgmt_ip:'IP management cluster / FQDN',
   ct_create_snapshot:'Créer Snapshot',ct_new_schedule:'Nouvelle planification',
   ct_edit_schedule:'Modifier planification',ct_start_restore:'Single VM Restore',
-  ct_clone_vm:'Cloner VM',ct_jobs_history:'Jobs & Historique',
+  ct_clone_vm:'Cloner VM',
   ct_new_endpoint:'Nouvel endpoint ONTAP',ct_new_pve_host:'Nouvel hôte PVE',
   th_name:'Nom',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Planification',th_label:'Label',
   th_retention:'Rétention',th_status:'Statut',th_last_run:'Dernière exéc.',th_actions:'Actions',
@@ -1392,7 +1392,7 @@ es:{
   lbl_start_after:'Iniciar VM después de clonar',lbl_mgmt_ip:'IP gestión cluster / FQDN',
   ct_create_snapshot:'Crear Snapshot',ct_new_schedule:'Nuevo programa',
   ct_edit_schedule:'Editar programa',ct_start_restore:'Single VM Restore',
-  ct_clone_vm:'Clonar VM',ct_jobs_history:'Jobs & Historial',
+  ct_clone_vm:'Clonar VM',
   ct_new_endpoint:'Nuevo endpoint ONTAP',ct_new_pve_host:'Nuevo host PVE',
   th_name:'Nombre',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Programa',th_label:'Label',
   th_retention:'Retención',th_status:'Estado',th_last_run:'Última ejec.',th_actions:'Acciones',
@@ -1512,7 +1512,7 @@ pt:{
   lbl_start_after:'Iniciar VM após clonar',lbl_mgmt_ip:'IP gerenciamento cluster / FQDN',
   ct_create_snapshot:'Criar Snapshot',ct_new_schedule:'Novo agendamento',
   ct_edit_schedule:'Editar agendamento',ct_start_restore:'Single VM Restore',
-  ct_clone_vm:'Clonar VM',ct_jobs_history:'Jobs & Histórico',
+  ct_clone_vm:'Clonar VM',
   ct_new_endpoint:'Novo endpoint ONTAP',ct_new_pve_host:'Novo host PVE',
   th_name:'Nome',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Agendamento',th_label:'Label',
   th_retention:'Retenção',th_status:'Status',th_last_run:'Última exec.',th_actions:'Ações',
@@ -1632,7 +1632,7 @@ ko:{
   lbl_start_after:'복제 후 VM 시작',lbl_mgmt_ip:'클러스터 관리 IP / FQDN',
   ct_create_snapshot:'Snapshot 생성',ct_new_schedule:'새 일정',
   ct_edit_schedule:'일정 편집',ct_start_restore:'Single VM Restore',
-  ct_clone_vm:'VM 복제',ct_jobs_history:'Jobs & 기록',
+  ct_clone_vm:'VM 복제',
   ct_new_endpoint:'새 ONTAP Endpoint',ct_new_pve_host:'새 PVE 호스트',
   th_name:'이름',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'일정',th_label:'Label',
   th_retention:'보존',th_status:'상태',th_last_run:'마지막 실행',th_actions:'작업',
@@ -1752,7 +1752,7 @@ it:{
   lbl_start_after:'Avvia VM dopo la clonazione',lbl_mgmt_ip:'IP gestione cluster / FQDN',
   ct_create_snapshot:'Crea Snapshot',ct_new_schedule:'Nuova pianificazione',
   ct_edit_schedule:'Modifica pianificazione',ct_start_restore:'Single VM Restore',
-  ct_clone_vm:'Clona VM',ct_jobs_history:'Jobs & Cronologia',
+  ct_clone_vm:'Clona VM',
   ct_new_endpoint:'Nuovo endpoint ONTAP',ct_new_pve_host:'Nuovo host PVE',
   th_name:'Nome',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Pianificazione',th_label:'Label',
   th_retention:'Ritenzione',th_status:'Stato',th_last_run:'Ultima esec.',th_actions:'Azioni',
@@ -2209,11 +2209,15 @@ function applyI18n() {
           <button id="rcSrcPrimary" class="btn btn-primary btn-sm" onclick="rcSetSource('primary')">Primary</button>
           <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">SnapMirror Secondary</button>
         </div>
-        <input id="rcSearch" type="text" placeholder="Filter by VM name, ID or datastore…" oninput="rcFilterChanged()" style="flex:1;min-width:140px;max-width:220px;margin-left:4px">
         <button id="rcRefreshBtn" class="btn btn-ghost btn-sm" title="Reload the VM list. Also re-checks OS type (e.g. after installing the QEMU Guest Agent)." onclick="_rcSource==='secondary'?rcDrRelChanged():loadRcVmList(true)">
           <svg id="rcRefreshIcon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh
         </button>
         <span id="rcStaleNote" style="font-size:10px;color:var(--muted);display:none"></span>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <input id="rcSearch" type="search" data-i18n-placeholder="filter_search" placeholder="Search …"
+                 title="Filter by VM name, ID or datastore"
+                 oninput="rcFilterChanged()" style="width:200px;padding:5px 8px;font-size:13px">
+        </div>
       </div>
       <!-- DR relationship selector (hidden for primary) -->
       <div id="rcDrRow" style="display:none;margin-bottom:10px;gap:8px;align-items:center">
@@ -2301,17 +2305,19 @@ function applyI18n() {
     </div>
 
     <!-- ═══════════════════════ JOBS & LOGS ══════════════════════ -->
-    <!-- ═══════════════════════ JOBS & LOGS ══════════════════════ -->
     <div id="tab-jobs" class="tab-panel" style="display:none">
-      <div class="card table-scroll">
-        <div class="card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <svg class="tab-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg><span data-i18n="ct_jobs_history">Jobs &amp; History</span>
-          <button class="btn btn-ghost btn-sm" onclick="loadAllJobs()" data-i18n="btn_refresh">Refresh</button>
+      <div class="section-actions">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink:0;color:var(--accent)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+        <span style="font-weight:700;font-size:15px" data-i18n="tab_jobs">Jobs &amp; Logs</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadAllJobs()" data-i18n="btn_refresh">Refresh</button>
+        <button class="btn btn-danger btn-sm" onclick="cleanupJobs()" data-i18n="btn_cleanup_jobs">Clean up completed</button>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
           <input id="jobs_filter_text" type="search" data-i18n-placeholder="filter_search" placeholder="Search …"
-                 style="width:200px;padding:5px 8px;font-size:13px;margin-left:auto"
+                 style="width:200px;padding:5px 8px;font-size:13px"
                  oninput="_jobsSearchInput(this.value)" title="Searches type, status, created by and log text">
-          <button class="btn btn-danger btn-sm" onclick="cleanupJobs()" data-i18n="btn_cleanup_jobs">Clean up completed</button>
         </div>
+      </div>
+      <div class="card table-scroll">
         <table style="min-width:860px">
           <thead><tr>
             <th data-i18n="th_type">Type</th><th>VMID</th><th data-i18n="th_node">Node</th><th data-i18n="th_status">Status</th>
@@ -3361,21 +3367,10 @@ document.querySelectorAll('.subtab').forEach(function(t) {
   });
 });
 
-// Per-tab help button, injected into the topbar (left of the userbar app.py
-// adds server-side) — showTabHelp() with no arg auto-detects the active tab.
-(function() {
-  var tb = document.querySelector('.topbar');
-  if (!tb) return;
-  var btn = document.createElement('button');
-  btn.id = 'tabHelpBtn';
-  btn.title = 'Help for this tab';
-  btn.textContent = '?';
-  btn.style.cssText = 'width:26px;height:26px;border-radius:50%;border:1px solid var(--border);'
-    + 'background:var(--card);color:var(--text);cursor:pointer;font-weight:700;font-size:13px;'
-    + 'line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0';
-  btn.onclick = function(){ showTabHelp(); };
-  tb.insertBefore(btn, tb.firstChild);
-})();
+// Help button lives in the userbar, injected server-side by app.py
+// (id="globalHelpBtn", class .btn-tab-help) — showTabHelp() with no arg
+// auto-detects the active tab. (A second, duplicate button used to be
+// injected here too; removed 2026-08-28.)
 
 function sidebarToggleGroup(name) {
   var grp = document.getElementById('sidebarGroup' + (name || 'Protection'));
