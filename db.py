@@ -99,7 +99,8 @@ class NaSnapDB:
                 username      TEXT PRIMARY KEY,
                 auth_source   TEXT NOT NULL DEFAULT 'local',
                 last_role     TEXT NOT NULL DEFAULT 'viewer',
-                last_login_at TEXT NOT NULL DEFAULT ''
+                last_login_at TEXT NOT NULL DEFAULT '',
+                first_seen_at TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS np_settings (
                 key   TEXT PRIMARY KEY,
@@ -130,6 +131,8 @@ class NaSnapDB:
             "ALTER TABLE np_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer'",
             "UPDATE np_sessions SET role='admin' WHERE username IN (SELECT username FROM np_users WHERE role='admin')",
             "ALTER TABLE netapp_sfr_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE np_user_activity ADD COLUMN first_seen_at TEXT NOT NULL DEFAULT ''",
+            "UPDATE np_user_activity SET first_seen_at = last_login_at WHERE first_seen_at = ''",
         ]:
             try:
                 conn.execute(migration)

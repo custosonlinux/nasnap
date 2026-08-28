@@ -14,6 +14,7 @@ from auth import (
     verify_password, create_session, delete_session,
     ensure_default_admin, get_session, ROLE_ADMIN, SESSION_HOURS,
     list_users, create_user, delete_user, change_password, is_local_user,
+    cleanup_stale_ldap_users,
     require_admin, require_auth, ldap_authenticate,
     get_user_timezone, set_user_timezone,
 )
@@ -143,6 +144,18 @@ def create_app():
             return jsonify({'error': 'Cannot delete your own account'}), 400
         delete_user(username)
         return jsonify({'ok': True})
+
+    @app.route('/api/auth/users/cleanup-ldap', methods=['POST'])
+    @require_admin
+    def _users_cleanup_ldap():
+        data = request.get_json() or {}
+        try:
+            days = int(data.get('days', 90))
+        except (TypeError, ValueError):
+            days = 90
+        days = max(1, days)
+        removed = cleanup_stale_ldap_users(days)
+        return jsonify({'ok': True, 'removed': removed})
 
     @app.route('/api/auth/users/<username>/password', methods=['POST'])
     @require_admin

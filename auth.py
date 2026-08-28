@@ -54,11 +54,15 @@ def create_session(username: str, role: str = ROLE_ADMIN, auth_source: str = 'lo
     # Tracks every successful login (local or LDAP) so User Management can list
     # LDAP users too — they never get a np_users row (see ldap_authenticate),
     # so without this they'd be invisible there despite being able to log in.
+    # first_seen_at is deliberately left out of the UPDATE SET clause so it's
+    # only ever set once, on the row's first INSERT — it's what "Created"
+    # shows for LDAP users, who have no real account-creation date of their own.
     get_db().execute(
-        "INSERT INTO np_user_activity (username, auth_source, last_role, last_login_at) VALUES (?,?,?,?) "
+        "INSERT INTO np_user_activity (username, auth_source, last_role, last_login_at, first_seen_at) "
+        "VALUES (?,?,?,?,?) "
         "ON CONFLICT(username) DO UPDATE SET auth_source=excluded.auth_source, "
         "last_role=excluded.last_role, last_login_at=excluded.last_login_at",
-        (username, auth_source, role, now.isoformat())
+        (username, auth_source, role, now.isoformat(), now.isoformat())
     )
     return token
 
@@ -113,7 +117,9 @@ def list_users() -> list:
     from db import get_db
     now = datetime.now(timezone.utc).isoformat()
     local_rows    = get_db().query("SELECT username, role, created_at FROM np_users")
-    activity_rows = get_db().query("SELECT username, auth_source, last_role, last_login_at FROM np_user_activity")
+    activity_rows = get_db().query(
+        "SELECT username, auth_source, last_role, last_login_at, first_seen_at FROM np_user_activity"
+    )
     online_rows   = get_db().query("SELECT DISTINCT username FROM np_sessions WHERE expires_at > ?", (now,))
     activity = {r['username']: dict(r) for r in activity_rows}
     online   = {r['username'] for r in online_rows}
@@ -133,7 +139,7 @@ def list_users() -> list:
         result.append({
             'username':      username,
             'role':          a['last_role'],
-            'created_at':    '',
+            'created_at':    a['first_seen_at'],  # LDAP users have no real account-creation date — this is their first login
             'auth_source':   'ldap',
             'last_login_at': a['last_login_at'],
             'online':        username in online,
@@ -164,6 +170,25 @@ def delete_user(username: str) -> None:
     get_db().execute("DELETE FROM np_users WHERE username=?", (username,))
     get_db().execute("DELETE FROM np_user_activity WHERE username=?", (username,))
     get_db().execute("DELETE FROM np_sessions WHERE username=?", (username,))
+
+
+def cleanup_stale_ldap_users(days: int = 90) -> int:
+    """Removes tracked LDAP users (and any lingering sessions) who haven't
+    logged in within `days` — the bulk equivalent of delete_user() for
+    entries whose real AD/LDAP account may no longer exist. Never touches
+    AD/LDAP itself; a removed entry simply reappears on its next successful
+    login. Returns how many were removed."""
+    from db import get_db
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    rows = get_db().query(
+        "SELECT username FROM np_user_activity WHERE auth_source='ldap' AND last_login_at < ?",
+        (cutoff,)
+    )
+    usernames = [r['username'] for r in rows]
+    for username in usernames:
+        get_db().execute("DELETE FROM np_user_activity WHERE username=?", (username,))
+        get_db().execute("DELETE FROM np_sessions WHERE username=?", (username,))
+    return len(usernames)
 
 
 def change_password(username: str, new_password: str) -> None:
