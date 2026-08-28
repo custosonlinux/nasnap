@@ -174,6 +174,22 @@ NaSnap  →  SMTP server         TCP 25/465/587  (optional, for email notificati
 
 ## Quick Start
 
+### Fresh Debian/Ubuntu VM or LXC (recommended)
+
+`install.sh` takes a bare machine all the way to a running container: installs Docker CE from Docker's own apt repo (not the distro's outdated `docker.io` package), clones the repo, writes a `.env` with a generated `SECRET_KEY` and admin password, then builds and starts NaSnap. Safe to re-run.
+
+```bash
+git clone https://github.com/custosonlinux/nasnap.git && cd nasnap && sudo ./install.sh
+```
+
+Deploying inside a Proxmox **LXC** container specifically? Docker needs nesting enabled on the **Proxmox host** first (not inside the container) — the script detects this and tells you the exact command if it's missing:
+```bash
+pct set <VMID> --features nesting=1,keyctl=1
+pct reboot <VMID>
+```
+
+### Already have Docker + Compose set up
+
 ```bash
 # 1. Clone
 git clone https://github.com/custosonlinux/nasnap.git
