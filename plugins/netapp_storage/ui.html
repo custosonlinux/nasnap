@@ -2063,17 +2063,17 @@ function applyI18n() {
         <button class="btn btn-ghost"   onclick="_snapSource==='secondary'?loadSnapSecondary():loadSnapshots()" data-i18n="btn_refresh">Refresh</button>
         <div style="display:flex;gap:4px;margin-left:4px">
           <button id="snapSrcPrimary"   class="btn btn-primary btn-sm" onclick="snapSetSource('primary')">Primary</button>
-          <button id="snapSrcSecondary" class="btn btn-ghost btn-sm"   onclick="snapSetSource('secondary')">SnapMirror Secondary</button>
-        </div>
-        <div id="snapDrRow" style="display:none;gap:8px;align-items:center">
-          <select id="snapDrRelSel" onchange="loadSnapSecondary()" style="flex:1;max-width:380px;font-size:13px">
-            <option value="">— Select relationship —</option>
-          </select>
+          <button id="snapSrcSecondary" class="btn btn-ghost btn-sm"   onclick="snapSetSource('secondary')">Secondary</button>
         </div>
         <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
           <input id="snap_filter_text" type="search" data-i18n-placeholder="filter_search" placeholder="Search …"
                  style="width:160px;padding:5px 8px;font-size:13px"
                  oninput="filterSnapshots()">
+          <div id="snapDrRow" style="display:none;gap:6px;align-items:center">
+            <select id="snapDrRelSel" onchange="loadSnapSecondary()" style="width:220px;font-size:13px">
+              <option value="">— Select relationship —</option>
+            </select>
+          </div>
           <span id="snapSrcFilterWrap">
           <select id="snap_filter_source" onchange="filterSnapshots()"
                   style="padding:5px 8px;font-size:13px">
@@ -2207,7 +2207,7 @@ function applyI18n() {
         <span style="font-weight:700;font-size:15px">VM Restore &amp; Clone</span>
         <div style="display:flex;gap:4px;margin-left:4px">
           <button id="rcSrcPrimary" class="btn btn-primary btn-sm" onclick="rcSetSource('primary')">Primary</button>
-          <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">SnapMirror Secondary</button>
+          <button id="rcSrcSecondary" class="btn btn-ghost btn-sm" onclick="rcSetSource('secondary')">Secondary</button>
         </div>
         <button id="rcRefreshBtn" class="btn btn-ghost btn-sm" title="Reload the VM list. Also re-checks OS type (e.g. after installing the QEMU Guest Agent)." onclick="_rcSource==='secondary'?rcDrRelChanged():loadRcVmList(true)">
           <svg id="rcRefreshIcon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh
@@ -17816,7 +17816,7 @@ var _helpData = {
       + '<h3>Toolbar</h3><ul>'
       + '<li><strong>+ Create Snapshot</strong> — Opens a wizard to take a new snapshot immediately. Choose the datastore, which VMs to include, a label, and consistency options. Only available in Primary mode.</li>'
       + '<li><strong>Refresh</strong> — Reloads the snapshot list (primary: from database; secondary: from ONTAP).</li>'
-      + '<li><strong>Primary / SnapMirror Secondary</strong> — Switch between the local primary snapshots and snapshots on the SnapMirror destination volume. In Secondary mode a relationship dropdown appears; selecting a relationship loads the snapshots from that secondary volume. Secondary snapshots are read-only (no delete, restore, or clone).</li>'
+      + '<li><strong>Primary / Secondary</strong> — Switch between the local primary snapshots and snapshots on the SnapMirror destination volume. In Secondary mode a relationship dropdown appears; selecting a relationship loads the snapshots from that secondary volume. Secondary snapshots are read-only (no delete, restore, or clone).</li>'
       + '<li><strong>Source filter</strong> — (Primary only) Show all, plugin-managed, or ONTAP-native snapshots.</li>'
       + '<li><strong>Search box</strong> — Filter by snapshot name, datastore, or label.</li>'
       + '<li><strong>Datastore filter</strong> — Restrict the view to one specific datastore.</li>'
@@ -17841,7 +17841,7 @@ var _helpData = {
       + '<h3>Toolbar</h3><ul>'
       + '<li><strong>+ Snapshot erstellen</strong> — Öffnet einen Assistenten für einen sofortigen Snapshot. Datastore, VMs, Label und Konsistenz-Optionen auswählen. Nur im Primär-Modus verfügbar.</li>'
       + '<li><strong>Aktualisieren</strong> — Lädt die Snapshot-Liste neu (primär: aus der Datenbank; sekundär: direkt von ONTAP).</li>'
-      + '<li><strong>Primary / SnapMirror Secondary</strong> — Wechselt zwischen den lokalen Primär-Snapshots und den Snapshots auf dem SnapMirror-Zielvolume. Im Sekundär-Modus erscheint ein Beziehungs-Dropdown; nach Auswahl werden die Snapshots dieses sekundären Volumes geladen. Sekundär-Snapshots sind schreibgeschützt (kein Löschen, kein Restore, kein Clone).</li>'
+      + '<li><strong>Primary / Secondary</strong> — Wechselt zwischen den lokalen Primär-Snapshots und den Snapshots auf dem SnapMirror-Zielvolume. Im Sekundär-Modus erscheint ein Beziehungs-Dropdown; nach Auswahl werden die Snapshots dieses sekundären Volumes geladen. Sekundär-Snapshots sind schreibgeschützt (kein Löschen, kein Restore, kein Clone).</li>'
       + '<li><strong>Quell-Filter</strong> — (nur Primär) Alle, plugin-verwaltete oder ONTAP-native Snapshots anzeigen.</li>'
       + '<li><strong>Suchfeld</strong> — Filtert nach Snapshot-Name, Datastore oder Label.</li>'
       + '<li><strong>Datastore-Filter</strong> — Ansicht auf einen bestimmten Datastore beschränken.</li>'
@@ -17925,7 +17925,7 @@ var _helpData = {
       + '<p>This tab lets you restore VMs to a previous state or create clones from any available snapshot. It also provides access to Single File Restore.</p>'
       + '<h3>Source selector</h3><ul>'
       + '<li><strong>Primary</strong> — Local snapshots taken directly on this ONTAP system.</li>'
-      + '<li><strong>SnapMirror Secondary</strong> — Snapshots on a DR replica. Select the SnapMirror relationship from the dropdown that appears.</li>'
+      + '<li><strong>Secondary</strong> — Snapshots on a DR replica. Select the SnapMirror relationship from the dropdown that appears.</li>'
       + '</ul>'
       + '<h3>VM table</h3>'
       + '<p>Lists all VMs that have at least one snapshot. Columns: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (count), <strong>Last Snapshot</strong>, <strong>OS</strong> (detected via QEMU Guest Agent, cached in the database and refreshed in the background so it stays visible even when the VM is off). Click any column header to sort. Use the search box to filter by VMID, name, or datastore.</p>'
@@ -17944,7 +17944,7 @@ var _helpData = {
       + '<p>Dieser Tab ermöglicht die Wiederherstellung von VMs auf einen früheren Zustand oder die Erstellung von Klonen aus vorhandenen Snapshots.</p>'
       + '<h3>Quell-Auswahl</h3><ul>'
       + '<li><strong>Primary</strong> — Lokale Snapshots direkt auf diesem ONTAP-System.</li>'
-      + '<li><strong>SnapMirror Secondary</strong> — Snapshots auf einem DR-Replikat. Die SnapMirror-Beziehung aus dem Dropdown auswählen.</li>'
+      + '<li><strong>Secondary</strong> — Snapshots auf einem DR-Replikat. Die SnapMirror-Beziehung aus dem Dropdown auswählen.</li>'
       + '</ul>'
       + '<h3>VM-Tabelle</h3>'
       + '<p>Listet alle VMs mit mindestens einem Snapshot. Spalten: <strong>VMID</strong>, <strong>Name</strong>, <strong>Datastore</strong>, <strong>Protocol</strong> (NFS / iSCSI / NVMe), <strong>Snapshots</strong> (Anzahl), <strong>Last Snapshot</strong>, <strong>OS</strong> (per QEMU Guest Agent erkannt, in der Datenbank zwischengespeichert und im Hintergrund aktualisiert — bleibt so auch bei ausgeschalteter VM sichtbar). Spaltenköpfe klicken zum Sortieren. Suchfeld filtert nach VMID, Name oder Datastore.</p>'
