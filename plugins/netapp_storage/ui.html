@@ -4415,6 +4415,7 @@ function renderSnapshots() {
     if (text && s.snap_name.toLowerCase().indexOf(text) < 0 &&
                sDs.toLowerCase().indexOf(text) < 0 &&
                (s.label||'').toLowerCase().indexOf(text) < 0 &&
+               !(s.vmids||[]).some(function(id){ return String(id).indexOf(text) >= 0; }) &&
                !Object.values(s.vm_names||{}).some(function(n){ return (n||'').toLowerCase().indexOf(text) >= 0; })) return false;
     if (_win.from !== null || _win.to !== null) {
       var ts = s.created_at ? Date.parse(s.created_at) : 0;
