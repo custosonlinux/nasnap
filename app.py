@@ -105,7 +105,8 @@ def create_app():
         sess = getattr(g, '_nasnap_session', {})
         if not sess:
             return jsonify({'authenticated': False}), 401
-        return jsonify({'authenticated': True, 'username': sess.get('username'), 'role': sess.get('role', ROLE_ADMIN)})
+        return jsonify({'authenticated': True, 'username': sess.get('username'), 'role': sess.get('role', ROLE_ADMIN),
+                         'expires_at': sess.get('expires_at')})
 
     # ── User management API (admin only) ─────────────────────────────
     @app.route('/api/auth/users')
@@ -218,6 +219,7 @@ def create_app():
             'role':       role,
             'created_at': urow['created_at'] if urow else '',
             'timezone':   get_user_timezone(sess['username']),
+            'expires_at': sess.get('expires_at'),
         }
         if role == ROLE_ADMIN:
             uptime_s = int((datetime.now(timezone.utc) - _START_TIME).total_seconds())
@@ -504,14 +506,72 @@ def create_app():
     _AUTH_GUARD = """
 <script>
 (function () {
-  /* intercept fetch globally — redirect to /login on 401 */
+  /* ── Session-expiry modal (replaces the old silent instant redirect) ── */
+  var _SESSION_MODAL_ID = 'ns-session-modal';
+  function _sessionModal(opts) {
+    if (document.getElementById(_SESSION_MODAL_ID)) return;
+    var overlay = document.createElement('div');
+    overlay.id = _SESSION_MODAL_ID;
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;' +
+      'justify-content:center;background:rgba(0,0,0,0.6);font-family:inherit;';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#1A252F;color:#ECF0F1;border-radius:12px;padding:26px 30px;' +
+      'max-width:360px;box-shadow:0 16px 48px rgba(0,0,0,0.5);text-align:center;' +
+      'border:1px solid rgba(255,255,255,0.08);';
+    var title = document.createElement('div');
+    title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:10px;';
+    title.textContent = opts.title;
+    var msg = document.createElement('div');
+    msg.style.cssText = 'font-size:13px;color:#95A5A6;margin-bottom:20px;line-height:1.5;';
+    msg.textContent = opts.message;
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;justify-content:center;';
+    var primary = document.createElement('button');
+    primary.textContent = opts.primaryLabel;
+    primary.style.cssText = 'background:#E67E22;color:#fff;border:none;border-radius:8px;' +
+      'padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;';
+    primary.onclick = opts.onPrimary;
+    row.appendChild(primary);
+    if (opts.secondaryLabel) {
+      var sec = document.createElement('button');
+      sec.textContent = opts.secondaryLabel;
+      sec.style.cssText = 'background:transparent;color:#ECF0F1;border:1px solid rgba(255,255,255,0.2);' +
+        'border-radius:8px;padding:9px 18px;font-size:13px;cursor:pointer;';
+      sec.onclick = function () { overlay.remove(); if (opts.onSecondary) opts.onSecondary(); };
+      row.appendChild(sec);
+    }
+    box.appendChild(title); box.appendChild(msg); box.appendChild(row);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+  function nasnapSessionExpired() {
+    _sessionModal({
+      title: 'Sitzung abgelaufen',
+      message: 'Deine Sitzung ist abgelaufen. Bitte melde dich erneut an, um weiterzuarbeiten.',
+      primaryLabel: 'Zum Login',
+      onPrimary: function () { window.location.replace('/login?expired=1'); }
+    });
+  }
+  function nasnapSessionWarning(minutesLeft) {
+    if (document.getElementById(_SESSION_MODAL_ID)) return;
+    _sessionModal({
+      title: 'Sitzung läuft bald ab',
+      message: 'Deine Sitzung läuft in etwa ' + minutesLeft + ' Minuten ab. ' +
+        'Bitte sichere offene Eingaben rechtzeitig.',
+      primaryLabel: 'Jetzt neu anmelden',
+      onPrimary: function () { window.location.replace('/login?expired=1'); },
+      secondaryLabel: 'Später erinnern'
+    });
+  }
+
+  /* intercept fetch globally — show the modal (not a silent redirect) on 401 */
   var _fetch = window.fetch;
   window.fetch = function () {
     return _fetch.apply(this, arguments).then(function (r) {
       if (r.status === 401 &&
           !r.url.endsWith('/api/auth/me') &&
           !r.url.endsWith('/api/auth/login')) {
-        window.location.replace('/login');
+        nasnapSessionExpired();
       }
       return r;
     });
@@ -572,6 +632,15 @@ def create_app():
         if (d.role === 'admin') {
           var lnk = document.getElementById('ns-admin-link');
           if (lnk) lnk.style.display = 'flex';
+        }
+        /* proactive expiry warning — fires even if the user hasn't triggered
+           any request that would surface a 401 (e.g. just reading a dashboard) */
+        if (d.expires_at) {
+          var remaining = new Date(d.expires_at).getTime() - Date.now();
+          var warnAt = remaining - 5 * 60 * 1000;
+          if (warnAt > 0) setTimeout(function () { nasnapSessionWarning(5); }, warnAt);
+          if (remaining > 0) setTimeout(nasnapSessionExpired, remaining);
+          else if (remaining <= 0) nasnapSessionExpired();
         }
       });
   });

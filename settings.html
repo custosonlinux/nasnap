@@ -541,8 +541,12 @@ function saveTimezone() {
     method: 'POST', credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ timezone: tz })
-  }).then(function(r) { return r.json(); })
+  }).then(function(r) {
+      if (r.status === 401) { nasnapSessionExpired(); return null; }
+      return r.json();
+    })
     .then(function(d) {
+      if (!d) return;
       btn.disabled = false;
       var el = document.getElementById('tz-msg');
       if (d.ok) {
@@ -561,13 +565,69 @@ function fmtBytes(b) {
   return (b/(1024*1024)).toFixed(2) + ' MB';
 }
 
+var _SESSION_MODAL_ID = 'ns-session-modal';
+function _sessionModal(opts) {
+  if (document.getElementById(_SESSION_MODAL_ID)) return;
+  var overlay = document.createElement('div');
+  overlay.id = _SESSION_MODAL_ID;
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;' +
+    'justify-content:center;background:rgba(0,0,0,0.6);font-family:inherit;';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#1A252F;color:#ECF0F1;border-radius:12px;padding:26px 30px;' +
+    'max-width:360px;box-shadow:0 16px 48px rgba(0,0,0,0.5);text-align:center;' +
+    'border:1px solid rgba(255,255,255,0.08);';
+  var title = document.createElement('div');
+  title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:10px;';
+  title.textContent = opts.title;
+  var msg = document.createElement('div');
+  msg.style.cssText = 'font-size:13px;color:#95A5A6;margin-bottom:20px;line-height:1.5;';
+  msg.textContent = opts.message;
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;justify-content:center;';
+  var primary = document.createElement('button');
+  primary.textContent = opts.primaryLabel;
+  primary.style.cssText = 'background:#E67E22;color:#fff;border:none;border-radius:8px;' +
+    'padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;';
+  primary.onclick = opts.onPrimary;
+  row.appendChild(primary);
+  box.appendChild(title); box.appendChild(msg); box.appendChild(row);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+function nasnapSessionExpired() {
+  _sessionModal({
+    title: 'Sitzung abgelaufen',
+    message: 'Deine Sitzung ist abgelaufen. Bitte melde dich erneut an, um weiterzuarbeiten.',
+    primaryLabel: 'Zum Login',
+    onPrimary: function () { window.location.replace('/login?expired=1'); }
+  });
+}
+function nasnapSessionWarning(minutesLeft) {
+  if (document.getElementById(_SESSION_MODAL_ID)) return;
+  _sessionModal({
+    title: 'Sitzung läuft bald ab',
+    message: 'Deine Sitzung läuft in etwa ' + minutesLeft + ' Minuten ab. ' +
+      'Bitte sichere offene Eingaben rechtzeitig.',
+    primaryLabel: 'Jetzt neu anmelden',
+    onPrimary: function () { window.location.replace('/login?expired=1'); }
+  });
+}
+
 fetch('/api/system/info', { credentials: 'include' })
   .then(function(r) {
-    if (r.status === 401) { window.location.replace('/login'); return null; }
+    if (r.status === 401) { nasnapSessionExpired(); return null; }
     return r.json();
   })
   .then(function(d) {
     if (!d) return;
+
+    if (d.expires_at) {
+      var remaining = new Date(d.expires_at).getTime() - Date.now();
+      var warnAt = remaining - 5 * 60 * 1000;
+      if (warnAt > 0) setTimeout(function () { nasnapSessionWarning(5); }, warnAt);
+      if (remaining > 0) setTimeout(nasnapSessionExpired, remaining);
+      else if (remaining <= 0) nasnapSessionExpired();
+    }
 
     var initials = (d.username || '?').substring(0, 2).toUpperCase();
     document.getElementById('avatar-initials').textContent = initials;

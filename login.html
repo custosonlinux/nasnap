@@ -334,6 +334,10 @@
   }
   function clearError() { errBox.style.display = 'none'; }
 
+  if (new URLSearchParams(window.location.search).get('expired') === '1') {
+    showError('Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.');
+  }
+
   function setLoading(on) {
     btn.disabled = on;
     spinner.style.display = on ? 'block' : 'none';
