@@ -10,6 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.11.0] — 2026-08-28
+
+### Added
+
+- **Session-expiry warning** — a warning modal now appears roughly 5 minutes before your browser session expires, scheduled from the session's actual `expires_at` rather than guessed. Previously there was no warning at all: you could keep working until an action failed or a page refresh revealed you'd been logged out.
+
+### Fixed
+
+- **Silent instant redirect on session expiry replaced with a clear modal** — a 401 response used to trigger an immediate, unexplained `window.location.replace('/login')` with no indication of what happened. Now shows a "session expired, please sign in again" dialog with a button to the login page, consistently across the main app (`ui.html`), Admin, and Settings pages — previously each page had its own inconsistent handling (Admin redirected to `/` instead of `/login` on the same condition). The login page itself now shows an explanatory message when reached via an expired-session redirect.
+- **Instant Recovery could report success while Proxmox actually failed to boot the VM** — the manifest fallback chain can legitimately hand back today's live disk layout for a snapshot taken before that layout existed (a VM that predates NaSnap's own tracking of it, see the `1649c1c` fix from 2026-08-27). The clone's config only ever rewrote the storage name, never checked the disk file itself existed in that particular FlexClone, and the VM-start call only confirmed Proxmox *accepted* the start request — not that it could actually open the disk. The job logged "Instant Recovery ready" while Proxmox's own task queue failed the boot moments later with a bare "volume ... does not exist" and nothing pointing at the real cause. Every disk the manifest lists is now verified to exist in the clone before the config is written or the VM is started; a mismatch fails the job cleanly with the missing file(s) named, and the existing clone/temp-storage/reserved-VMID cleanup still runs — before a broken VM is ever started instead of after.
+
+### Changed
+
+- **README maturity matrix** — Instant Recovery (NFS) promoted to Stable (SAN Instant Recovery now shown as Planned rather than N/A). Tamperproof Snapshots, SnapMirror Destination Tamperproof, SAN Single File Restore, SnapMirror/SnapVault replication setup, FlexGroup volumes, PVE Cluster Grouping, and Bulk Migrate promoted from Alpha to Beta, reflecting real-environment use accumulated since their introduction. Disaster Recovery features are unchanged (remain In Development / Planned).
+
+---
+
 ## [1.10.0] — 2026-08-26
 
 ### Added

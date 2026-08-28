@@ -23,7 +23,7 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
 )
 
-NASNAP_VERSION = '1.10.0'
+NASNAP_VERSION = '1.11.0'
 _START_TIME    = datetime.now(timezone.utc)
 
 _HERE          = os.path.dirname(os.path.abspath(__file__))

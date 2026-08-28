@@ -6,7 +6,7 @@
 
 A self-contained web application that brings VM-consistent NetApp® ONTAP® snapshot management to Proxmox VE environments. Runs as a single Docker container with built-in authentication, SQLite database, and a clean UI with three themes: dark, light, and the new Liquid Glass theme.
 
-**Current stable: 1.10.0** · [Changelog](CHANGELOG.md)
+**Current stable: 1.11.0** · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -17,11 +17,11 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Snapshot** any VM or set of VMs on a shared ONTAP datastore — crash-consistent, app-consistent (QEMU guest agent), or suspend-based.
 - **Restore** individual VMs (SFSR for NFS, LV copy for SAN) or revert an entire datastore to a snapshot in seconds (volume revert).
 - **Clone** VMs from any snapshot to a new VMID with fresh MAC addresses.
-- **Instant Recovery** *(Alpha, NFS only)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume, with no data copied up front. Test the VM (optionally network-isolated with fresh MACs to avoid IP/MAC collisions with the source), then either **Storage Migrate** it onto a permanent datastore live (falling back to a brief automatic stop/restart only if the VM has a TPM device, which ONTAP/PVE can't move while running), migrate the disks yourself outside NaSnap and use **Clean Up Clone** to tear down just the FlexClone afterwards, or **Discard** the whole thing to remove the temporary VM and clone with no lasting footprint. Also works from a live VM (takes a small ad-hoc snapshot first). Sessions left running past 3 days get a log reminder to commit or discard.
+- **Instant Recovery** *(Stable, NFS; SAN planned)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume, with no data copied up front. Test the VM (optionally network-isolated with fresh MACs to avoid IP/MAC collisions with the source), then either **Storage Migrate** it onto a permanent datastore live (falling back to a brief automatic stop/restart only if the VM has a TPM device, which ONTAP/PVE can't move while running), migrate the disks yourself outside NaSnap and use **Clean Up Clone** to tear down just the FlexClone afterwards, or **Discard** the whole thing to remove the temporary VM and clone with no lasting footprint. Also works from a live VM (takes a small ad-hoc snapshot first). Sessions left running past 3 days get a log reminder to commit or discard.
 - **Protect datastores with Protection Plans** — assign multiple datastores to a single plan with unified scheduling, retention, hooks, and email notifications. Each datastore runs as an independent job (Veeam-style); a consolidated email summarises all results per plan run.
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
-- **Set up SnapMirror/SnapVault replication in one click** *(Alpha)* — pick a second registered NetApp system and NaSnap automatically peers the clusters and SVMs (if not already peered), then creates the relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available at provisioning time or retroactively via the datastore's **SnapMirror / Vault** action, which also handles policy changes and safely breaking/removing a relationship (optionally keeping the destination volume for restore).
-- **FlexGroup volumes** *(Alpha, NFS only)* — provision a datastore as a FlexGroup spanning multiple aggregates instead of a single-aggregate FlexVol, for datastores that need to scale past a single aggregate's capacity.
+- **Set up SnapMirror/SnapVault replication in one click** *(Beta)* — pick a second registered NetApp system and NaSnap automatically peers the clusters and SVMs (if not already peered), then creates the relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available at provisioning time or retroactively via the datastore's **SnapMirror / Vault** action, which also handles policy changes and safely breaking/removing a relationship (optionally keeping the destination volume for restore).
+- **FlexGroup volumes** *(Beta, NFS only)* — provision a datastore as a FlexGroup spanning multiple aggregates instead of a single-aggregate FlexVol, for datastores that need to scale past a single aggregate's capacity.
 - **Lock snapshots** with ONTAP Snapshot Locking (WORM / tamperproof) — set an expiry time that prevents deletion even by ONTAP admins, protecting against ransomware and accidental removal. Independent locking for source and SnapMirror destination.
 - **Provision** new SAN datastores end-to-end (iSCSI and NVMe-oF): ONTAP volume + LUN/namespace + iGroup/subsystem creation, host-side iSCSI/NVMe setup, LVM VG creation, and PVE storage registration — in a single wizard.
 - **Disaster Recovery** *(In Development)* — single-instance DR: SnapMirror-based failover (planned/emergency) with ordered VM boot groups, and a **Recover VMs** wizard that provisions a fresh or existing standby cluster with storage, then imports and restarts the VMs from it. No second coordinating NaSnap instance required — the same instance manages both the primary and DR side.
@@ -45,21 +45,21 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | SnapMirror Transfer Trigger per Schedule | ✅ | ✅ | ✅ |
 | Email Notifications per Schedule | ✅ | ✅ | ✅ |
 | Manifest (VM inventory, disk layout, configs) rides inside ONTAP snapshot | ✅ | ✅ | ✅ |
-| Tamperproof Snapshots (ONTAP Snapshot Locking / WORM, requires ONTAP 9.12.1+) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
-| SnapMirror Destination Tamperproof (independent lock duration) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
+| Tamperproof Snapshots (ONTAP Snapshot Locking / WORM, requires ONTAP 9.12.1+) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
+| SnapMirror Destination Tamperproof (independent lock duration) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
 | Restore — SFSR (Single File / VM Disk, NFS only) | ✅ | ❌ n/a | ❌ n/a |
-| Single File Restore (SFR) — browse snapshot filesystem, copy files/dirs into live VM via QGA | ✅ | 🟠 Alpha | 🟠 Alpha |
+| Single File Restore (SFR) — browse snapshot filesystem, copy files/dirs into live VM via QGA | ✅ | 🟡 Beta | 🟡 Beta |
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
 | VM Clone from snapshot | ✅ | 🟡 Beta | 🟡 Beta¹ |
-| Instant Recovery (boot from FlexClone, commit or discard) | 🟠 Alpha | ❌ n/a | ❌ n/a |
+| Instant Recovery (boot from FlexClone, commit or discard) | ✅ | 🔄 Planned | 🔄 Planned |
 | Clone from ONTAP-native snapshots | ✅ | 🟡 Beta | 🟡 Beta |
 | Multi-VM snapshot | ✅ | 🟡 Beta | 🟡 Beta |
 | ONTAP-native snapshot visibility | ✅ | 🟡 Beta | 🟡 Beta |
 | SnapMirror® visibility & DR restore/clone | ✅ | 🟡 Beta | 🟡 Beta |
 | Storage Provisioning (auto-setup) | ✅ | 🟡 Beta | 🟡 Beta |
-| FlexGroup volumes (spans multiple aggregates) | 🟠 Alpha | ❌ n/a | ❌ n/a |
-| SnapMirror/SnapVault replication setup (auto cluster+SVM peering, policy create/select) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
+| FlexGroup volumes (spans multiple aggregates) | 🟡 Beta | ❌ n/a | ❌ n/a |
+| SnapMirror/SnapVault replication setup (auto cluster+SVM peering, policy create/select) | 🟡 Beta | 🟡 Beta | 🟡 Beta |
 | Storage Resize | ✅ grow & shrink | 🟡 Beta grow only | 🟡 Beta grow only |
 | Job Cancellation | ✅ | 🟡 Beta | 🟡 Beta |
 | Recover VMs from Datastore (adopt existing volumes with VMs, DR tab) | 🟠 Alpha | 🟠 Alpha | 🟠 Alpha |
@@ -84,8 +84,8 @@ These features are application-level and independent of the storage protocol.
 | AES-256-GCM Credential Encryption at Rest | ✅ |
 | DB Export / Import (full config + user backup) | ✅ |
 | Dark / Light / Liquid Glass Theme | ✅ |
-| PVE Cluster Grouping (auto-detected via `/cluster/status`, Settings → PVE Hosts) | 🟠 Alpha |
-| Bulk Migrate (move VMs between datastores with live progress) | 🟠 Alpha |
+| PVE Cluster Grouping (auto-detected via `/cluster/status`, Settings → PVE Hosts) | 🟡 Beta |
+| Bulk Migrate (move VMs between datastores with live progress) | 🟡 Beta |
 
 ¹ NVMe Single VM Restore and Clone on ASA use a full volume clone via the ONTAP CLI bridge (`private/cli/volume/clone`). Direct namespace clone APIs are not available on ASA, but the volume clone approach achieves identical results.
 
@@ -579,7 +579,7 @@ This is the default since v1.0.0 and prevents lock contention from background th
 
 Single File Restore lets you browse the filesystem inside an ONTAP snapshot and copy individual files or entire directories into a running VM — without a full volume restore. It supports Linux and Windows VMs and requires the QEMU Guest Agent to be running inside the VM.
 
-SFR works for NFS datastores (stable) and SAN datastores — iSCSI and NVMe-oF (Alpha). For SAN, NaSnap creates a temporary read-only ONTAP clone, maps it to the PVE host, imports it as an LVM VG, and attaches a single LV via `qemu-nbd --read-only`. From that point, browsing and copying works identically to NFS.
+SFR works for NFS datastores (stable) and SAN datastores — iSCSI and NVMe-oF (Beta). For SAN, NaSnap creates a temporary read-only ONTAP clone, maps it to the PVE host, imports it as an LVM VG, and attaches a single LV via `qemu-nbd --read-only`. From that point, browsing and copying works identically to NFS.
 
 ### How data travels
 
@@ -1007,7 +1007,7 @@ DEBUG=1 .venv/bin/python app.py
 - **Configurable port + TLS** — set the listening port and HTTP/HTTPS mode in Settings → Server/Network. Self-signed certificates are auto-generated in `/data/tls/`. The container uses `network_mode: host` so port changes take effect on restart without editing `docker-compose.yml`.
 - **DR tab toggle** — Settings → UI Features lets you disable (hide) the Disaster Recovery tab for environments without a DR site.
 - **DR Failover *(In Development)*** — DR plans with ordered VM boot groups, precheck, and planned/emergency failover. Originally coordinated two peered NaSnap instances (PRIMARY/SECONDARY roles, background heartbeat, config sync); redesigned to a single-instance model in a later release — see below.
-- **Tamperproof Snapshots *(Alpha)*** — ONTAP Snapshot Locking (WORM) with configurable lock duration per schedule. Automatic harmonization ensures the lock expires before the retention policy would attempt to delete the snapshot. Independent locking for source volumes and SnapMirror destinations.
+- **Tamperproof Snapshots *(Beta)*** — ONTAP Snapshot Locking (WORM) with configurable lock duration per schedule. Automatic harmonization ensures the lock expires before the retention policy would attempt to delete the snapshot. Independent locking for source volumes and SnapMirror destinations.
 - **Dashboard** — Live protection overview with 7-day rolling stats, snapshot timeline, SnapMirror health, and alert banners for failed snapshots and unhealthy relationships.
 - **Light / Dark theme** — One-click toggle in the top bar; preference persisted per browser.
 
@@ -1035,7 +1035,7 @@ DEBUG=1 .venv/bin/python app.py
 
 - **Single File Restore (SFR)** — Total Commander-style two-panel browser. Browse the filesystem inside any ONTAP snapshot, select files or directories, and copy them directly into a running VM via the QEMU Guest Agent — no full volume restore required.
   - **NFS** (✅ Stable): direct SSH read from the NFS mount.
-  - **SAN — iSCSI / NVMe-oF** (🟠 Alpha): temporary read-only ONTAP clone → LUN/namespace mapped to PVE host → LVM import → `qemu-nbd --read-only` → same file browser.
+  - **SAN — iSCSI / NVMe-oF** (🟡 Beta): temporary read-only ONTAP clone → LUN/namespace mapped to PVE host → LVM import → `qemu-nbd --read-only` → same file browser.
   - **Linux VMs**: single file, multi-file, and directory copy via tar stream through QGA.
   - **Windows VMs**: single-file copy via PowerShell QGA path (base64 chunked); multi-file/directory: use ↓ tar.gz and restore manually.
   - **Batch OS detection**: all VMs in the Restore & Clone view are probed concurrently (up to 12 threads) via a single cluster/resources call per PVE cluster.
@@ -1076,7 +1076,7 @@ DEBUG=1 .venv/bin/python app.py
 
 ### v1.9.0 — Released
 
-- **Instant Recovery (NFS)** *(Alpha)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume — no data copy up front, the clone only diverges once written to. New **VMs** sidebar group hosts the wizard and the Instant Recovery tab (active/recent sessions). Works from either a snapshot or a live VM (an ad-hoc snapshot is taken first). An optional network-isolated boot assigns fresh random MACs and sets `link_down=1` so the clone can't collide with the still-live source VM. Once tested, a session is either **Storage Migrated** onto a permanent datastore (reuses the same per-disk `move_disk`/`move_volume` mechanism as Bulk Migrate) or **Discarded**, tearing down the temporary VM and FlexClone immediately. Sessions left running past 3 days get a log reminder, surfaced during the hourly Detect & Scan job.
+- **Instant Recovery (NFS)** *(Stable as of v1.11.0)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume — no data copy up front, the clone only diverges once written to. New **VMs** sidebar group hosts the wizard and the Instant Recovery tab (active/recent sessions). Works from either a snapshot or a live VM (an ad-hoc snapshot is taken first). An optional network-isolated boot assigns fresh random MACs and sets `link_down=1` so the clone can't collide with the still-live source VM. Once tested, a session is either **Storage Migrated** onto a permanent datastore (reuses the same per-disk `move_disk`/`move_volume` mechanism as Bulk Migrate) or **Discarded**, tearing down the temporary VM and FlexClone immediately. Sessions left running past 3 days get a log reminder, surfaced during the hourly Detect & Scan job.
 - **Storage Migrate — TPM devices** — PVE can only move a `tpmstate0` disk while the VM is stopped; Bulk Migrate and Instant Recovery's commit step were treating it like any other disk, so a running VM with a TPM ended up with its regular disks already moved and the TPM device stranded (job reported failed despite mostly succeeding). Both flows now migrate every other disk live first, then — only if a TPM device is present — briefly stop the VM, move the TPM state, and restart it (the restart always happens, even if the TPM move itself fails). A precheck warns and asks for explicit confirmation before the migration starts if any selected VM has a TPM device.
 - **VM Restore & Clone — OS-type badge flashed and re-probed on every tab visit** — the OS-detection cache was wiped on every tab entry instead of only on an explicit Refresh click, forcing a full re-probe and a visible appear→vanish→reappear cycle each time the tab was revisited.
 - **Instant Recovery — "Clean Up Clone" for manually-migrated VMs** — new action for a running session, for when the VM's disks were migrated by hand outside NaSnap (e.g. staged in Proxmox: disks moved live during the day, TPM device moved offline in the evening). Tears down only the FlexClone/temp storage — never stops or touches the VM — and refuses if the VM still has any disk left on the temp storage, so it can't be used before the manual migration is actually finished.
@@ -1101,7 +1101,15 @@ DEBUG=1 .venv/bin/python app.py
 
 See [Changelog](CHANGELOG.md#1100--2026-08-26) for the full list.
 
-### v1.11 — Planned
+### v1.11.0 — Released
+
+- **Session-expiry warning** — a warning modal now appears 5 minutes before your browser session expires, and a clear "session expired, please sign in again" dialog replaces the old silent instant redirect to the login page when it actually lapses. Consistent across the main app, Admin, and Settings pages; the login page itself now shows a message when you land there because your session ran out.
+- **Instant Recovery — pre-start disk-existence check** — the manifest fallback chain can legitimately hand back today's live disk layout for a snapshot taken long before that layout existed (a VM that predates NaSnap's own tracking of it); until now the job could report "ready" while Proxmox's own boot task failed moments later with a bare "volume ... does not exist" and no indication why. Every disk the manifest lists is now verified to actually exist in the FlexClone before the VM config is written or started; a mismatch now fails the job cleanly, names the missing file(s), and cleans up the clone/temp storage/reserved VMID before a broken VM is ever started.
+- **Maturity matrix updated** — Instant Recovery (NFS) promoted to Stable; Tamperproof Snapshots, SnapMirror Destination Tamperproof, SAN Single File Restore, SnapMirror/SnapVault replication setup, FlexGroup volumes, PVE Cluster Grouping, and Bulk Migrate promoted from Alpha to Beta, reflecting real-environment use since their introduction. Disaster Recovery remains In Development.
+
+See [Changelog](CHANGELOG.md#1110--2026-08-28) for the full list.
+
+### v1.12 — Planned
 
 - **DR Test via FlexClone** — bring up a DR test environment without breaking SnapMirror: FlexClone each DR volume → mount clones with isolated storage IDs → optionally start VMs with a VMID offset → one-click cleanup.
 - **Failback** — guided return to primary: reverse SnapMirror, final resync, re-mount on primary PVE, restore SnapMirror in the original direction.
