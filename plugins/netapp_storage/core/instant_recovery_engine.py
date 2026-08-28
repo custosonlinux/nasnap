@@ -46,6 +46,7 @@ from .restore_engine import (
     _load_manifest, _find_vm_in_manifest, _vm_start, _vm_stop, _resolve_node_host,
 )
 from .migrate_engine import _migrate_one_vm
+from .snapshot_engine import _extract_disk_files
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +113,43 @@ def _build_instant_recovery_config(raw_conf, storage_id_old, storage_id_new,
     if new_name and not any(l.startswith(f"{name_key}:") for l in lines):
         lines.append(f"{name_key}: {new_name}")
     return "\n".join(lines) + "\n"
+
+
+def _verify_disks_exist(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
+                        raw_conf, storage_id_old, vm_type, jlog=None):
+    """Confirms every disk file the manifest lists for this VM actually exists in
+    the FlexClone before the config is written and the VM is started.
+
+    _load_manifest's later fallback tiers (live manifest tree / live PVE config —
+    see restore_engine._load_manifest) can report *today's* disk layout for a
+    snapshot taken long before that layout existed, e.g. a snapshot that predates
+    NaSnap's own tracking of this VM. _build_instant_recovery_config only rewrites
+    the storage NAME, never checks the file is actually there, and _vm_start only
+    confirms the async start request was accepted — not that PVE could actually
+    open the disk. Without this check, the job reports "ready" while PVE fails the
+    boot moments later with a bare "volume ... does not exist" task error and no
+    indication why.
+    """
+    disks = _extract_disk_files(raw_conf, storage_id_old, vm_type)
+    if not disks:
+        return
+    checks = " ; ".join(
+        f"test -f {shlex.quote('/mnt/pve/' + temp_storage_id + '/images/' + d['file'])} "
+        f"|| echo MISSING:{shlex.quote(d['file'])}"
+        for d in disks
+    )
+    out = ssh_run(pve_host, pve_user, pve_pass, checks, capture=True,
+                 key_material=pve_key, timeout=15) or ""
+    missing = [line.split("MISSING:", 1)[1] for line in out.splitlines() if line.startswith("MISSING:")]
+    if missing:
+        if jlog:
+            jlog.log(f"ERROR: missing disk file(s) in FlexClone: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Disk file(s) not found in this snapshot's clone: {', '.join(missing)} — "
+            "the manifest used for this VM likely reflects a newer disk layout than this "
+            "particular snapshot (the snapshot predates NaSnap's own tracking of this VM, "
+            "see restore_engine._load_manifest tiers 4/5). Try a more recent snapshot."
+        )
 
 
 # ── Start ─────────────────────────────────────────────────────────────────────
@@ -218,6 +256,14 @@ def _run_instant_recovery(job_id, params, username):
                f" --content images",
                key_material=pve_key, timeout=60)
         _set_progress(db, job_id, 55)
+
+        # ── Verify the manifest's disk files actually exist in this clone ──
+        # (catches a manifest fallback to the live/current layout — see
+        # restore_engine._load_manifest tiers 4/5 — that doesn't match what
+        # this particular, possibly much older, snapshot actually froze)
+        jlog.log("Verifying disk files exist in the clone …")
+        _verify_disks_exist(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
+                            raw_conf, mapping["pve_storage_id"], vm_type, jlog=jlog)
 
         # ── Build and write the instant-recovery VM config ─────────────
         jlog.log(f"Building VM config for {new_vmid} (name: {new_name!r}) …")
