@@ -548,28 +548,35 @@ def create_app():
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;' +
       'justify-content:center;background:rgba(0,0,0,0.6);font-family:inherit;';
     var box = document.createElement('div');
-    box.style.cssText = 'background:#1A252F;color:#ECF0F1;border-radius:12px;padding:26px 30px;' +
+    box.style.cssText = 'background:var(--card);color:var(--text);border-radius:12px;padding:26px 30px;' +
       'max-width:360px;box-shadow:0 16px 48px rgba(0,0,0,0.5);text-align:center;' +
-      'border:1px solid rgba(255,255,255,0.08);';
+      'border:1px solid var(--border);backdrop-filter:blur(20px) saturate(1.5);' +
+      '-webkit-backdrop-filter:blur(20px) saturate(1.5);';
     var title = document.createElement('div');
     title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:10px;';
     title.textContent = opts.title;
     var msg = document.createElement('div');
-    msg.style.cssText = 'font-size:13px;color:#95A5A6;margin-bottom:20px;line-height:1.5;';
+    msg.style.cssText = 'font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5;';
     msg.textContent = opts.message;
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;justify-content:center;';
     var primary = document.createElement('button');
     primary.textContent = opts.primaryLabel;
-    primary.style.cssText = 'background:#E67E22;color:#fff;border:none;border-radius:8px;' +
-      'padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;';
+    primary.style.cssText = 'background:var(--primary);color:#fff;border:1px solid var(--primary);' +
+      'border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;' +
+      'transition:filter .15s;';
+    primary.onmouseover = function () { primary.style.filter = 'brightness(1.1)'; };
+    primary.onmouseout = function () { primary.style.filter = 'none'; };
     primary.onclick = opts.onPrimary;
     row.appendChild(primary);
     if (opts.secondaryLabel) {
       var sec = document.createElement('button');
       sec.textContent = opts.secondaryLabel;
-      sec.style.cssText = 'background:transparent;color:#ECF0F1;border:1px solid rgba(255,255,255,0.2);' +
-        'border-radius:8px;padding:9px 18px;font-size:13px;cursor:pointer;';
+      sec.style.cssText = 'background:transparent;color:var(--text);border:1px solid var(--border);' +
+        'border-radius:8px;padding:9px 18px;font-size:13px;cursor:pointer;' +
+        'transition:background .15s,border-color .15s;';
+      sec.onmouseover = function () { sec.style.background = 'var(--hover)'; sec.style.borderColor = 'var(--text)'; };
+      sec.onmouseout = function () { sec.style.background = 'transparent'; sec.style.borderColor = 'var(--border)'; };
       sec.onclick = function () { overlay.remove(); if (opts.onSecondary) opts.onSecondary(); };
       row.appendChild(sec);
     }
