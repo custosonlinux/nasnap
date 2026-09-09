@@ -18,13 +18,13 @@ from auth import (
     require_admin, require_auth, ldap_authenticate,
     get_user_timezone, set_user_timezone,
 )
+from nasnap_core.constants import NASNAP_VERSION
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
 )
 
-NASNAP_VERSION = '1.11.0'
 _START_TIME    = datetime.now(timezone.utc)
 
 _HERE          = os.path.dirname(os.path.abspath(__file__))
@@ -260,6 +260,51 @@ def create_app():
                 'tables':         table_stats,
             })
         return jsonify(info)
+
+    # ── Update check ──────────────────────────────────────────────────
+    # Only checks the latest tag on GitHub and compares it against
+    # NASNAP_VERSION — this deployment has no git or docker access inside
+    # the container (image is built from an rsync'd context, see
+    # build-docker.sh), so there is no in-place "apply" path. The actual
+    # update is a host-side `git pull && ./rebuild.sh` (see install.sh).
+    _GITHUB_REPO = 'custosonlinux/nasnap'
+
+    @app.route('/api/system/update-check')
+    @require_admin
+    def _system_update_check():
+        import re as _re
+        import requests as _rq
+
+        def _parse_ver(name):
+            m = _re.match(r'^v?(\d+)\.(\d+)\.(\d+)$', name or '')
+            return tuple(int(x) for x in m.groups()) if m else None
+
+        try:
+            r = _rq.get(
+                f'https://api.github.com/repos/{_GITHUB_REPO}/tags',
+                timeout=8,
+                headers={'Accept': 'application/vnd.github+json'},
+            )
+            r.raise_for_status()
+            tags = r.json()
+        except Exception as exc:
+            return jsonify({'error': f'Could not reach GitHub: {exc}'}), 502
+
+        best_name, best_ver = None, None
+        for t in (tags or []):
+            v = _parse_ver(t.get('name', ''))
+            if v and (best_ver is None or v > best_ver):
+                best_ver, best_name = v, t.get('name')
+
+        current_ver = _parse_ver(NASNAP_VERSION) or (0, 0, 0)
+        return jsonify({
+            'current_version':  NASNAP_VERSION,
+            'latest_version':   best_name.lstrip('v') if best_name else None,
+            'update_available': bool(best_ver and best_ver > current_ver),
+            'release_url':      (f'https://github.com/{_GITHUB_REPO}/releases/tag/{best_name}'
+                                  if best_name else f'https://github.com/{_GITHUB_REPO}/releases'),
+            'instructions':     'On the host: cd /docker/nasnap && git pull && ./rebuild.sh',
+        })
 
     # ── Settings UI ───────────────────────────────────────────────────
     @app.route('/settings')

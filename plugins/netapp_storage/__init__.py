@@ -250,4 +250,4 @@ def register(app):
     start_sfr_cleanup()
     start_report_scheduler()
 
-    log.info(f"[PLUGINS] {PLUGIN_NAME} registriert (UI: /api/plugins/netapp_storage/api/ui)")
+    log.info(f"[PLUGINS] {PLUGIN_NAME} registered (UI: /api/plugins/netapp_storage/api/ui)")

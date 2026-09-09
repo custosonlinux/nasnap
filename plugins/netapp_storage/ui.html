@@ -1926,6 +1926,8 @@ function applyI18n() {
         </div>
       </div>
 
+      <div style="text-align:right;padding:10px 2px 0;font-size:10px;color:var(--muted)" id="db_version_line">&nbsp;</div>
+
     </div>
 
     <!-- ════════════════════════ SNAPSHOTS ════════════════════════ -->
@@ -2981,7 +2983,12 @@ function _nsOpts(o) {
 function loadUserTimezone() {
   fetch('/api/system/info', {credentials:'include'})
     .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ if (d) _nsUserTz = d.timezone || ''; })
+    .then(function(d){
+      if (!d) return;
+      _nsUserTz = d.timezone || '';
+      var vEl = document.getElementById('db_version_line');
+      if (vEl && d.version) vEl.textContent = 'NaSnap v' + d.version;
+    })
     .catch(function(){});
 }
 

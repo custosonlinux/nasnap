@@ -415,6 +415,13 @@
         <span class="settings-value" id="sys-version">—</span>
       </div>
       <div class="settings-row">
+        <span class="settings-label">Updates</span>
+        <span class="settings-value">
+          <button id="update-check-btn" class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="checkForUpdates()">Check for Updates</button>
+          <span id="update-check-result" style="margin-left:8px;font-size:12px"></span>
+        </span>
+      </div>
+      <div class="settings-row">
         <span class="settings-label">Uptime</span>
         <span class="settings-value" id="sys-uptime">—</span>
       </div>
@@ -670,6 +677,39 @@ fetch('/api/system/info', { credentials: 'include' })
       tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No tables found</td></tr>';
     }
   });
+
+function checkForUpdates() {
+  var btn    = document.getElementById('update-check-btn');
+  var result = document.getElementById('update-check-result');
+  btn.disabled = true;
+  result.textContent = 'Checking…';
+  result.style.color = 'var(--muted)';
+  fetch('/api/system/update-check', { credentials: 'include' })
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    .then(function (res) {
+      btn.disabled = false;
+      if (!res.ok || res.d.error) {
+        result.textContent = 'Check failed: ' + (res.d.error || 'unknown error');
+        result.style.color = 'var(--error)';
+        return;
+      }
+      var d = res.d;
+      if (d.update_available) {
+        result.innerHTML = 'Update available: v' + esc(d.latest_version) +
+          ' — <a href="' + esc(d.release_url) + '" target="_blank" rel="noopener">release notes</a>' +
+          '<br><span style="color:var(--muted);font-size:11px">' + esc(d.instructions) + '</span>';
+        result.style.color = 'var(--warn, #d29922)';
+      } else {
+        result.textContent = 'Up to date (v' + esc(d.current_version) + ')';
+        result.style.color = 'var(--success, #56d364)';
+      }
+    })
+    .catch(function () {
+      btn.disabled = false;
+      result.textContent = 'Check failed: network error';
+      result.style.color = 'var(--error)';
+    });
+}
 
 function changePassword() {
   var current = document.getElementById('pw-current').value;
