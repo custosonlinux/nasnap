@@ -794,7 +794,7 @@
     background: rgba(30,123,245,0.09);
     box-shadow: 0 0 0 3px rgba(30,123,245,0.15), inset 0 1px 3px rgba(0,0,0,0.1);
   }
-  /* Native dropdown options brauchen Solid-Farbe — transparente Werte werden ignoriert */
+  /* Native dropdown options need a solid color — transparent values are ignored */
   body.glass-theme select option {
     background: #0f1f38;
     color: #f2f4f7;
@@ -5795,7 +5795,7 @@ function rwScopeChanged(scope) {
 // front — only from a specific VM's own row does. When scope is "This VM
 // only" and the snapshot covers more than one VM, that choice has to be made
 // explicitly instead of silently grabbing the first one (the original
-// Fehler-3 complaint). Volume scope never needs a specific VM at all.
+// original bug report). Volume scope never needs a specific VM at all.
 function rwResolveVmPick() {
   var group = document.getElementById('rw_vmpick_group');
   var sel   = document.getElementById('rw_vmpick');
@@ -10089,10 +10089,10 @@ function _dbRenderSystems(data, stale) {
 
   naDiv.innerHTML = (data.netapp && data.netapp.length)
     ? data.netapp.map(ontapRow).join('')
-    : '<div style="font-size:13px;color:var(--muted);padding:10px 0">Keine Endpoints konfiguriert</div>';
+    : '<div style="font-size:13px;color:var(--muted);padding:10px 0">No endpoints configured</div>';
   pvDiv.innerHTML = (data.pve && data.pve.length)
     ? data.pve.map(pveRow).join('')
-    : '<div style="font-size:13px;color:var(--muted);padding:10px 0">Keine PVE-Hosts konfiguriert</div>';
+    : '<div style="font-size:13px;color:var(--muted);padding:10px 0">No PVE hosts configured</div>';
 }
 
 function _dbLoadSystems() {

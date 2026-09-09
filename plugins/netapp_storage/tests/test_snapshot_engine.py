@@ -65,7 +65,7 @@ class TestExtractDiskFiles(unittest.TestCase):
         cfg = {
             'scsi0': 'nfs-store:images/100/disk-0.qcow2,size=20G',
             'scsi1': 'nfs-store:images/100/disk-1.qcow2,size=40G',
-            'ide2': 'none,media=cdrom',  # kein Disk
+            'ide2': 'none,media=cdrom',  # not a disk
         }
         disks = _extract_disk_files(cfg, 'nfs-store', 'qemu')
         self.assertEqual(len(disks), 2)

@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 
 def _db_execute_retry(db, sql, params, retries=8, delay=0.4):
-    """db.execute() mit Retry bei SQLite-Lock (SQLITE_LOCKED tritt auch bei timeout=30 auf)."""
+    """db.execute() with retry on SQLite lock (SQLITE_LOCKED can still happen even with timeout=30)."""
     for attempt in range(retries):
         try:
             db.execute(sql, params)
@@ -34,7 +34,7 @@ def _db_execute_retry(db, sql, params, retries=8, delay=0.4):
                 raise
 
 
-# ── PVE-API-Session ───────────────────────────────────────────────────────────
+# ── PVE API session ───────────────────────────────────────────────────────────
 
 def _pve_session(pve_host):
     """Build a requests.Session with PVE ticket auth.
@@ -52,11 +52,11 @@ def _pve_session(pve_host):
             timeout=15,
         )
     except Exception as exc:
-        raise RuntimeError(f"PVE-Login fehlgeschlagen ({pve_host['host']}): {exc}")
+        raise RuntimeError(f"PVE login failed ({pve_host['host']}): {exc}")
 
     if r.status_code != 200:
         raise RuntimeError(
-            f"PVE-Login {pve_host['host']} → HTTP {r.status_code}: {r.text[:200]}"
+            f"PVE login {pve_host['host']} → HTTP {r.status_code}: {r.text[:200]}"
         )
     data   = r.json().get("data", {})
     ticket = data.get("ticket", "")
@@ -140,7 +140,7 @@ def run_discovery(endpoint_id=None):
         )
         return found_mappings, debug_info
 
-    # ── PVE-NFS-Storages sammeln ──────────────────────────────────────────────
+    # ── Collect PVE NFS storages ──────────────────────────────────────────────
     all_pve_storages = []
     for row in pve_rows:
         pve = dict(row)
@@ -151,7 +151,7 @@ def run_discovery(endpoint_id=None):
                 f"PVE '{pve['name']}' ({pve['host']}): {err}"
             )
         elif not storages:
-            # NFS-Storages auflisten zur Diagnose
+            # List NFS storages for diagnostics
             try:
                 sess, base = _pve_session(pve)
                 r2 = sess.get(f"{base}/storage", timeout=15)
@@ -182,7 +182,7 @@ def run_discovery(endpoint_id=None):
         for s in all_pve_storages
     ]
 
-    # ── ONTAP-Endpoints ───────────────────────────────────────────────────────
+    # ── ONTAP endpoints ───────────────────────────────────────────────────────
     for ep_row in (ep_rows or []):
         ep = dict(ep_row)
         ep["password"] = db._decrypt(ep.pop("password_encrypted", ""))
@@ -195,7 +195,7 @@ def run_discovery(endpoint_id=None):
         try:
             client = build_ontap_client(ep)
         except Exception as exc:
-            msg = f"ONTAP '{ep['name']}' ({ep['host']}): Verbindung fehlgeschlagen: {exc}"
+            msg = f"ONTAP '{ep['name']}' ({ep['host']}): connection failed: {exc}"
             log.warning(f"[netapp_storage] {msg}")
             debug_info["no_match_reasons"].append(msg)
             continue
@@ -203,7 +203,7 @@ def run_discovery(endpoint_id=None):
         try:
             ip_to_svm = client.get_lif_svm_map()
         except Exception as exc:
-            msg = f"ONTAP '{ep['name']}': LIF-Abfrage fehlgeschlagen: {exc}"
+            msg = f"ONTAP '{ep['name']}': LIF lookup failed: {exc}"
             log.warning(f"[netapp_storage] {msg}")
             debug_info["no_match_reasons"].append(msg)
             ip_to_svm = {}
@@ -211,7 +211,7 @@ def run_discovery(endpoint_id=None):
         try:
             ontap_volumes = client.get_volumes()
         except Exception as exc:
-            msg = f"ONTAP '{ep['name']}': Volume-Abfrage fehlgeschlagen: {exc}"
+            msg = f"ONTAP '{ep['name']}': volume lookup failed: {exc}"
             log.warning(f"[netapp_storage] {msg}")
             debug_info["no_match_reasons"].append(msg)
             continue
@@ -239,7 +239,7 @@ def run_discovery(endpoint_id=None):
             ],
         })
 
-        # ── Abgleich ─────────────────────────────────────────────────
+        # ── Reconciliation ─────────────────────────────────────────────────
         for stor in all_pve_storages:
             server     = stor["server"]
             export     = stor["export"]
@@ -311,7 +311,7 @@ def run_discovery(endpoint_id=None):
                 log.warning(f"[netapp_storage] {msg}")
                 debug_info["no_match_reasons"].append(msg)
 
-    # ── SAN-Discovery (iSCSI / NVMe-oF) ─────────────────────────────────────
+    # ── SAN discovery (iSCSI / NVMe-oF) ─────────────────────────────────────
     _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now)
 
     return found_mappings, debug_info
@@ -366,7 +366,7 @@ def _get_pve_lvm_storages(pve_host):
         if not lvm_storages:
             return [], None
 
-        # SSH: PV → VG-Zuordnung
+        # SSH: PV → VG mapping
         h, u, p, k = _ssh_creds(pve_host)
         try:
             pvs_out = ssh_run(
@@ -380,8 +380,8 @@ def _get_pve_lvm_storages(pve_host):
                 if len(parts) >= 2:
                     pv_map.setdefault(parts[1].strip(), []).append(parts[0].strip())
         except Exception as exc:
-            log.warning(f"[netapp_storage] pvs auf {pve_host['host']} fehlgeschlagen: {exc}")
-            return lvm_storages, f"pvs fehlgeschlagen: {exc}"
+            log.warning(f"[netapp_storage] pvs failed on {pve_host['host']}: {exc}")
+            return lvm_storages, f"pvs failed: {exc}"
 
         # SSH: which VGs already have a netapp_snapmanifest LV?
         try:
@@ -395,9 +395,9 @@ def _get_pve_lvm_storages(pve_host):
         except Exception:
             snap_vgs = set()
 
-        # SSH: Device-Basename → SCSI-Seriennummer
-        # Multipath (/dev/mapper/mpathX) und direkte Devices (/dev/sdX, /dev/nvmeXnY)
-        # erscheinen beide in lsblk OUTPUT mit ihrem Basename.
+        # SSH: device basename → SCSI serial number
+        # Multipath (/dev/mapper/mpathX) and direct devices (/dev/sdX, /dev/nvmeXnY)
+        # both show up in lsblk output under their basename.
         try:
             lsblk_out = ssh_run(
                 h, u, p,
@@ -418,8 +418,8 @@ def _get_pve_lvm_storages(pve_host):
             pvs_for_vg = pv_map.get(stor["vg_name"], [])
             if not pvs_for_vg:
                 log.debug(
-                    f"[netapp_storage] VG {stor['vg_name']}: kein PV-Device in pvs-Output "
-                    f"(bekannte VGs: {sorted(pv_map.keys())})"
+                    f"[netapp_storage] VG {stor['vg_name']}: no PV device in pvs output "
+                    f"(known VGs: {sorted(pv_map.keys())})"
                 )
                 continue
 
@@ -428,7 +428,7 @@ def _get_pve_lvm_storages(pve_host):
             stor["pv_device"] = pv_dev
 
             if "nvme" in pv_dev:
-                # NVMe-oF: Namespace-UUID aus sysfs lesen.
+                # NVMe-oF: read the namespace UUID from sysfs.
                 # If the PV is on a partition (e.g. nvme1n1p1), the parent
                 # namespace (nvme1n1) must be used for UUID lookup — partitions
                 # have no uuid attribute.
@@ -457,7 +457,7 @@ def _get_pve_lvm_storages(pve_host):
                         f"[netapp_storage] NVMe UUID {pv_dev} (NS={ns_dev}): {ns_uuid or '—'}"
                     )
                 except Exception as exc:
-                    log.debug(f"[netapp_storage] NVMe UUID-Lookup {pv_dev}: {exc}")
+                    log.debug(f"[netapp_storage] NVMe UUID lookup {pv_dev}: {exc}")
             else:
                 # iSCSI: Extract serial from device.
                 # Case 1: multipath device — /dev/mapper/<WWID> where WWID is the
@@ -506,12 +506,12 @@ def _get_pve_lvm_storages(pve_host):
 
 
 def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
-    """SAN-Discovery: matched ONTAP-LUNs mit PVE-LVM-Storages via Seriennummer.
+    """SAN discovery: matches ONTAP LUNs to PVE LVM storages via serial number.
 
-    Erweitert found_mappings und debug_info in-place.
-    Seriennummern-Vergleich ist case-insensitive.
+    Extends found_mappings and debug_info in-place.
+    Serial number comparison is case-insensitive.
     """
-    # PVE LVM-Storages mit PV-Serials sammeln
+    # Collect PVE LVM storages with PV serials
     all_lvm_storages = []
     for row in (pve_rows or []):
         pve = dict(row)
@@ -526,9 +526,9 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
                 all_lvm_storages.append(s)
             elif s.get("pv_device"):
                 debug_info["no_match_reasons"].append(
-                    f"PVE '{pve['name']}' Storage '{s['storage_id']}': "
-                    f"kein Identifier ermittelbar (VG={s['vg_name']}, "
-                    f"PV={s['pv_device']}, Protokoll={s.get('protocol','?')})"
+                    f"PVE '{pve['name']}' storage '{s['storage_id']}': "
+                    f"could not determine an identifier (VG={s['vg_name']}, "
+                    f"PV={s['pv_device']}, protocol={s.get('protocol','?')})"
                 )
 
     if not all_lvm_storages:
@@ -560,7 +560,7 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
         s["pv_serial"].upper(): s
         for s in all_lvm_storages if s.get("pv_serial")
     }
-    # NVMe: Namespace-UUID → Storage (normalisiert mit Bindestrichen, lowercase)
+    # NVMe: namespace UUID → storage (normalized with hyphens, lowercase)
     def _norm_uuid(u):
         try:
             import uuid as _u
@@ -573,7 +573,7 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
         for s in all_lvm_storages if s.get("nvme_ns_uuid")
     }
 
-    # ── ONTAP-Endpoints ────────────────────────────────────────────────────
+    # ── ONTAP endpoints ────────────────────────────────────────────────────
     for ep_row in (ep_rows or []):
         ep = dict(ep_row)
         ep["password"] = db._decrypt(ep.pop("password_encrypted", ""))
@@ -582,17 +582,17 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
             client = build_ontap_client(ep)
         except Exception as exc:
             debug_info["no_match_reasons"].append(
-                f"ONTAP '{ep['name']}': Verbindung fehlgeschlagen: {exc}"
+                f"ONTAP '{ep['name']}': connection failed: {exc}"
             )
             continue
 
-        # iSCSI: LUN-Serial-Matching
+        # iSCSI: LUN serial matching
         if serial_to_stor:
             try:
                 luns = client.list_luns()
             except Exception as exc:
                 debug_info["no_match_reasons"].append(
-                    f"ONTAP '{ep['name']}': LUN-Abfrage fehlgeschlagen: {exc}"
+                    f"ONTAP '{ep['name']}': LUN lookup failed: {exc}"
                 )
                 luns = []
 
@@ -605,20 +605,20 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
                             lun.get("uuid", ""), lun.get("name", ""),
                             stor, found_mappings, debug_info, now)
 
-        # NVMe-oF: Namespace-UUID-Matching
+        # NVMe-oF: namespace UUID matching
         if nvme_uuid_to_stor:
             try:
                 namespaces = client.list_nvme_namespaces()
             except Exception as exc:
                 debug_info["no_match_reasons"].append(
-                    f"ONTAP '{ep['name']}': NVMe-Namespace-Abfrage fehlgeschlagen: {exc}"
+                    f"ONTAP '{ep['name']}': NVMe namespace lookup failed: {exc}"
                 )
                 namespaces = []
 
             if not namespaces:
                 debug_info["no_match_reasons"].append(
-                    f"ONTAP '{ep['name']}': NVMe-Namespace-Liste leer "
-                    f"(suche UUIDs: {sorted(nvme_uuid_to_stor.keys())})"
+                    f"ONTAP '{ep['name']}': NVMe namespace list empty "
+                    f"(looking for UUIDs: {sorted(nvme_uuid_to_stor.keys())})"
                 )
             else:
                 ns_debug = [
@@ -634,7 +634,7 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
                 ]
                 debug_info.setdefault("san_debug", []).extend(ns_debug)
 
-                # Wenn Namespaces ohne Vol-UUID vorhanden: SVM-Volumes im UI anzeigen
+                # If namespaces without a vol UUID exist: show SVM volumes in the UI
                 missing_vol_svms = {
                     e["svm"] for e in ns_debug if not e["vol_uuid"] and e["svm"]
                 }
@@ -643,12 +643,12 @@ def _run_san_discovery(db, ep_rows, pve_rows, found_mappings, debug_info, now):
                         vols = client.get_volumes_san(svm_name=svm_n)
                         vol_names = sorted(v.get("name", "") for v in vols if v.get("name"))
                         debug_info["no_match_reasons"].append(
-                            f"ONTAP '{ep['name']}' SVM '{svm_n}': Volumes auf dem System: "
-                            + (", ".join(vol_names) if vol_names else "(keine)")
+                            f"ONTAP '{ep['name']}' SVM '{svm_n}': volumes on the system: "
+                            + (", ".join(vol_names) if vol_names else "(none)")
                         )
                     except Exception as exc:
                         debug_info["no_match_reasons"].append(
-                            f"ONTAP '{ep['name']}' SVM '{svm_n}': Volume-Abfrage fehlgeschlagen: {exc}"
+                            f"ONTAP '{ep['name']}' SVM '{svm_n}': volume lookup failed: {exc}"
                         )
 
             for ns in namespaces:
@@ -670,7 +670,7 @@ def _san_upsert(db, ep, location, svm_obj, lun_uuid, lun_path,
 
     if not vol_uuid:
         debug_info["no_match_reasons"].append(
-            f"LUN/Namespace {lun_path}: kein Volume-UUID in ONTAP-Antwort"
+            f"LUN/Namespace {lun_path}: no volume UUID in the ONTAP response"
         )
         return
 
@@ -716,7 +716,7 @@ def _san_upsert(db, ep, location, svm_obj, lun_uuid, lun_path,
         )
     except Exception as exc:
         msg = (
-            f"SAN DB-Insert fehlgeschlagen '{stor['storage_id']}': {exc} | "
+            f"SAN DB insert failed '{stor['storage_id']}': {exc} | "
             f"lun_uuid={lun_uuid!r} vol_uuid={vol_uuid!r}"
         )
         log.warning(f"[netapp_storage] {msg}")

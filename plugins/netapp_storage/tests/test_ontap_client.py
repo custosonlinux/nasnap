@@ -13,14 +13,14 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-# Flask-Stub damit __init__.py importierbar ist ohne laufende Flask-App
+# Flask stub so __init__.py can be imported without a running Flask app
 _flask_stub = types.ModuleType('flask')
 _flask_stub.send_file = lambda *a, **kw: None
 _flask_stub.redirect = lambda *a, **kw: None
 _flask_stub.request = MagicMock()
 sys.modules.setdefault('flask', _flask_stub)
 
-# requests-Stub
+# requests stub
 _req_stub = types.ModuleType('requests')
 _req_stub.Session = MagicMock
 _req_stub.RequestException = Exception
@@ -33,7 +33,7 @@ _req_stub.auth.HTTPBasicAuth = _HTTPBasicAuth
 sys.modules.setdefault('requests', _req_stub)
 sys.modules.setdefault('requests.auth', _req_stub.auth)
 
-# urllib3-Stub (wird bei ssl_verify=False importiert)
+# urllib3 stub (imported when ssl_verify=False)
 _urllib3 = types.ModuleType('urllib3')
 _urllib3.exceptions = types.ModuleType('urllib3.exceptions')
 class _InsecureRequestWarning(UserWarning): pass

@@ -335,7 +335,7 @@
   function clearError() { errBox.style.display = 'none'; }
 
   if (new URLSearchParams(window.location.search).get('expired') === '1') {
-    showError('Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.');
+    showError('Your session has expired. Please sign in again.');
   }
 
   function setLoading(on) {
