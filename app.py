@@ -586,21 +586,21 @@ def create_app():
   }
   function nasnapSessionExpired() {
     _sessionModal({
-      title: 'Sitzung abgelaufen',
-      message: 'Deine Sitzung ist abgelaufen. Bitte melde dich erneut an, um weiterzuarbeiten.',
-      primaryLabel: 'Zum Login',
+      title: 'Session expired',
+      message: 'Your session has expired. Please sign in again to continue.',
+      primaryLabel: 'Go to login',
       onPrimary: function () { window.location.replace('/login?expired=1'); }
     });
   }
   function nasnapSessionWarning(minutesLeft) {
     if (document.getElementById(_SESSION_MODAL_ID)) return;
     _sessionModal({
-      title: 'Sitzung läuft bald ab',
-      message: 'Deine Sitzung läuft in etwa ' + minutesLeft + ' Minuten ab. ' +
-        'Bitte sichere offene Eingaben rechtzeitig.',
-      primaryLabel: 'Jetzt neu anmelden',
+      title: 'Session expiring soon',
+      message: 'Your session will expire in about ' + minutesLeft + ' minutes. ' +
+        'Please save any unsaved input.',
+      primaryLabel: 'Sign in again now',
       onPrimary: function () { window.location.replace('/login?expired=1'); },
-      secondaryLabel: 'Später erinnern'
+      secondaryLabel: 'Remind me later'
     });
   }
 

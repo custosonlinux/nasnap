@@ -2,53 +2,55 @@
 
 ---
 
-## Skalierungs-Architektur: Aufsplittung in Web / Scheduler / Worker
+## Scaling Architecture: Split into Web / Scheduler / Worker
 
-**Prio: Hoch (für Enterprise-Umgebungen), aber Umsetzung zurückgestellt — nur Design, noch keine Freigabe zur Implementierung**
+**Priority: High (for enterprise environments), but implementation deferred — design only, no go-ahead for implementation yet**
 
-Ziel-Umgebungen: 10–20 PVE-Hosts, ~1000 VMs, große Storage-Systeme. Die aktuelle
-Architektur (ein Gunicorn-Prozess, `WORKERS=1`, SQLite, In-Memory-Jobregistry)
-wurde für kleine/mittlere Installationen gebaut und stößt bei dieser Größenordnung
-an mehrere unabhängige Grenzen — nicht primär Rohdurchsatz, sondern Blockierung
-und fehlende horizontale Skalierung.
+Target environments: 10–20 PVE hosts, ~1000 VMs, large storage systems. The
+current architecture (one Gunicorn process, `WORKERS=1`, SQLite, in-memory job
+registry) was built for small/medium installations and hits several
+independent limits at this scale — not primarily raw throughput, but blocking
+behavior and the lack of horizontal scaling.
 
-### Problem (konkret an bestehendem Code festgemacht)
+### Problem (grounded in the existing code)
 
-1. **`WORKERS=1` ist erzwungen**, weil der Scheduler (`_scheduler_loop` in
-   `api/schedules.py`) als In-Process-Daemon-Thread in `create_app()` läuft.
-   Mehrere Gunicorn-Worker würden jeden Zeitplan mehrfach feuern.
-2. **Lange SSH/PVE/ONTAP-Calls blockieren den einzigen Worker.** Das Codebase
-   umgeht das bereits mehrfach mit dem "Background-Refresh-Cache"-Muster
-   (`_vm_cache` in `api/snapshots.py`, `_cap_cache` in `api/provisioning.py`) —
-   ein Symptom dafür, dass die Architektur eigentlich einen echten Worker-Pool
-   bräuchte, nicht mehr Workarounds im Web-Prozess.
-3. **`_job_registry.py` ist ein In-Memory-Dict** (Thread-Objekt + Cancel-Event
-   pro `job_id`). Funktioniert nur, solange Job-Start und Job-Ausführung im
-   selben Prozess passieren. Sobald Web und Worker getrennte Container sind,
-   funktioniert `jobs/cancel` nicht mehr ohne Weiteres.
-4. **SQLite als Datei** ist für einen einzelnen Prozess in Ordnung, aber riskant
-   sobald mehrere Container (Web + Scheduler + mehrere Worker) gleichzeitig
-   schreibend zugreifen — insbesondere über einen Bind-Mount/NFS-Volume.
-5. **PVE-Polling ist pro Web-Prozess im RAM gecacht** (`_vm_cache`,
-   `_STORAGE_UNIFIED_CACHE_KEY` clientseitig) — bei mehreren Web-Replicas wäre
-   das inkonsistent (jeder Replica pollt unabhängig, kein geteilter Zustand).
-6. **Parallele Operationen** (Bulk Migrate, Multi-Datastore-Schedules) laufen
-   heute als `ThreadPoolExecutor` innerhalb eines einzelnen Prozesses — skaliert
-   nicht über die CPU/Netzwerk-Kapazität eines einzelnen Containers hinaus.
+1. **`WORKERS=1` is enforced** because the scheduler (`_scheduler_loop` in
+   `api/schedules.py`) runs as an in-process daemon thread inside
+   `create_app()`. Multiple Gunicorn workers would fire every schedule
+   multiple times.
+2. **Long SSH/PVE/ONTAP calls block the single worker.** The codebase already
+   works around this repeatedly with the "background-refresh cache" pattern
+   (`_vm_cache` in `api/snapshots.py`, `_cap_cache` in `api/provisioning.py`)
+   — a symptom that the architecture actually needs a real worker pool,
+   rather than more workarounds inside the web process.
+3. **`_job_registry.py` is an in-memory dict** (thread object + cancel event
+   per `job_id`). Only works as long as job start and job execution happen in
+   the same process. Once web and worker are separate containers,
+   `jobs/cancel` no longer works without further changes.
+4. **SQLite as a file** is fine for a single process, but risky once multiple
+   containers (web + scheduler + several workers) write to it concurrently —
+   especially over a bind mount / NFS volume.
+5. **PVE polling is cached in RAM per web process** (`_vm_cache`,
+   `_STORAGE_UNIFIED_CACHE_KEY` client-side) — with multiple web replicas
+   this would be inconsistent (each replica polls independently, no shared
+   state).
+6. **Parallel operations** (Bulk Migrate, multi-datastore schedules) currently
+   run as a `ThreadPoolExecutor` inside a single process — this doesn't scale
+   beyond the CPU/network capacity of a single container.
 
-### Zielarchitektur
+### Target architecture
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌──────────────────┐
-│  nasnap-web  │─────▶│  Job-Queue    │◀────│ nasnap-scheduler  │
-│ (N Replicas) │      │ (Redis+RQ o.  │      │   (1 Replica,     │
-│  Gunicorn,   │      │  DB-Tabelle)  │      │   Singleton)      │
-│  kein Sched. │      └───────┬──────┘      └──────────────────┘
+│  nasnap-web  │─────▶│  Job queue    │◀────│ nasnap-scheduler  │
+│ (N replicas) │      │ (Redis+RQ or  │      │   (1 replica,     │
+│  Gunicorn,   │      │  DB table)    │      │   singleton)      │
+│  no sched.   │      └───────┬──────┘      └──────────────────┘
 └──────┬───────┘              │
        │                      ▼
        │             ┌──────────────────┐
        │             │  nasnap-worker    │
-       │             │  (M Replicas)     │
+       │             │  (M replicas)     │
        │             │  SSH/PVE/ONTAP    │
        │             └─────────┬────────┘
        │                       │
@@ -59,218 +61,250 @@ und fehlende horizontale Skalierung.
 └──────────────────────────────────────┘
 ```
 
-- **`nasnap-web`**: Flask/Gunicorn, mehrere Worker möglich, da kein Scheduler
-  und keine langlaufenden Calls mehr inline laufen. Legt Jobs an (DB-Insert +
-  Queue-Publish) und liest Status/Progress aus der DB — identisch zum
-  heutigen Polling-Pattern (`jobs/status?job_id=`), das bleibt unverändert.
-- **`nasnap-scheduler`**: Singleton (genau 1 Replica) — exakt die heutige
-  `WORKERS=1`-Beschränkung, nur isoliert auf eine kleine, austauschbare
-  Komponente statt auf den gesamten Webserver. Feuert Zeitpläne, legt Jobs in
-  die Queue, führt sie nicht mehr selbst aus.
-- **`nasnap-worker`**: N Replicas, konsumieren Jobs aus der Queue
-  (Snapshot/Restore/Clone/Bulk-Migrate/SFR). Jeder Worker öffnet seine eigene
-  PVE-/ONTAP-Session — das Pattern existiert bereits (`pve_for_mapping`,
-  `build_pve_client`), muss nur aus dem Web-Prozess in den Worker-Prozess
-  wandern.
-- **Queue**: Redis+RQ (einfach, bewährt) oder minimal-invasiv eine
-  DB-Tabelle als Queue (`netapp_job_queue`, Worker pollen `SELECT ... FOR
-  UPDATE SKIP LOCKED` — geht erst mit Postgres, nicht mit SQLite).
-- **DB**: Postgres statt SQLite — nicht wegen Durchsatz, sondern weil mehrere
-  Prozesse/Container jetzt gleichzeitig schreiben.
+- **`nasnap-web`**: Flask/Gunicorn, multiple workers possible since no
+  scheduler and no long-running calls run inline anymore. Creates jobs
+  (DB insert + queue publish) and reads status/progress from the DB —
+  identical to today's polling pattern (`jobs/status?job_id=`), which stays
+  unchanged.
+- **`nasnap-scheduler`**: Singleton (exactly 1 replica) — exactly today's
+  `WORKERS=1` constraint, just isolated to a small, replaceable component
+  instead of the entire web server. Fires schedules, puts jobs on the queue,
+  no longer executes them itself.
+- **`nasnap-worker`**: N replicas, consume jobs from the queue
+  (Snapshot/Restore/Clone/Bulk-Migrate/SFR). Each worker opens its own
+  PVE/ONTAP session — the pattern already exists (`pve_for_mapping`,
+  `build_pve_client`), it just needs to move from the web process into the
+  worker process.
+- **Queue**: Redis+RQ (simple, proven) or, less invasively, a DB table as the
+  queue (`netapp_job_queue`, workers poll with `SELECT ... FOR UPDATE SKIP
+  LOCKED` — only works with Postgres, not SQLite).
+- **DB**: Postgres instead of SQLite — not for throughput, but because
+  multiple processes/containers now write concurrently.
 
-### Phasenplan (jede Phase einzeln lieferbar, Umsetzung erst nach Freigabe)
+### Phase plan (each phase individually shippable, implementation only after go-ahead)
 
-**Phase 1 — Scheduler aus dem Web-Prozess lösen** (kleinstes Risiko, größter
-sofortiger Gewinn: `WORKERS>1` wird für den Web-Tier möglich)
-- Scheduler-Loop aus `create_app()` in einen eigenen Einstiegspunkt
-  (`scheduler_main.py` o.ä.) extrahieren, als separates Deployment/Container
-  mit fest 1 Replica.
-- Web-Prozess ruft `start_scheduler()` nicht mehr selbst auf.
-- **Aufwand: 2–3 Tage**
+**Phase 1 — Detach the scheduler from the web process** (smallest risk,
+biggest immediate win: `WORKERS>1` becomes possible for the web tier)
+- Extract the scheduler loop out of `create_app()` into its own entry point
+  (`scheduler_main.py` or similar), as a separate deployment/container with a
+  fixed 1 replica.
+- The web process no longer calls `start_scheduler()` itself.
+- **Effort: 2–3 days**
 
-**Phase 2 — Jobqueue + Worker-Container**
-- Neue Queue-Anbindung (Redis+RQ empfohlen — geringster Umbau, gute
-  Python-Integration).
-- Alle `start_*_job()`-Funktionen (`snapshot_engine.py`, `clone_engine.py`,
-  `restore_engine.py`, `migrate_engine.py`, …) von
-  `threading.Thread(daemon=True).start()` auf `queue.enqueue(...)` umstellen —
-  die eigentlichen `_run_*`-Funktionen bleiben inhaltlich fast unverändert,
-  nur der Start-Mechanismus ändert sich.
-- `_job_registry.py` (Cancel-Events) auf einen DB-Flag (`netapp_jobs.cancel_requested`)
-  oder Redis umstellen, da Web- und Worker-Prozess getrennt sind.
-- **Aufwand: 5–8 Tage** (inkl. Migration aller bestehenden Engines)
+**Phase 2 — Job queue + worker container**
+- New queue integration (Redis+RQ recommended — smallest rework, good Python
+  integration).
+- Switch all `start_*_job()` functions (`snapshot_engine.py`,
+  `clone_engine.py`, `restore_engine.py`, `migrate_engine.py`, …) from
+  `threading.Thread(daemon=True).start()` to `queue.enqueue(...)` — the
+  actual `_run_*` functions stay almost unchanged in content, only the start
+  mechanism changes.
+- Switch `_job_registry.py` (cancel events) to a DB flag
+  (`netapp_jobs.cancel_requested`) or Redis, since the web and worker
+  processes are separate.
+- **Effort: 5–8 days** (including migrating all existing engines)
 
 **Phase 3 — SQLite → Postgres**
-- Schema-Migration (`schema.sql` ist bereits reines Standard-SQL, sollte
-  weitgehend kompatibel sein — SQLite-spezifische Syntax wie `INSERT OR
-  REPLACE` muss auf `INSERT ... ON CONFLICT DO UPDATE` vereinheitlicht werden,
-  Grossteil des Codes nutzt das bereits).
-- DB-Zugriffsschicht (`db.py`) auf einen Postgres-Treiber umstellen, Thread-
-  Local-Connection-Pattern durch echten Connection-Pool (z.B. `psycopg` Pool)
-  ersetzen.
-- Bestehendes Backup/Restore-Feature (JSON-Export) muss weiter funktionieren.
-- **Aufwand: 5–8 Tage** (inkl. Testing der Backup/Restore-Kompatibilität)
+- Schema migration (`schema.sql` is already plain standard SQL, should be
+  largely compatible — SQLite-specific syntax like `INSERT OR REPLACE` needs
+  to be unified to `INSERT ... ON CONFLICT DO UPDATE`, most of the code
+  already uses that).
+- Switch the DB access layer (`db.py`) to a Postgres driver, replace the
+  thread-local connection pattern with a real connection pool (e.g.
+  `psycopg` pool).
+- The existing backup/restore feature (JSON export) must keep working.
+- **Effort: 5–8 days** (including testing backup/restore compatibility)
 
-**Phase 4 — Zentrales PVE-Polling** (optional, nach Bedarf)
-- `_vm_cache`/`_cap_cache` aus dem Web-Prozess-RAM in eine DB-Tabelle oder
-  Redis verlagern, damit mehrere Web-Replicas denselben Cache-Stand sehen.
-- **Aufwand: 2–3 Tage**
+**Phase 4 — Centralized PVE polling** (optional, as needed)
+- Move `_vm_cache`/`_cap_cache` out of web-process RAM into a DB table or
+  Redis, so multiple web replicas see the same cache state.
+- **Effort: 2–3 days**
 
-### Gesamtaufwand
+### Total effort
 
-**14–22 Tage** verteilt auf 4 unabhängig lieferbare Phasen. Phase 1 kann isoliert
-umgesetzt und getestet werden, ohne dass Phase 2–4 sofort folgen müssen.
+**14–22 days** spread across 4 independently shippable phases. Phase 1 can be
+implemented and tested in isolation without phases 2–4 having to follow
+immediately.
 
 ### Status
 
-Nur Design — **Umsetzung wartet auf explizite Freigabe.** Nicht mit der
-Implementierung beginnen, bevor das nicht ausdrücklich angefordert wird.
+Design only — **implementation waits for explicit go-ahead.** Do not start
+implementation until it is explicitly requested.
 
 ---
 
-## VM-Datenbank Garbage Collection
+## VM Database Garbage Collection
 
-**Prio: Mittel**
+**Priority: Medium**
 
-VMs, die gelöscht oder migriert wurden, bleiben dauerhaft in der RC-Ansicht sichtbar, obwohl kein Restore mehr möglich ist. Das gilt auch für Datastores, deren Mapping gelöscht wurde. Die Bereinigung muss automatisch erfolgen — kein Admin kann sich merken, welche Einträge veraltet sind.
+VMs that were deleted or migrated stay permanently visible in the RC view
+even though restore is no longer possible. The same applies to datastores
+whose mapping was deleted. Cleanup must happen automatically — no admin can
+keep track of which entries are stale.
 
 ### Problem
 
-Die `netapp_snapshots`-Tabelle enthält `vmids_json` pro Snapshot. Wenn alle Snapshots einer VM gelöscht sind (durch Retention), bleibt die VM trotzdem in der Restore-Ansicht (weil frühere Einträge in der DB verbleiben). Dasselbe gilt für Datastores, deren `netapp_volume_mapping` gelöscht wurde — der `ON DELETE CASCADE` löscht zwar die Snapshots, aber die RC-Ansicht aggregiert VMs über alle bekannten `vmids_json`-Einträge.
+The `netapp_snapshots` table holds `vmids_json` per snapshot. Once all
+snapshots of a VM have been deleted (via retention), the VM still shows up in
+the restore view (because earlier entries remain in the DB). The same applies
+to datastores whose `netapp_volume_mapping` was deleted — `ON DELETE CASCADE`
+does delete the snapshots, but the RC view aggregates VMs across all known
+`vmids_json` entries.
 
-### Bereinigungsregeln
+### Cleanup rules
 
-1. **Snapshot ohne zugehöriges Mapping** → Mapping wurde gelöscht, CASCADE löscht Snapshots — kein Problem.
-2. **VM ohne Snapshots mehr** → VM taucht in `vmids_json` keines aktiven Snapshots mehr auf → VM-Eintrag muss aus der Aggregation verschwinden. Aktuell kein expliziter VM-Eintrag in der DB (VMs werden dynamisch aus `vmids_json` aggregiert) → GC muss alten `vmids_json`-Einträge in *noch vorhandenen* Snapshots prüfen.
-3. **Snapshot in DB, aber nicht mehr auf ONTAP** → Snapshot wurde direkt auf ONTAP gelöscht ohne NaSnap → Eintrag in DB ist Leiche.
+1. **Snapshot without an associated mapping** → mapping was deleted, CASCADE
+   deletes the snapshots — not a problem.
+2. **VM with no snapshots left** → the VM no longer appears in `vmids_json` of
+   any active snapshot → the VM entry must disappear from the aggregation.
+   Currently there is no explicit VM entry in the DB (VMs are aggregated
+   dynamically from `vmids_json`) → GC must check old `vmids_json` entries in
+   snapshots that *still exist*.
+3. **Snapshot in the DB but no longer on ONTAP** → the snapshot was deleted
+   directly on ONTAP without going through NaSnap → the DB entry is a
+   corpse.
 
-### Geplanter Ansatz
+### Planned approach
 
-- **Automatischer Abgleich** beim Snapshot-Scan (Index-Import):  
-  Der Index in jedem Snapshot enthält die Snapshot-History. Beim Startup-Scan oder manuellen Index-Scan wird geprüft, welche Snapshots tatsächlich noch auf ONTAP existieren. Einträge ohne ONTAP-Gegenstück werden als `status='orphaned'` markiert oder gelöscht.
-- **Hintergrund-GC-Thread** (täglich, z.B. 03:00 Uhr):  
-  Vergleicht `netapp_snapshots` mit ONTAP-Snapshot-Liste via REST API. Snapshots, die nicht mehr auf ONTAP existieren, werden entfernt. Danach: alle VMIDs, die in keinem verbleibenden `done`-Snapshot mehr vorkommen, sind automatisch bereinigt.
-- **Mapping-Prüfung**:  
-  GC prüft auch, ob das ONTAP-Volume für jedes Mapping noch existiert. Fehlt das Volume, werden alle zugehörigen Snapshots als orphaned markiert.
+- **Automatic reconciliation** during the snapshot scan (index import):
+  The index in every snapshot contains the snapshot history. During the
+  startup scan or a manual index scan, it's checked which snapshots still
+  actually exist on ONTAP. Entries without an ONTAP counterpart are marked
+  `status='orphaned'` or deleted.
+- **Background GC thread** (daily, e.g. 03:00):
+  Compares `netapp_snapshots` against the ONTAP snapshot list via the REST
+  API. Snapshots that no longer exist on ONTAP are removed. After that: all
+  VMIDs that no longer appear in any remaining `done` snapshot are
+  automatically cleaned up.
+- **Mapping check**:
+  GC also checks whether the ONTAP volume for each mapping still exists. If
+  the volume is missing, all associated snapshots are marked orphaned.
 
-### Was wiederverwendet werden kann
+### What can be reused
 
-- ONTAP-Client `list_snapshots(volume_uuid)` — bereits vorhanden
-- Index-Scan-Logik aus `_ds_scan_creds()` + `_reconcile_index_into_db()`
-- DB-Abfrage `DELETE FROM netapp_snapshots WHERE ...` (inkl. ON DELETE CASCADE auf Jobs/Manifeste)
+- ONTAP client `list_snapshots(volume_uuid)` — already exists
+- Index scan logic from `_ds_scan_creds()` + `_reconcile_index_into_db()`
+- DB query `DELETE FROM netapp_snapshots WHERE ...` (incl. `ON DELETE
+  CASCADE` onto jobs/manifests)
 
-### Was neu gebaut werden muss
+### What needs to be newly built
 
-- GC-Thread mit konfigurierbarem Intervall (Default: täglich)
-- ONTAP-Snapshot-Abgleich je Mapping
-- UI-Hinweis in Settings: "Letzte GC-Ausführung / N orphaned entries entfernt"
-- Optional: manueller "Run GC now"-Button in Settings
+- GC thread with configurable interval (default: daily)
+- ONTAP snapshot reconciliation per mapping
+- UI hint in Settings: "Last GC run / N orphaned entries removed"
+- Optional: manual "Run GC now" button in Settings
 
-**Aufwand: 2–3 Tage**
-- 1 Tag: ONTAP-Abgleich-Logik + DB-Cleanup
-- 0,5 Tag: GC-Thread + Scheduling
-- 0,5 Tag: Settings-UI (Status-Anzeige + manueller Trigger)
-- 0,5 Tag: Tests + Edge Cases (offline ONTAP, teilweise Snapshots)
+**Effort: 2–3 days**
+- 1 day: ONTAP reconciliation logic + DB cleanup
+- 0.5 day: GC thread + scheduling
+- 0.5 day: Settings UI (status display + manual trigger)
+- 0.5 day: tests + edge cases (ONTAP offline, partial snapshots)
 
 ---
 
 ## Active Directory / LDAP Authentication
 
-**Prio: Hoch**
+**Priority: High**
 
-Benutzer können sich mit ihrem AD/LDAP-Konto an der WebGUI anmelden. Lokale Accounts bleiben als Fallback erhalten.
+Users can sign in to the web GUI with their AD/LDAP account. Local accounts
+remain available as a fallback.
 
 ### Scope
 
-- Settings-Seite: LDAP-Server, Port, SSL/TLS, Base DN, Bind-User, Bind-Passwort, User-Suchfilter, Gruppe→Rolle-Mapping, "Test Connection"-Button
-- Login-Flow: AD-Bind zuerst, Fallback auf lokalen Account wenn AD nicht erreichbar oder Benutzer lokal bekannt
-- Gruppen-zu-Rolle-Mapping: eine AD-Gruppe → Admin, eine → Viewer (konfigurierbar)
-- Lokale Notfall-Accounts bleiben immer aktiv (kein Aussperren bei AD-Ausfall)
-- Session-Handling bleibt unverändert (HMAC-Token)
-- Bibliothek: `ldap3` (pure Python, keine C-Abhängigkeiten)
+- Settings page: LDAP server, port, SSL/TLS, base DN, bind user, bind
+  password, user search filter, group→role mapping, "Test Connection" button
+- Login flow: AD bind first, fall back to a local account if AD is
+  unreachable or the user is known locally
+- Group-to-role mapping: one AD group → Admin, one → Viewer (configurable)
+- Local emergency accounts always stay active (no lockout on AD outage)
+- Session handling stays unchanged (HMAC token)
+- Library: `ldap3` (pure Python, no C dependencies)
 
-### Technische Einschätzung
+### Technical assessment
 
-- `nasnap_core/utils/auth.py` erweitern: LDAP-Bind als alternativer Auth-Pfad
-- Neue Tabelle `nasnap_ldap_config` in der DB (ein Eintrag, verschlüsseltes Bind-Passwort)
-- Settings-Tab "Authentication" mit Formular + Test-Button
-- Login-Endpoint: versucht erst lokalen Match, dann LDAP-Bind wenn konfiguriert
+- Extend `nasnap_core/utils/auth.py`: LDAP bind as an alternative auth path
+- New table `nasnap_ldap_config` in the DB (one row, encrypted bind password)
+- Settings tab "Authentication" with a form + test button
+- Login endpoint: tries a local match first, then LDAP bind if configured
 
-**Aufwand: 3–4 Tage**
-- 1 Tag: LDAP-Bind-Logik + DB-Schema + Settings-API
-- 1 Tag: Settings-UI (Formular, Test-Button, Verbindungsstatus)
-- 1 Tag: Login-Flow-Integration, Fehlerbehandlung, Fallback-Logik
-- 0,5 Tag: Tests + Edge Cases (AD-Ausfall, falsches Passwort, Gruppen-Mapping)
+**Effort: 3–4 days**
+- 1 day: LDAP bind logic + DB schema + settings API
+- 1 day: settings UI (form, test button, connection status)
+- 1 day: login flow integration, error handling, fallback logic
+- 0.5 day: tests + edge cases (AD outage, wrong password, group mapping)
 
 ---
 
-## Single File Restore für SAN (iSCSI / NVMe-oF)
+## Single File Restore for SAN (iSCSI / NVMe-oF)
 
-**Prio: Mittel**
+**Priority: Medium**
 
-SFR auf Block-Storage: Datei aus einem ONTAP-Snapshot in eine laufende VM kopieren, ohne Vollrestore.
+SFR on block storage: copy a file from an ONTAP snapshot into a running VM,
+without a full restore.
 
 ### Problem
 
-Auf SAN gibt es kein direkt zugängliches Dateisystem auf dem PVE-Host — nur ein Block-Device (LUN). Der Workflow braucht deshalb einen temporären ONTAP-Clone, bevor das Mounting möglich ist.
+On SAN there is no directly accessible filesystem on the PVE host — only a
+block device (LUN). The workflow therefore needs a temporary ONTAP clone
+before mounting is possible.
 
-### Geplanter Ablauf
+### Planned flow
 
 ```
 ONTAP Snapshot
   └─ FlexClone (read-only, temp)
-       └─ LUN-Mapping → PVE Host
-            └─ kpartx / multipath → Block-Device
-                 └─ qemu-nbd mount (wie NFS SFR)
-                      └─ Datei-Browser + QGA-Transfer (identisch zu NFS SFR)
-  └─ Cleanup: umount → LUN unmap → FlexClone löschen
+       └─ LUN mapping → PVE host
+            └─ kpartx / multipath → block device
+                 └─ qemu-nbd mount (like NFS SFR)
+                      └─ file browser + QGA transfer (identical to NFS SFR)
+  └─ Cleanup: unmount → LUN unmap → delete FlexClone
 ```
 
-### Was wiederverwendet werden kann
+### What can be reused
 
-- Kompletter Datei-Browser (links) — identisch zu NFS
-- Kompletter QGA-Transfer-Code — identisch zu NFS
-- ONTAP-FlexClone + LUN-Mapping aus `restore_engine.py` — bereits vorhanden
+- The complete file browser (left side) — identical to NFS
+- The complete QGA transfer code — identical to NFS
+- ONTAP FlexClone + LUN mapping from `restore_engine.py` — already exists
 
-### Was neu gebaut werden muss
+### What needs to be newly built
 
-- SFR-Session-Typ "san" mit FlexClone-Lifecycle-Management
-- Robustes Cleanup bei Session-Timeout oder Fehler (FlexClone-Leichen vermeiden)
-- `file_restore.py`: neuer Mount-Pfad für SAN-Sessions
-- UI: minimale Anpassung (SFR-Button für SAN-VMs freischalten)
+- SFR session type "san" with FlexClone lifecycle management
+- Robust cleanup on session timeout or error (avoid FlexClone corpses)
+- `file_restore.py`: new mount path for SAN sessions
+- UI: minimal change (enable the SFR button for SAN VMs)
 
-### Risiken
+### Risks
 
-- Cleanup-Zuverlässigkeit: ein hängengebliebener FlexClone blockiert Speicher auf ONTAP
-- kpartx/multipath-Mapping kann auf manchen PVE-Hosts Probleme machen
-- Timeout-Handling komplexer als bei NFS (mehr Ressourcen im Spiel)
+- Cleanup reliability: a stuck FlexClone blocks storage on ONTAP
+- kpartx/multipath mapping can cause issues on some PVE hosts
+- Timeout handling is more complex than with NFS (more resources in play)
 
-**Aufwand: 4–5 Tage**
-- 1 Tag: SAN-Mount-Sequenz (FlexClone → LUN map → kpartx → qemu-nbd)
-- 1 Tag: Session-Lifecycle + Cleanup-Daemon für SAN-Sessions
-- 1 Tag: Integration in `file_restore.py` + API-Anpassungen
-- 0,5 Tag: UI (SFR-Button für SAN-VMs aktivieren)
-- 1–1,5 Tag: Tests + Fehlerbehandlung + Cleanup-Robustheit
+**Effort: 4–5 days**
+- 1 day: SAN mount sequence (FlexClone → LUN map → kpartx → qemu-nbd)
+- 1 day: session lifecycle + cleanup daemon for SAN sessions
+- 1 day: integration into `file_restore.py` + API changes
+- 0.5 day: UI (enable SFR button for SAN VMs)
+- 1–1.5 days: tests + error handling + cleanup robustness
 
 ---
 
-## DR Failover (niedrige Prio, zurückgestellt)
+## DR Failover (low priority, deferred)
 
-Vollständiges Failover-Szenario mit SnapMirror-Secondary als Produktivsystem.
-Implementation vorhanden, aber noch nicht ausreichend getestet.
-Wird zurückgestellt bis Core-Features stabil sind.
+Full failover scenario with a SnapMirror secondary as the production system.
+Implementation exists but hasn't been sufficiently tested yet.
+Deferred until core features are stable.
 
-Enthält:
-- Planned Failover (sauber, mit Reverse-Resync)
-- Emergency Failover (dirty, SnapMirror gebrochen)
-- DR Test via FlexClone (ohne Produktionsunterbrechung)
+Includes:
+- Planned Failover (clean, with reverse resync)
+- Emergency Failover (dirty, SnapMirror broken)
+- DR Test via FlexClone (without interrupting production)
 - DR Failback
 
-**Aufwand: 5–8 Tage** (Implementierung vorhanden, hauptsächlich Testing + Edge Cases)
+**Effort: 5–8 days** (implementation exists, mainly testing + edge cases)
 
 ---
 
-## Erledigte Features (zur Referenz)
+## Completed Features (for reference)
 
 | Feature | Version |
 |---|---|
@@ -278,4 +312,4 @@ Enthält:
 | SAN Datastore Index (snapmanifest LV) | v1.3.0 |
 | Multi-Datastore Protection Plans | v1.4.0 |
 | Single File Restore (NFS, Linux + Windows VMs) | v1.5.0 |
-| Snapshot Timeline — Bucket-Clustering + Dashboard-Farben | v1.5.0 |
+| Snapshot Timeline — Bucket Clustering + Dashboard Colors | v1.5.0 |

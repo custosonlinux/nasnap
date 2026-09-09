@@ -900,23 +900,23 @@
     border-radius: 10px !important;
   }
 
-  /* ── Radius-System (Apple-Prinzip: einheitliche Stufen überall) ── */
-  /* Stufen: panel=18px · card=16px · element=12px · input=10px · sm=8px · pill=100px */
+  /* ── Radius system (Apple principle: consistent scale everywhere) ── */
+  /* Scale: panel=18px · card=16px · element=12px · input=10px · sm=8px · pill=100px */
 
-  /* Buttons — alle Varianten einheitlich */
+  /* Buttons — all variants consistent */
   body.glass-theme .btn                  { border-radius: 10px; }
   body.glass-theme .btn-sm               { border-radius: 8px; }
   body.glass-theme .btn-icon             { border-radius: 10px; }
   body.glass-theme .btn-tab-help         { border-radius: 100px; }
 
-  /* Step-Tab-Streifen im Wizard (Container bekommt rounded corners) */
+  /* Step-tab strip in the wizard (container gets rounded corners) */
   body.glass-theme .setup-step-pill:first-child { border-radius: 10px 0 0 10px; }
   body.glass-theme .setup-step-pill:last-child  { border-radius: 0 10px 10px 0; }
 
-  /* Datastore-Auswahlliste in Wizard */
+  /* Datastore selection list in the wizard */
   body.glass-theme .sched-ds-list { border-radius: 10px !important; }
 
-  /* Sub-Panels mit var(--bg) innerhalb von Cards/Wizards */
+  /* Sub-panels with var(--bg) inside cards/wizards */
   body.glass-theme .card-title + *,
   body.glass-theme [style*="border-radius:8px"][style*="background:var(--bg)"],
   body.glass-theme [style*="border-radius:8px"][style*="background:var(--card)"],
@@ -925,16 +925,16 @@
     border-radius: 12px !important;
   }
 
-  /* Wizard-internen Step-Container (die Flex-Zeile mit setup-step-pills) */
+  /* Wizard's internal step container (the flex row with setup-step-pills) */
   body.glass-theme [style*="border-radius:6px;overflow:hidden;border:1px solid var(--border)"] {
     border-radius: 12px !important;
   }
 
-  /* Progress bars — vollrund */
+  /* Progress bars — fully rounded */
   body.glass-theme .jtc-track,
   body.glass-theme .jtc-bar      { border-radius: 100px; }
 
-  /* Scrollbar-Thumb */
+  /* Scrollbar thumb */
   body.glass-theme ::-webkit-scrollbar-thumb { border-radius: 100px; }
 
   /* ── Custom date-range picker popover ── */
@@ -998,133 +998,6 @@ var _LANG = (function(){
 })();
 
 var _I18N = {
-de:{
-  tab_snapshots:'Snapshots',tab_schedules:'Protection Plans',tab_jobs:'Jobs & Logs',tab_settings:'Einstellungen',
-  btn_create_snapshot:'+ Snapshot erstellen',btn_refresh:'Aktualisieren',btn_start_snapshot:'Snapshot starten',
-  btn_cancel:'Abbrechen',btn_save:'Speichern',btn_add_schedule:'+ Schutzplan anlegen',
-  btn_start_restore:'VM-Restore starten',btn_start_clone:'Klonen starten',btn_suggest:'Vorschlagen',
-  btn_cleanup_jobs:'Erledigte aufräumen',btn_detect_now:'Jetzt erkennen',
-  btn_add_netapp:'+ NetApp System hinzufügen',btn_add_pve:'+ PVE-Host hinzufügen',
-  btn_all:'Alle',btn_none:'Keine',btn_test:'Testen',btn_detect:'Erkennen',
-  lbl_volume_mapping:'Volume-Mapping',lbl_pve_cluster:'PVE-Cluster',lbl_node:'Node',lbl_vms:'VMs',
-  lbl_name:'Name',lbl_consistency:'Konsistenz',lbl_snapmirror_label:'SnapMirror Label',
-  lbl_snapmirror_hint:'(optional, für Vault/Replikation)',lbl_retention:'Retention (Snapshots behalten)',
-  lbl_frequency:'Häufigkeit',lbl_at_time:'Um Uhrzeit',lbl_weekday:'Wochentag',
-  lbl_day_of_month:'Tag des Monats',lbl_interval:'Intervall',lbl_method:'Methode',
-  lbl_source_vm:'Quell-VM',lbl_new_name:'Neuer Name',lbl_new_name_hint:'(optional)',
-  lbl_new_vmid:'Neue VM-ID',lbl_target_node:'Ziel-Node',lbl_display_name:'Anzeigename',
-  lbl_username:'Benutzername',lbl_password:'Passwort',lbl_ssl_verify:'SSL-Zertifikat prüfen',
-  lbl_host_ip:'Host / IP',lbl_port:'Port',lbl_snapshot:'Snapshot',lbl_vm_id:'VM-ID',
-  lbl_name_hint:'(Snapshot heißt dann NPP_<em>Name</em>)',lbl_node_hint:'(optional)',
-  lbl_start_after:'VM nach dem Klonen starten',lbl_mgmt_ip:'Cluster-Management-IP / FQDN',
-  ct_create_snapshot:'Snapshot erstellen',ct_new_schedule:'Neuer Schutzplan',
-  ct_edit_schedule:'Schutzplan bearbeiten',ct_start_restore:'Single-VM Restore',
-  ct_clone_vm:'VM klonen',
-  ct_new_endpoint:'Neuer ONTAP-Endpoint',ct_new_pve_host:'Neuer PVE-Host',
-  th_name:'Name',th_volume:'Volume',th_datastore:'Datastore',th_vms:'VMs',th_schedule:'Zeitplan',th_label:'Label',
-  th_retention:'Retention',th_status:'Status',th_last_run:'Letzter Lauf',th_actions:'Aktionen',
-  th_host:'Host',th_user:'Benutzer',th_ssl_verified:'SSL geprüft',th_pve_hosts:'PVE-Hosts',
-  th_storage_id:'Storage-ID',th_svm:'SVM',th_junction:'Protokoll / Pfad',th_nfs_server:'Details',
-  th_endpoint:'Endpoint',th_detected:'Erkannt am',th_type:'Typ',th_node:'Node',
-  th_created_by:'Erstellt von',th_started:'Gestartet',th_log:'Log',
-  th_consistency:'Konsistenz',th_source:'Quelle',th_created:'Erstellt',
-  sect_netapp:'NetApp Systeme',sect_pve:'Proxmox VE Hosts',sect_discovery:'Volume-Erkennung',
-  sect_sched_builder:'Zeitplan',sect_vms_include:'VMs einschließen',
-  opt_all_sources:'Alle Quellen',opt_all_volumes:'Alle Volumes',opt_all_datastores:'Alle Datastores',opt_plugin:'Plugin',opt_ontap_native:'ONTAP-nativ',
-  opt_crash:'Crash-konsistent',opt_app_qemu:'App-konsistent (QEMU guest-agent)',
-  opt_app_sched:'App-konsistent (QEMU mit Guest Agent)',
-  opt_sfsr:'SFSR – in-place (schnell)',opt_flexclone:'FlexClone – neue VM aus Klon',
-  opt_san_revert:'SAN – Volume Revert (NVMe/iSCSI)',
-  opt_hourly:'Stündlich',opt_daily:'Täglich',opt_weekly:'Wöchentlich',
-  opt_monthly:'Monatlich',opt_every_n_h:'Alle N Stunden',
-  opt_ssl_yes:'Ja (empfohlen)',opt_ssl_no:'Nein (self-signed)',opt_ssl_yes_s:'Ja',
-  opt_int_1h:'jede Stunde',opt_int_2h:'alle 2 Stunden',opt_int_3h:'alle 3 Stunden',
-  opt_int_4h:'alle 4 Stunden',opt_int_6h:'alle 6 Stunden',opt_int_8h:'alle 8 Stunden',
-  opt_int_12h:'alle 12 Stunden',
-  day_mon:'Montag',day_tue:'Dienstag',day_wed:'Mittwoch',day_thu:'Donnerstag',
-  day_fri:'Freitag',day_sat:'Samstag',day_sun:'Sonntag',
-  day_mon_s:'Mo',day_tue_s:'Di',day_wed_s:'Mi',day_thu_s:'Do',
-  day_fri_s:'Fr',day_sat_s:'Sa',day_sun_s:'So',
-  hint_select_mapping:'← Erst Mapping wählen',hint_loading:'Wird geladen …',
-  hint_no_vms:'Keine VMs gefunden',hint_mapping_first:'Mapping wählen …',
-  hint_no_select:'Keine Auswahl = alle VMs des Datastores werden eingeschlossen.',
-  hint_discovery:'Durchsucht PVE-Hosts nach NFS-, iSCSI- und NVMe-Datastores und ordnet sie ONTAP-Volumes zu.',
-  hint_ontap_native:'ONTAP-nativer Snapshot — VM-ID manuell eingeben. Manifest wird beim Restore aus dem Snapshot gelesen (jüngstes verfügbares Manifest).',
-  hint_no_discovery:'Noch keine Erkennung durchgeführt.',hint_cron_prefix:'Zeitplan:',
-  badge_active:'Aktiv',badge_inactive:'Inaktiv',badge_done:'Abgeschlossen',badge_failed:'Fehlgeschlagen',
-  badge_running:'Läuft',badge_pending:'In Warteschlange',badge_cancelling:'Wird abgebrochen',badge_cancelled:'Abgebrochen',badge_schedule:'Zeitplan',badge_ontap:'ONTAP-nativ',badge_running_dots:'läuft …',
-  act_restore:'Restore',act_clone:'Clone',act_delete:'Löschen',act_activate:'Aktivieren',
-  act_deactivate:'Deaktivieren',act_run_now:'Jetzt',act_edit:'Bearbeiten',
-  pg_prev:'← Zurück',pg_next:'Weiter →',sched_save:'Plan speichern',sched_update:'Plan aktualisieren',
-  sched_step1:'Grundlagen',sched_step2:'Zeitplan',sched_step3:'VMs & Skripte',sched_step4:'SnapMirror',sched_step5:'Benachrichtigungen',sched_step6:'Zusammenfassung',
-  empty_snapshots:'Keine Snapshots vorhanden.',empty_schedules:'Keine Schutzpläne konfiguriert.',
-  empty_jobs:'Keine Jobs vorhanden.',empty_endpoints:'Keine Endpoints – oben hinzufügen.',
-  empty_pve:'Keine PVE-Hosts – oben hinzufügen.',empty_mappings:'Noch keine Erkennung – „Jetzt erkennen" klicken.',
-  empty_no_restore:'Keine fertigen Snapshots vorhanden',
-  confirm_delete_snap:'Snapshot "%s" löschen?',
-  confirm_delete_snap_native:'ONTAP-Snapshot "%s" löschen?\n\nDieser Snapshot wurde nicht vom Plugin erstellt.',
-  confirm_delete_sched:'Schutzplan "%s" löschen?\n\nDer Plan wird gestoppt und entfernt. Bestehende ONTAP-Snapshots werden nicht gelöscht.',confirm_delete_sched_check:'Ja, Schutzplan unwiderruflich löschen',confirm_run_now:'Zeitplan "%s" sofort ausführen?',
-  confirm_delete_ep:'Endpoint "%s" wirklich löschen?',confirm_delete_pve:'PVE-Host "%s" wirklich löschen?',
-  act_cancel_job:'Abbrechen',confirm_cancel_job:'Diesen Job wirklich abbrechen?',msg_job_cancelled:'Job abgebrochen',
-  confirm_delete_job:'Diesen Job-Eintrag löschen?',confirm_cleanup:'%d erledigte/fehlerhafte Jobs löschen?',
-  confirm_clone:'VM %s → neue VM %s auf Node "%s" klonen?',
-  confirm_restore:'Restore von VM %s aus "%s" starten?',
-  msg_fill_required:'Name und Mapping angeben',msg_snap_mapping_req:'Bitte Mapping auswählen',
-  msg_snap_vm_req:'Mindestens eine VM auswählen',msg_snap_name_req:'Bitte einen Namen eingeben',
-  msg_snap_started:'Snapshot-Job gestartet',msg_snap_deleted:'Snapshot gelöscht',
-  msg_sched_saved:'Schutzplan gespeichert',msg_sched_updated:'Schutzplan aktualisiert',
-  msg_sched_deleted:'Schutzplan gelöscht',msg_sched_enabled:'Schutzplan aktiviert',
-  msg_sched_disabled:'Schutzplan deaktiviert',msg_sched_running:'Schutzplan wird ausgeführt',
-  msg_restore_started:'Restore-Job gestartet: %s',msg_clone_started:'Clone-Job gestartet: %s',
-  msg_ep_saved:'Endpoint gespeichert',msg_ep_deleted:'Endpoint gelöscht',
-  msg_pve_saved:'PVE-Host gespeichert',msg_pve_deleted:'PVE-Host gelöscht',
-  msg_all_fields:'Alle Felder ausfüllen',msg_job_deleted:'Job gelöscht',
-  msg_jobs_cleaned:'%d Jobs gelöscht',msg_no_done_jobs:'Keine erledigten Jobs vorhanden',
-  msg_discovery_found:'%d Mapping(s) erkannt',msg_discovery_none:'Nichts erkannt – Details eingeblendet',
-  msg_no_snap:'Kein Snapshot ausgewählt',msg_src_vm_req:'Quell-VM auswählen',
-  msg_vmid_req:'Neue VM-ID eingeben',msg_node_req:'Ziel-Node auswählen',
-  msg_snap_req:'Snapshot auswählen',msg_vmid_req2:'VM-ID eingeben',
-  msg_testing:'Teste Verbindung zu %s …',
-  msg_no_manifest:'Kein Manifest gefunden — VMID manuell eingeben.',
-  cron_daily:'Täglich um %s Uhr',cron_hourly:'Stündlich',cron_hourly_min:'Stündlich (Minute %s)',
-  cron_weekly:'%s %s Uhr wöchentlich',cron_monthly:'Monatlich am %s. um %s Uhr',cron_every_n_h:'Alle %s Stunden',
-  filter_search:'Suchen …',snap_count:'%d Snapshot%s · Seite %d / %d',
-  jobs_page:'Seite %d / %d (%d Jobs)',
-  snap_choose:'– Snapshot wählen –',
-  tab_snapmirror:'SnapMirror®',sect_sm_rels:'SnapMirror® Beziehungen',
-  sm_scan:'Scannen',sm_update_now:'Jetzt updaten',
-  sm_no_rels:'Keine SnapMirror®-Beziehungen gefunden. Endpoint konfigurieren und scannen.',
-  sm_unmatched:'Kein Endpoint',sm_update_after_snap:'SnapMirror® nach Snapshot updaten',
-  lbl_notify_enabled:'E-Mail-Benachrichtigungen senden',lbl_notify_on:'Benachrichtigen bei',lbl_notify_recipients:'Empfänger (kommagetrennt)',
-  opt_notify_all:'Alle Ereignisse (Erfolg &amp; Fehler)',opt_notify_failed:'Nur Fehler',opt_notify_success:'Nur Erfolg',
-  btn_notify_test:'Test-E-Mail senden',msg_notify_test_sent:'Test-E-Mail gesendet',msg_notify_no_recipients:'Keine Empfänger angegeben',
-  badge_sm_dr:'DR-Sekär',sm_dr_title:'Restore vom SnapMirror®-Sekundärsystem',
-  sm_select_rel:'SnapMirror®-Beziehung',sm_select_snap:'Sekundär-Snapshot',
-  sm_btn_start_dr:'DR-Restore starten',sm_ensure_export:'Sekundär prüfen',
-  sm_no_dest_ep:'Kein Sekundär-Endpoint — erst scannen',
-  ct_dr_clone:'DR-Clone von Sekundärsystem',btn_start_dr_clone:'DR-Clone starten',
-  sm_source_vol:'Quell-Volume',sm_dest_vol:'Ziel-Volume',sm_state:'Zustand',sm_lag:'Verzug',
-  tab_dashboard:'Dashboard',tab_restore:'VM Restore & Clone',tab_clone:'Clone',tab_provision:'Provision',tab_storage:'Datastores',
-  db_vm_overview:'VM-Übersicht',db_total:'Gesamt',db_running:'Laufend',db_stopped:'Gestoppt',
-  db_ds_overview:'Datastores',db_protected:'Geschützt',db_schedules_active:'Schutzpläne aktiv',
-  db_storage:'Storage-Übersicht',db_recent_jobs:'Letzte Jobs',db_no_ds:'Keine Datastores konfiguriert.',
-  db_ts_fresh:'aktuell %s',db_ts_stale:'Stand: %s',db_ts_title_fresh:'Zuletzt aktualisiert: %s',db_ts_title_stale:'Gecachte Daten – wird aktualisiert…',
-  db_no_jobs:'Noch keine Jobs.',db_protected_badge:'Zeitplan aktiv',db_unprotected_badge:'Kein Zeitplan',
-  db_all_ok:'Alle Systeme in Ordnung.',db_issues:'Probleme erkannt',db_systems:'Environment',
-  sect_smtp:'E-Mail-Benachrichtigungen (SMTP)',
-  lbl_smtp_host:'SMTP-Server',lbl_smtp_port:'Port',lbl_smtp_user:'Benutzername',
-  lbl_smtp_pass:'Passwort',lbl_smtp_from:'Absender (Von)',lbl_smtp_encryption:'Verschlüsselung',
-  opt_smtp_none:'Keine (Port 25)',opt_smtp_starttls:'STARTTLS (Port 587)',opt_smtp_ssl:'SSL/TLS (Port 465)',
-  btn_test_smtp:'Verbindung testen',
-  msg_smtp_saved:'SMTP-Einstellungen gespeichert',msg_smtp_test_ok:'SMTP-Verbindung erfolgreich',
-  hint_smtp_desc:'Wird für Benachrichtigungen über Zeitplan-Jobs verwendet. Empfänger pro Zeitplan konfigurierbar (demnächst).',
-  hint_sched_notify:'Sendet nach jedem Lauf dieses Protection Plans einen zusammengefassten Bericht (alle Datastores).',
-  sect_report:'Regelmäßiger Bericht',lbl_report_enabled:'Regelmäßigen Bericht senden',lbl_report_time:'Uhrzeit',
-  lbl_report_recipients:'Empfänger (kommagetrennt)',lbl_report_warn_pct:'Warnschwelle (%)',lbl_report_crit_pct:'Kritische Schwelle (%)',
-  hint_report_desc:'Nutzt die SMTP-Einstellungen oben. Wird an eine eigene Empfängerliste gesendet, unabhängig von den Protection-Plan-Benachrichtigungen.',
-  btn_test_report:'Testbericht jetzt senden',msg_report_saved:'Berichtseinstellungen gespeichert',msg_report_test_ok:'Testbericht gesendet',
-  provision_title:'Storage Provisioning',provision_desc:'Volumes (NFS, iSCSI, NVMe-oF) anlegen und automatisch an Proxmox anbinden – inkl. Vergrößern/Verkleinern. Demnächst verfügbar.',
-},
 en:{
   tab_snapshots:'Snapshots',tab_schedules:'Protection Plans',tab_jobs:'Jobs & Logs',tab_settings:'Settings',
   btn_create_snapshot:'+ Create Snapshot',btn_refresh:'Refresh',btn_start_snapshot:'Start Snapshot',
@@ -1855,8 +1728,7 @@ it:{
 
 function t(key) {
   return (_I18N[_LANG] && _I18N[_LANG][key]) ||
-         (_I18N['en'] && _I18N['en'][key]) ||
-         (_I18N['de'] && _I18N['de'][key]) || key;
+         (_I18N['en'] && _I18N['en'][key]) || key;
 }
 function tf(key) {
   var s = t(key);
@@ -8891,7 +8763,7 @@ function fmtDate(iso) {
   if (!iso) return '–';
   try {
     var locales = {de:'de-DE',en:'en-US',fr:'fr-FR',es:'es-ES',pt:'pt-BR',ko:'ko-KR',it:'it-IT'};
-    var loc = locales[_LANG] || 'de-DE';
+    var loc = locales[_LANG] || 'en-US';
     var d = new Date(iso);
     return d.toLocaleDateString(loc, _nsOpts()) + ' ' + d.toLocaleTimeString(loc,_nsOpts({hour:'2-digit',minute:'2-digit'}));
   } catch(e) { return iso; }
