@@ -531,8 +531,7 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
         "temp_iscsi_clone_vol_uuid":  "",
         "temp_iscsi_serial":          "",
         "igroup_uuid":                "",
-        "temp_ns_uuid":               "",
-        "subsystem_uuid":             "",
+        "nvme_clone_info":            {},
         "temp_vg_name":               "",
         "lv_name":                    lv_name,
     }
@@ -573,9 +572,7 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
             device = _fds(host, user, pw, key, temp_serial, timeout_s=60)
 
         elif protocol == "nvme":
-            from .san_helpers import nvme_list_devices, nvme_ns_rescan, find_new_nvme_device
-            log.info(f"[sfr-san] Cloning NVMe namespace from snapshot '{snap_name}' …")
-            devices_before = nvme_list_devices(host, user, pw, key)
+            from .san_helpers import nvme_clone_and_map_temp_subsystem
 
             namespaces = client.list_nvme_namespaces(svm_name=svm_name)
             main_ns = next(
@@ -591,29 +588,16 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
                 )
             if not main_ns:
                 raise RuntimeError(f"Cannot find NVMe namespace for volume {vol_uuid}")
-            main_ns_uuid  = main_ns["uuid"]
-            subsystem     = client.get_nvme_subsystem_for_namespace(main_ns_uuid, svm_name=svm_name)
-            if not subsystem:
-                raise RuntimeError("No NVMe subsystem found for main namespace")
-            subsystem_uuid = subsystem["uuid"]
-            san["subsystem_uuid"] = subsystem_uuid
+            main_ns_uuid = main_ns["uuid"]
 
-            temp_ns_uuid, ns_job = client.clone_namespace(
-                main_ns_uuid, snap_name, vol_name, clone_name, svm_name)
-            if ns_job:
-                client.poll_job(ns_job, interval_s=poll_ivl, timeout_s=poll_to)
-            if not temp_ns_uuid:
-                raise RuntimeError("clone_namespace returned no UUID")
-            san["temp_ns_uuid"] = temp_ns_uuid
-
-            clone_already_mapped = bool(
-                client.get_nvme_subsystem_for_namespace(temp_ns_uuid, svm_name=svm_name))
-            if not clone_already_mapped:
-                client.add_nvme_namespace_to_subsystem(subsystem_uuid, temp_ns_uuid, svm_name=svm_name)
-
-            nvme_ns_rescan(host, user, pw, key)
-            device = find_new_nvme_device(host, user, pw, key, devices_before, timeout_s=60)
-            san["nvme_device"] = device  # stored for host-side disconnect on cleanup
+            # Maps the clone to a brand-new, host-scoped subsystem — never the
+            # production one — so other hosts never see it, mirroring the
+            # temporary igroup the iSCSI branch above already uses.
+            nvme_clone_info = nvme_clone_and_map_temp_subsystem(
+                client, main_ns_uuid, snap_name, vol_name, clone_name, svm_name,
+                host, user, pw, key, token)
+            san["nvme_clone_info"] = nvme_clone_info
+            device = nvme_clone_info["device"]
         else:
             raise RuntimeError(f"Unsupported SAN protocol for SFR: {protocol}")
 
@@ -729,18 +713,7 @@ def _san_partial_cleanup(pve, client, san):
         from .san_helpers import cleanup_restore_vg
         _try(lambda: cleanup_restore_vg(host, user, pw, key, temp_vg))
 
-    if san.get("protocol") == "nvme":
-        nvme_device = san.get("nvme_device", "")
-        if nvme_device:
-            import re as _re
-            m = _re.match(r'(/dev/nvme\d+)', nvme_device)
-            if m:
-                ctrl = shlex.quote(m.group(1))
-                _try(lambda: ssh_run(host, user, pw,
-                                     f"timeout 15 nvme disconnect --device {ctrl} 2>/dev/null; true",
-                                     key_material=key, timeout=25))
-
-    _san_cleanup_ontap(client, san)
+    _san_cleanup_ontap(client, san, host, user, pw, key)
 
 
 def cleanup_san_state(pve, client, san_state):
@@ -777,35 +750,27 @@ def cleanup_san_state(pve, client, san_state):
         from .san_helpers import cleanup_restore_vg
         _try(lambda: cleanup_restore_vg(host, user, pw, key, temp_vg))
 
-    # Step 3: host-side protocol disconnect
+    # Step 3: host-side protocol disconnect (NVMe is handled by _san_cleanup_ontap
+    # below via nvme_clone_cleanup, which also removes the temp subsystem)
     protocol = san_state.get("protocol", "")
 
-    if protocol == "nvme":
-        # Disconnect the NVMe controller that served the clone namespace.
-        # We stored the device path at mount time; use it directly since the VG is gone.
-        nvme_device = san_state.get("nvme_device", "")
-        if nvme_device:
-            import re as _re
-            m = _re.match(r'(/dev/nvme\d+)', nvme_device)
-            if m:
-                ctrl = shlex.quote(m.group(1))
-                _try(lambda: ssh_run(host, user, pw,
-                                     f"timeout 15 nvme disconnect --device {ctrl} 2>/dev/null; true",
-                                     key_material=key, timeout=25))
-                log.info(f"[sfr-san] NVMe disconnect {m.group(1)} on {host}")
-
-    elif protocol == "iscsi":
+    if protocol == "iscsi":
         temp_iscsi_serial = san_state.get("temp_iscsi_serial", "")
         if temp_iscsi_serial:
             from .san_helpers import flush_iscsi_clone_device
             _try(lambda: flush_iscsi_clone_device(host, user, pw, key, temp_iscsi_serial))
 
     # Step 4: delete ONTAP clone (unmap + delete namespace/LUN + delete volume)
-    _san_cleanup_ontap(client, san_state)
+    _san_cleanup_ontap(client, san_state, host, user, pw, key)
 
 
-def _san_cleanup_ontap(client, san):
-    """Delete the ONTAP clone LUN/namespace and its volume (if applicable)."""
+def _san_cleanup_ontap(client, san, host="", user="", pw="", key=""):
+    """Delete the ONTAP clone LUN/namespace and its volume (if applicable).
+
+    For NVMe, host/user/pw/key are required — see san_helpers.nvme_clone_cleanup,
+    which also disconnects the PVE host's NVMe controller and removes the
+    temporary subsystem created for this clone.
+    """
     def _try(fn):
         try:
             fn()
@@ -826,12 +791,10 @@ def _san_cleanup_ontap(client, san):
             _try(lambda: client.delete_lun(lun_uuid))
 
     elif protocol == "nvme":
-        ns_uuid  = san.get("temp_ns_uuid", "")
-        sub_uuid = san.get("subsystem_uuid", "")
-        if ns_uuid and sub_uuid:
-            _try(lambda: client.remove_nvme_namespace_from_subsystem(sub_uuid, ns_uuid))
-        if ns_uuid:
-            _try(lambda: client.delete_namespace(ns_uuid))
+        nvme_clone_info = san.get("nvme_clone_info") or {}
+        if nvme_clone_info:
+            from .san_helpers import nvme_clone_cleanup
+            _try(lambda: nvme_clone_cleanup(client, nvme_clone_info, host, user, pw, key))
 
 
 # ── Browsing: snapshot ────────────────────────────────────────────────────────

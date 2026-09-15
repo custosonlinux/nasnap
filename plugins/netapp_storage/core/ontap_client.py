@@ -33,10 +33,6 @@ class OntapClient:
         if not ssl_verify:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        # Tracks FlexClone/CLI-bridge volumes created as namespace clone fallback.
-        # Keyed by clone namespace UUID; value is {"uuid": vol_uuid, "name": vol_name, "svm": svm}.
-        # delete_namespace() uses this to delete the whole volume instead of just the namespace.
-        self._clone_vol_for_ns: dict = {}
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -1247,7 +1243,22 @@ class OntapClient:
                         dest_volume_name, dest_ns_name, svm_name):
         """Clone an NVMe namespace from a snapshot (CoW).
 
-        Returns (clone_ns_uuid, job_uuid).
+        Returns (clone_ns_uuid, clone_vol_uuid, clone_vol_name, job_uuid).
+        clone_vol_uuid/clone_vol_name are "" for a real namespace-level clone
+        (plain REST path below), and set for the ASA fallback paths, where
+        the "namespace clone" is actually a whole cloned volume.
+        Callers MUST check clone_vol_uuid on cleanup — deleting just the
+        namespace on a volume-backed clone leaves the volume itself behind
+        (this used to be tracked in an in-memory, per-OntapClient-instance
+        cache, which lost the mapping across process restarts or whenever
+        cleanup ran through a freshly built client, leaving the volume
+        orphaned on the ASA with no error raised). Delete via
+        _delete_clone_volume(clone_vol_uuid, clone_vol_name, svm_name)
+        directly, passing the name/svm returned here — a fresh lookup by
+        UUID alone (as the generic delete_volume() does) was observed live
+        to sometimes return no name for a namespace-clone-backed volume,
+        silently skipping the CLI-bridge fallback delete needed on ASA.
+
         Falls back to FlexClone volume on ASA (POST protocols/nvme/namespaces → 404).
         Raises OntapError with a user-facing message when the platform supports neither.
         """
@@ -1265,26 +1276,30 @@ class OntapClient:
             resp = self._post("protocols/nvme/namespaces", body=body, params={"return_timeout": 15})
             ns_uuid  = resp.get("uuid", "")
             job_uuid = (resp.get("job") or {}).get("uuid", "")
-            return ns_uuid, job_uuid
+            return ns_uuid, "", "", job_uuid
         except OntapError as exc:
             if exc.status_code != 404:
                 raise
         log.info("[netapp_storage] protocols/nvme/namespaces POST → 404, trying FlexClone REST fallback")
         try:
-            return self._clone_namespace_flexvol(snap_name, dest_volume_name, dest_ns_name, svm_name)
+            ns_uuid, clone_vol_uuid, clone_vol_name = self._clone_namespace_flexvol(
+                snap_name, dest_volume_name, dest_ns_name, svm_name)
+            return ns_uuid, clone_vol_uuid, clone_vol_name, ""
         except OntapError as exc:
             if exc.status_code not in (405, 404):
                 raise
         log.info("[netapp_storage] FlexClone REST → 405, trying volume clone CLI bridge (ASA)")
-        return self._clone_namespace_via_cli_volume_clone(snap_name, dest_volume_name, dest_ns_name, svm_name, source_ns_uuid)
+        ns_uuid, clone_vol_uuid, clone_vol_name = self._clone_namespace_via_cli_volume_clone(
+            snap_name, dest_volume_name, dest_ns_name, svm_name, source_ns_uuid)
+        return ns_uuid, clone_vol_uuid, clone_vol_name, ""
 
     def _clone_namespace_flexvol(self, snap_name, src_volume_name, dest_ns_name, svm_name):
         """Fallback: clone NVMe namespace via FlexClone of the parent volume.
 
-        Creates a FlexClone of src_volume_name at snap_name, locates the namespace
-        inside the clone volume, and registers (ns_uuid → vol_uuid) in
-        self._clone_vol_for_ns so delete_namespace() deletes the whole volume.
-        Returns (clone_ns_uuid, "").
+        Creates a FlexClone of src_volume_name at snap_name and locates the
+        namespace inside the clone volume.
+        Returns (clone_ns_uuid, clone_vol_uuid, clone_vol_name) — the caller
+        must delete clone_vol_uuid (the whole volume), not just the namespace.
         """
         clone_vol_name = f"nsvol_{dest_ns_name}"[:64]
         log.info(f"[netapp_storage] FlexClone: {src_volume_name}@{snap_name} → {clone_vol_name}")
@@ -1315,9 +1330,8 @@ class OntapClient:
             loc = (ns.get("location") or {}).get("volume", {})
             if loc.get("uuid") == clone_vol_uuid or loc.get("name") == clone_vol_name:
                 ns_uuid = ns["uuid"]
-                self._clone_vol_for_ns[ns_uuid] = {"uuid": clone_vol_uuid, "name": clone_vol_name, "svm": svm_name}
                 log.info(f"[netapp_storage] FlexClone ns UUID: {ns_uuid} in vol {clone_vol_name}")
-                return ns_uuid, ""
+                return ns_uuid, clone_vol_uuid, clone_vol_name
 
         try:
             self._delete_clone_volume(clone_vol_uuid, clone_vol_name, svm_name)
@@ -1501,8 +1515,7 @@ class OntapClient:
                     break
 
         if ns_uuid:
-            self._clone_vol_for_ns[ns_uuid] = {"uuid": clone_vol_uuid, "name": clone_vol_name, "svm": svm_name}
-            return ns_uuid, ""
+            return ns_uuid, clone_vol_uuid, clone_vol_name
 
         try:
             self._delete_clone_volume(clone_vol_uuid, clone_vol_name, svm_name)
@@ -1552,20 +1565,14 @@ class OntapClient:
                     f"{clone_vol_uuid} ({clone_vol_name}) failed — manual cleanup needed on ONTAP")
 
     def delete_namespace(self, ns_uuid):
-        """Delete an NVMe namespace (or its CLI-bridge clone volume on ASA). Returns job UUID."""
-        clone_info = self._clone_vol_for_ns.pop(ns_uuid, None)
-        if clone_info:
-            if isinstance(clone_info, dict):
-                clone_vol_uuid = clone_info["uuid"]
-                clone_vol_name = clone_info.get("name", "")
-                svm_name       = clone_info.get("svm", "")
-            else:
-                clone_vol_uuid = clone_info  # legacy str path
-                clone_vol_name = ""
-                svm_name       = ""
-            log.info(f"[netapp_storage] Deleting clone volume {clone_vol_uuid} ({clone_vol_name}) for ns {ns_uuid}")
-            self._delete_clone_volume(clone_vol_uuid, clone_vol_name, svm_name)
-            return ""
+        """Delete a real (namespace-level) NVMe namespace. Returns job UUID.
+
+        Only valid when clone_namespace() returned "" for clone_vol_uuid —
+        a FlexClone-volume-backed clone (the ASA fallback paths) must be
+        removed via delete_volume(clone_vol_uuid) instead, or the backing
+        volume is left behind while this call only removes the namespace
+        object on top of it.
+        """
         try:
             resp = self._delete(f"protocols/nvme/namespaces/{ns_uuid}",
                                 params={"return_timeout": 0})
@@ -1884,9 +1891,17 @@ class OntapClient:
             log.warning(f"[netapp_storage] remove NVMe host from subsystem: {exc}")
 
     def delete_nvme_subsystem(self, subsystem_uuid):
-        """Deletes an NVMe subsystem."""
+        """Deletes an NVMe subsystem, including any hosts still added to it.
+
+        Without allow_delete_with_hosts, ONTAP refuses with 409 ("contains
+        one or more NVMe hosts") — every subsystem this app creates has a
+        host added right after creation (see add_nvme_host_to_subsystem),
+        so the plain DELETE always hit that 409 and left the subsystem
+        behind, verified live against ASA.
+        """
         try:
-            self._delete(f"protocols/nvme/subsystems/{subsystem_uuid}")
+            self._delete(f"protocols/nvme/subsystems/{subsystem_uuid}",
+                         params={"allow_delete_with_hosts": "true"})
         except OntapError as exc:
             log.warning(f"[netapp_storage] delete NVMe subsystem: {exc}")
 

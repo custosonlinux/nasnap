@@ -4,6 +4,11 @@ Clone API
   clone/start    POST  – start clone job
   clone/nextid   GET   – next free VMID from PVE
   clone/nodes    GET   – available PVE nodes for a mapping
+  clone/orphan-san-clones        GET  – scan ONTAP for leftover temporary SAN
+                                         clone objects (volumes / NVMe
+                                         subsystems / iSCSI igroups) from
+                                         Clone, Single-VM Restore and SFR
+  clone/orphan-san-clones/delete POST – delete one, after explicit admin review
 """
 
 import uuid
@@ -257,9 +262,151 @@ def _start_dr_clone():
     return {"success": True, "job_id": job_id}
 
 
+# ── Orphan scan: leftover temp SAN clone objects ────────────────────────────
+#
+# Clone, Single-VM Restore and SFR all create short-lived ONTAP objects under
+# these name prefixes (see clone_engine.py, restore_engine.py, sfr_engine.py)
+# and are supposed to remove them again within the same run. Unlike Instant
+# Recovery, none of these features has a persistent "session" row for most of
+# its lifetime, so anything still here that isn't tied to a currently-running
+# job (or, for SFR, a currently-open session) has outlived its purpose.
+
+_SAN_CLONE_VOL_PREFIXES    = ("nsclone_", "nsvol_nsclone_", "nasnap_sfr_", "nsvol_nasnap_sfr_")
+_SAN_CLONE_SUBSYSTEM_PREFIX = "nsclone-"
+_SAN_CLONE_IGROUP_PREFIX    = "nsclone-"
+
+
+def _job_id_prefix_still_running(db, name, marker):
+    """True if `name` embeds a still-'running' netapp_jobs id prefix right
+    after `marker` — e.g. 'nsclone_ab12cd34' -> job id starting 'ab12cd34'."""
+    token = name.split(marker, 1)[1][:8] if marker in name else ""
+    if len(token) < 8:
+        return False
+    return bool(db.query_one(
+        "SELECT 1 FROM netapp_jobs WHERE status='running' AND id LIKE ?", (token + "%",)))
+
+
+def _sfr_session_active_for(db, name):
+    """True if any open SFR session's persisted san_state JSON references this
+    clone/subsystem name — SFR sessions can legitimately stay mounted far
+    longer than a single job run."""
+    if not name:
+        return False
+    rows = db.query("SELECT san_state FROM netapp_sfr_sessions") or []
+    return any(name in (dict(r).get("san_state") or "") for r in rows)
+
+
+def _scan_orphan_san_clones():
+    """Scans every ONTAP endpoint for leftover temporary SAN clone objects
+    (volumes / NVMe subsystems / iSCSI igroups) that no in-flight job or open
+    SFR session still needs. Read-only; deletion is a separate, explicit,
+    per-object step so a same-prefixed object created outside NaSnap can't be
+    deleted by accident.
+    """
+    err = _require_admin()
+    if err:
+        return err
+    from ..core._helpers import get_endpoint, build_ontap_client
+
+    db = get_db()
+    endpoints = db.query("SELECT id, name FROM netapp_endpoints") or []
+    orphans = []
+    for ep_row in endpoints:
+        ep = dict(ep_row)
+        try:
+            endpoint = get_endpoint(db, ep["id"])
+            client = build_ontap_client(endpoint)
+        except Exception as exc:
+            log.warning(f"[netapp_storage] orphan-san-clone scan: endpoint '{ep['name']}': {exc}")
+            continue
+
+        def _add(kind, uuid_, name, svm_name):
+            orphans.append({
+                "endpoint_id": ep["id"], "endpoint_name": ep["name"],
+                "svm_name": svm_name, "kind": kind, "uuid": uuid_, "name": name,
+            })
+
+        try:
+            for v in client.get_volumes() or []:
+                name, uuid_ = v.get("name", ""), v.get("uuid", "")
+                if not uuid_ or not name.startswith(_SAN_CLONE_VOL_PREFIXES):
+                    continue
+                marker = next(p for p in _SAN_CLONE_VOL_PREFIXES if name.startswith(p))
+                if _job_id_prefix_still_running(db, name, marker) or _sfr_session_active_for(db, name):
+                    continue
+                _add("volume", uuid_, name, (v.get("svm") or {}).get("name", ""))
+        except Exception as exc:
+            log.warning(f"[netapp_storage] orphan-san-clone scan volumes: endpoint '{ep['name']}': {exc}")
+
+        try:
+            for s in client.list_nvme_subsystems() or []:
+                name, uuid_ = s.get("name", ""), s.get("uuid", "")
+                if not uuid_ or not name.startswith(_SAN_CLONE_SUBSYSTEM_PREFIX):
+                    continue
+                if (_job_id_prefix_still_running(db, name, _SAN_CLONE_SUBSYSTEM_PREFIX)
+                        or _sfr_session_active_for(db, name)):
+                    continue
+                _add("nvme_subsystem", uuid_, name, (s.get("svm") or {}).get("name", ""))
+        except Exception as exc:
+            log.warning(f"[netapp_storage] orphan-san-clone scan subsystems: endpoint '{ep['name']}': {exc}")
+
+        try:
+            for ig in client.list_igroups() or []:
+                name, uuid_ = ig.get("name", ""), ig.get("uuid", "")
+                if not uuid_ or not name.startswith(_SAN_CLONE_IGROUP_PREFIX):
+                    continue
+                if _job_id_prefix_still_running(db, name, _SAN_CLONE_IGROUP_PREFIX):
+                    continue
+                _add("iscsi_igroup", uuid_, name, (ig.get("svm") or {}).get("name", ""))
+        except Exception as exc:
+            log.warning(f"[netapp_storage] orphan-san-clone scan igroups: endpoint '{ep['name']}': {exc}")
+
+    return {"orphans": orphans}
+
+
+def _delete_orphan_san_clone():
+    """Deletes a single orphaned SAN clone object (volume / NVMe subsystem /
+    iSCSI igroup) by uuid, only after the admin has reviewed and explicitly
+    confirmed it in the UI."""
+    err = _require_admin()
+    if err:
+        return err
+    data        = request.get_json() or {}
+    endpoint_id = data.get("endpoint_id", "")
+    kind        = data.get("kind", "")
+    uuid_       = data.get("uuid", "")
+    name        = data.get("name", "")
+    svm_name    = data.get("svm_name", "")
+    if not endpoint_id or not kind or not uuid_:
+        return {"error": "endpoint_id, kind and uuid required"}, 400
+
+    from ..core._helpers import get_endpoint, build_ontap_client
+    db = get_db()
+    try:
+        endpoint = get_endpoint(db, endpoint_id)
+        client = build_ontap_client(endpoint)
+        if kind == "volume":
+            try:
+                client.unmount_volume(uuid_)
+            except Exception:
+                pass
+            client._delete_clone_volume(uuid_, name, svm_name)
+        elif kind == "nvme_subsystem":
+            client.delete_nvme_subsystem(uuid_)
+        elif kind == "iscsi_igroup":
+            client.delete_igroup(uuid_)
+        else:
+            return {"error": f"Unknown kind '{kind}'"}, 400
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+    return {"success": True}
+
+
 def register_routes():
     register_plugin_route(PLUGIN_ID, "clone/start",      _start_clone)
     register_plugin_route(PLUGIN_ID, "clone/start-live", _start_clone_live)
     register_plugin_route(PLUGIN_ID, "clone/dr-start",   _start_dr_clone)
     register_plugin_route(PLUGIN_ID, "clone/nextid",     _get_nextid)
+    register_plugin_route(PLUGIN_ID, "clone/orphan-san-clones",        _scan_orphan_san_clones)
+    register_plugin_route(PLUGIN_ID, "clone/orphan-san-clones/delete", _delete_orphan_san_clone)
     register_plugin_route(PLUGIN_ID, "clone/nodes",      _get_nodes)

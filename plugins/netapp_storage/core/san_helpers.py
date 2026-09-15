@@ -1163,6 +1163,153 @@ def nvme_disconnect_by_subsystem_name(ssh_host, ssh_user, ssh_pass, ssh_key, sub
         log.warning(f"[netapp_storage] nvme_disconnect_by_subsystem_name {ssh_host}: {exc}")
 
 
+# ── NVMe-oF: temp-subsystem clone lifecycle (Clone / Single-VM Restore / SFR) ─
+
+def nvme_clone_and_map_temp_subsystem(client, main_ns_uuid, snap_name, vol_name,
+                                       clone_name, svm_name,
+                                       ssh_host, ssh_user, ssh_pass, ssh_key,
+                                       job_id, jlog=None):
+    """Clones an NVMe namespace from a snapshot and maps it to a brand-new,
+    host-scoped NVMe subsystem — mirrors the isolation the iSCSI clone path
+    already gets via a temporary igroup, so other hosts sharing the
+    production subsystem never see the clone.
+
+    On ASA, clone_namespace()'s CLI-bridge fallback needs to map the clone
+    into the SOURCE's subsystem just to be able to discover its UUID at all
+    (see ontap_client._clone_namespace_via_cli_volume_clone) — this function
+    undoes that mapping immediately after discovery, before mapping the
+    clone into the new temp subsystem instead.
+
+    Returns a dict — pass it to nvme_clone_cleanup() for teardown, including
+    on partial failure (whatever fields got set before the exception):
+      device:          block device path on ssh_host once found
+      ns_uuid:         clone namespace uuid
+      clone_vol_uuid, clone_vol_name, svm_name: '' unless the clone is backed
+                       by a whole FlexClone volume (ASA fallback) — see
+                       clone_namespace(). clone_vol_name/svm_name must be
+                       used for the delete, not a fresh lookup by uuid alone
+                       — that was observed live to sometimes return no name
+                       for this kind of volume, silently skipping the
+                       CLI-bridge fallback delete needed on ASA.
+      subsystem_uuid, subsystem_name: the new temp subsystem
+
+    Raises RuntimeError/OntapError on failure.
+    """
+    def _log(msg):
+        log.info(f"[netapp_storage] {msg}")
+        if jlog:
+            jlog.log(msg)
+
+    info = {"device": "", "ns_uuid": "", "clone_vol_uuid": "", "clone_vol_name": "",
+            "svm_name": svm_name, "subsystem_uuid": "", "subsystem_name": ""}
+
+    devices_before = nvme_list_devices(ssh_host, ssh_user, ssh_pass, ssh_key)
+
+    _log(f"Cloning NVMe namespace from snapshot '{snap_name}' …")
+    ns_uuid, clone_vol_uuid, clone_vol_name, ns_job = client.clone_namespace(
+        main_ns_uuid, snap_name, vol_name, clone_name, svm_name)
+    if ns_job:
+        client.poll_job(ns_job, interval_s=3, timeout_s=300)
+    if not ns_uuid:
+        raise RuntimeError("clone_namespace returned no UUID — check ONTAP logs")
+    info["ns_uuid"], info["clone_vol_uuid"], info["clone_vol_name"] = ns_uuid, clone_vol_uuid, clone_vol_name
+
+    existing = client.get_nvme_subsystem_for_namespace(ns_uuid, svm_name=svm_name)
+    if existing and existing.get("uuid"):
+        _log(f"Clone namespace was auto-mapped to '{existing.get('name')}' — unmapping for isolation …")
+        client.remove_nvme_namespace_from_subsystem(existing["uuid"], ns_uuid)
+
+    host_nqn = get_nvme_host_nqn(ssh_host, ssh_user, ssh_pass, ssh_key)
+    if not host_nqn:
+        raise RuntimeError(f"Cannot determine NVMe host NQN of {ssh_host}")
+
+    subsystem_name = f"nsclone-{job_id[:8]}"
+    _log(f"Creating temporary NVMe subsystem '{subsystem_name}' for {ssh_host} only …")
+    subsystem_uuid = client.create_nvme_subsystem(svm_name, subsystem_name)
+    info["subsystem_uuid"], info["subsystem_name"] = subsystem_uuid, subsystem_name
+    client.add_nvme_host_to_subsystem(subsystem_uuid, host_nqn)
+    client.add_nvme_namespace_to_subsystem(subsystem_uuid, ns_uuid, svm_name=svm_name)
+
+    sub_info      = client.get_nvme_subsystem(subsystem_uuid)
+    subsystem_nqn = sub_info.get("target_nqn", "")
+    lif_ips       = [ip for ip in client.get_nvme_lifs_for_svm(svm_name) if ip]
+    if subsystem_nqn and lif_ips:
+        _log(f"Connecting {ssh_host} to clone subsystem via {lif_ips} …")
+        nvme_connect_to_subsystem(ssh_host, ssh_user, ssh_pass, ssh_key, lif_ips, subsystem_nqn)
+    else:
+        _log("WARNING: subsystem NQN/LIF unavailable — waiting for auto-discovery")
+
+    _log("Waiting for clone namespace device …")
+    info["device"] = find_new_nvme_device(ssh_host, ssh_user, ssh_pass, ssh_key,
+                                          devices_before, timeout_s=60)
+    return info
+
+
+def nvme_clone_cleanup(client, clone_info, ssh_host, ssh_user, ssh_pass, ssh_key, jlog=None):
+    """Best-effort teardown of everything nvme_clone_and_map_temp_subsystem
+    created — including a partially-filled clone_info from a job that failed
+    partway through, so a clone that got as far as being mapped still gets
+    disconnected/unmapped/deleted instead of silently orphaned.
+
+    Every step is independent (its own try/except) so one failure never
+    skips the rest — unlike delegating the whole sequence to a single
+    delete_namespace() call, which used to abort the entire cleanup (and
+    leave the clone volume behind) the moment any one ONTAP call failed.
+    Never raises.
+    """
+    def _log(msg):
+        log.info(f"[netapp_storage] {msg}")
+        if jlog:
+            jlog.log(msg)
+
+    ns_uuid        = clone_info.get("ns_uuid", "")
+    clone_vol_uuid = clone_info.get("clone_vol_uuid", "")
+    clone_vol_name = clone_info.get("clone_vol_name", "")
+    clone_svm_name = clone_info.get("svm_name", "")
+    subsystem_uuid = clone_info.get("subsystem_uuid", "")
+    subsystem_name = clone_info.get("subsystem_name", "")
+
+    if subsystem_name and ssh_host:
+        try:
+            nvme_disconnect_by_subsystem_name(ssh_host, ssh_user, ssh_pass, ssh_key, subsystem_name)
+        except Exception as exc:
+            log.warning(f"[netapp_storage] nvme clone cleanup: host disconnect failed: {exc}")
+
+    if ns_uuid and subsystem_uuid:
+        try:
+            client.remove_nvme_namespace_from_subsystem(subsystem_uuid, ns_uuid)
+        except Exception as exc:
+            log.warning(f"[netapp_storage] nvme clone cleanup: unmap failed: {exc}")
+
+    if clone_vol_uuid:
+        try:
+            client.unmount_volume(clone_vol_uuid)
+        except Exception:
+            pass
+        try:
+            # Deletes via the name/svm captured at clone time, not a fresh
+            # lookup by uuid alone (delete_volume()'s own fallback does that,
+            # and it was observed live to sometimes come back empty for this
+            # kind of volume — see nvme_clone_and_map_temp_subsystem).
+            client._delete_clone_volume(clone_vol_uuid, clone_vol_name, clone_svm_name)
+            _log("Clone volume removed.")
+        except Exception as exc:
+            log.warning(f"[netapp_storage] nvme clone cleanup: delete clone volume failed: {exc}")
+    elif ns_uuid:
+        try:
+            client.delete_namespace(ns_uuid)
+            _log("Clone namespace removed.")
+        except Exception as exc:
+            log.warning(f"[netapp_storage] nvme clone cleanup: delete namespace failed: {exc}")
+
+    if subsystem_uuid:
+        try:
+            client.delete_nvme_subsystem(subsystem_uuid)
+            _log("Temp NVMe subsystem removed.")
+        except Exception as exc:
+            log.warning(f"[netapp_storage] nvme clone cleanup: delete subsystem failed: {exc}")
+
+
 def vg_rescan_and_activate(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name):
     """Rescans PVs and activates the VG (after volume revert on ONTAP).
 

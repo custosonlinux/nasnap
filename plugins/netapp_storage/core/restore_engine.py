@@ -570,9 +570,14 @@ def _run_restore_nfs_revert(job_id, params, username):
 
 def _cleanup_san_clone(client, protocol,
                        temp_lun_uuid, igroup_uuid,
-                       temp_ns_uuid, subsystem_uuid,
+                       nvme_clone_info, pve_host="", pve_user="", pve_pass="", pve_key="",
                        temp_iscsi_clone_vol_uuid="", jlog=None):
-    """Unmaps and deletes a temporary clone LUN/volume or namespace."""
+    """Unmaps and deletes a temporary clone LUN/volume or namespace.
+
+    nvme_clone_info: dict from san_helpers.nvme_clone_and_map_temp_subsystem
+    (possibly partially filled, if the clone failed partway through) — pass
+    {} when protocol != "nvme".
+    """
     if protocol == "iscsi" and temp_lun_uuid:
         if igroup_uuid:
             try:
@@ -593,18 +598,9 @@ def _cleanup_san_clone(client, protocol,
                     jlog.log("Clone LUN removed.")
             except Exception as exc:
                 log.warning(f"[netapp_storage] delete clone LUN: {exc}")
-    elif protocol == "nvme" and temp_ns_uuid:
-        if subsystem_uuid:
-            try:
-                client.remove_nvme_namespace_from_subsystem(subsystem_uuid, temp_ns_uuid)
-            except Exception as exc:
-                log.warning(f"[netapp_storage] unmap clone NS: {exc}")
-        try:
-            client.delete_namespace(temp_ns_uuid)
-            if jlog:
-                jlog.log("Clone namespace removed.")
-        except Exception as exc:
-            log.warning(f"[netapp_storage] delete clone namespace: {exc}")
+    elif protocol == "nvme" and nvme_clone_info:
+        from .san_helpers import nvme_clone_cleanup
+        nvme_clone_cleanup(client, nvme_clone_info, pve_host, pve_user, pve_pass, pve_key, jlog=jlog)
 
 
 def _run_restore_san_single(job_id, params, username):
@@ -629,12 +625,11 @@ def _run_restore_san_single(job_id, params, username):
     vmid           = int(params["vmid"])
 
     temp_lun_uuid             = ""
-    temp_ns_uuid              = ""
+    nvme_clone_info           = {}
     temp_iscsi_clone_vol_uuid = ""
     temp_iscsi_serial         = ""
     temp_vg_name              = ""
     igroup_uuid               = ""
-    subsystem_uuid            = ""
     pve_host       = ""
     pve_user       = "root"
     pve_pass       = ""
@@ -727,12 +722,7 @@ def _run_restore_san_single(job_id, params, username):
                 pve_host, pve_user, pve_pass, pve_key, temp_serial, timeout_s=60)
 
         elif protocol == "nvme":
-            jlog.log(f"Cloning NVMe namespace from snapshot '{snap_name}' …")
-            from .san_helpers import nvme_list_devices, nvme_ns_rescan, find_new_nvme_device
-            # Snapshot of host devices taken before clone creation — the clone namespace
-            # may already be subsystem-mapped when clone_namespace() returns (CLI bridge path),
-            # so we must capture the baseline before the namespace appears on the host.
-            devices_before = nvme_list_devices(pve_host, pve_user, pve_pass, pve_key)
+            from .san_helpers import nvme_clone_and_map_temp_subsystem
 
             namespaces = client.list_nvme_namespaces(svm_name=svm_name)
             main_ns = next(
@@ -752,35 +742,13 @@ def _run_restore_san_single(job_id, params, username):
                     f"Cannot find NVMe namespace for volume {vol_uuid} — re-run discovery")
             main_ns_uuid = main_ns["uuid"]
 
-            subsystem = client.get_nvme_subsystem_for_namespace(main_ns_uuid, svm_name=svm_name)
-            if not subsystem:
-                raise RuntimeError("No NVMe subsystem found for main namespace")
-            subsystem_uuid = subsystem["uuid"]
-
-            temp_ns_uuid, ns_job = client.clone_namespace(
-                main_ns_uuid, snap_name, vol_name, temp_clone_name, svm_name)
-            if ns_job:
-                client.poll_job(ns_job,
-                                interval_s=poll_cfg.get("job_poll_interval_s", 3),
-                                timeout_s=poll_cfg.get("job_poll_timeout_s", 300))
-            if not temp_ns_uuid:
-                raise RuntimeError("clone_namespace returned no UUID — check ONTAP logs")
-
-            # On ASA, volume clone inherits the parent's subsystem mappings — the clone
-            # namespace is already visible in the subsystem. Skip mapping in that case.
-            clone_already_mapped = bool(
-                client.get_nvme_subsystem_for_namespace(temp_ns_uuid, svm_name=svm_name))
-            if clone_already_mapped:
-                jlog.log("Clone namespace already in subsystem (ASA volume clone) …")
-            else:
-                jlog.log("Mapping clone namespace to NVMe subsystem …")
-                client.add_nvme_namespace_to_subsystem(subsystem_uuid, temp_ns_uuid, svm_name=svm_name)
-
-            jlog.log("Rescanning NVMe controllers …")
-            nvme_ns_rescan(pve_host, pve_user, pve_pass, pve_key)
-            jlog.log("Waiting for clone namespace device …")
-            device = find_new_nvme_device(
-                pve_host, pve_user, pve_pass, pve_key, devices_before, timeout_s=60)
+            # Maps the clone to a brand-new, host-scoped subsystem — never the
+            # production one — so other hosts never see it, mirroring the
+            # temporary igroup the iSCSI branch above already uses.
+            nvme_clone_info = nvme_clone_and_map_temp_subsystem(
+                client, main_ns_uuid, snap_name, vol_name, temp_clone_name, svm_name,
+                pve_host, pve_user, pve_pass, pve_key, job_id, jlog=jlog)
+            device = nvme_clone_info["device"]
         else:
             raise RuntimeError(f"Unsupported SAN protocol for single restore: {protocol}")
 
@@ -845,12 +813,13 @@ def _run_restore_san_single(job_id, params, username):
         jlog.log("Removing temporary clone LUN/namespace …")
         _cleanup_san_clone(client, protocol,
                            temp_lun_uuid, igroup_uuid,
-                           temp_ns_uuid, subsystem_uuid,
+                           nvme_clone_info, pve_host, pve_user, pve_pass, pve_key,
                            temp_iscsi_clone_vol_uuid, jlog)
         if protocol == "iscsi" and temp_iscsi_serial and pve_host:
             from .san_helpers import flush_iscsi_clone_device
             flush_iscsi_clone_device(pve_host, pve_user, pve_pass, pve_key, temp_iscsi_serial)
-        temp_lun_uuid = temp_ns_uuid = temp_iscsi_clone_vol_uuid = temp_iscsi_serial = ""
+        temp_lun_uuid = temp_iscsi_clone_vol_uuid = temp_iscsi_serial = ""
+        nvme_clone_info = {}
         _set_progress(db, job_id, 88)
 
         # After clone cleanup the NVMe device disappears; refresh LVM so the
@@ -876,11 +845,11 @@ def _run_restore_san_single(job_id, params, username):
                 cleanup_restore_vg(pve_host, pve_user, pve_pass, pve_key, temp_vg_name)
             except Exception as ce:
                 log.warning(f"[netapp_storage] single restore cancel cleanup VG failed: {ce}")
-        if client and (temp_lun_uuid or temp_ns_uuid or temp_iscsi_clone_vol_uuid):
+        if client and (temp_lun_uuid or nvme_clone_info or temp_iscsi_clone_vol_uuid):
             try:
                 _cleanup_san_clone(client, protocol,
                                    temp_lun_uuid, igroup_uuid,
-                                   temp_ns_uuid, subsystem_uuid,
+                                   nvme_clone_info, pve_host, pve_user, pve_pass, pve_key,
                                    temp_iscsi_clone_vol_uuid)
             except Exception as ce:
                 log.warning(f"[netapp_storage] single restore cancel cleanup clone failed: {ce}")
@@ -902,11 +871,11 @@ def _run_restore_san_single(job_id, params, username):
                 cleanup_restore_vg(pve_host, pve_user, pve_pass, pve_key, temp_vg_name)
             except Exception as ce:
                 log.warning(f"[netapp_storage] single restore cleanup VG failed: {ce}")
-        if client and (temp_lun_uuid or temp_ns_uuid or temp_iscsi_clone_vol_uuid):
+        if client and (temp_lun_uuid or nvme_clone_info or temp_iscsi_clone_vol_uuid):
             try:
                 _cleanup_san_clone(client, protocol,
                                    temp_lun_uuid, igroup_uuid,
-                                   temp_ns_uuid, subsystem_uuid,
+                                   nvme_clone_info, pve_host, pve_user, pve_pass, pve_key,
                                    temp_iscsi_clone_vol_uuid)
             except Exception as ce:
                 log.warning(f"[netapp_storage] single restore cleanup clone failed: {ce}")
