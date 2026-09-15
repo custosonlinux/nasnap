@@ -266,10 +266,13 @@ def _start_dr_clone():
 #
 # Clone, Single-VM Restore and SFR all create short-lived ONTAP objects under
 # these name prefixes (see clone_engine.py, restore_engine.py, sfr_engine.py)
-# and are supposed to remove them again within the same run. Unlike Instant
-# Recovery, none of these features has a persistent "session" row for most of
-# its lifetime, so anything still here that isn't tied to a currently-running
-# job (or, for SFR, a currently-open session) has outlived its purpose.
+# and are supposed to remove them again within the same run — anything still
+# here that isn't tied to a currently-running job (or, for SFR, a currently-
+# open session) has outlived its purpose. NVMe Instant Recovery sessions
+# share the exact same temp-subsystem naming (san_helpers.
+# nvme_clone_and_map_temp_subsystem is used by all four features) but, unlike
+# the other three, are meant to live for days — checked against
+# netapp_instant_recovery_sessions instead of a job status.
 
 _SAN_CLONE_VOL_PREFIXES    = ("nsclone_", "nsvol_nsclone_", "nasnap_sfr_", "nsvol_nasnap_sfr_")
 _SAN_CLONE_SUBSYSTEM_PREFIX = "nsclone-"
@@ -293,6 +296,19 @@ def _sfr_session_active_for(db, name):
     if not name:
         return False
     rows = db.query("SELECT san_state FROM netapp_sfr_sessions") or []
+    return any(name in (dict(r).get("san_state") or "") for r in rows)
+
+
+def _ir_session_active_for(db, name):
+    """True if any non-terminal NVMe Instant Recovery session's persisted
+    san_state JSON references this subsystem name — these sessions are
+    meant to stay open for days, far longer than a single job run."""
+    if not name:
+        return False
+    rows = db.query(
+        "SELECT san_state FROM netapp_instant_recovery_sessions "
+        "WHERE protocol='nvme' AND status IN ('running','migrating','discarding')"
+    ) or []
     return any(name in (dict(r).get("san_state") or "") for r in rows)
 
 
@@ -344,7 +360,8 @@ def _scan_orphan_san_clones():
                 if not uuid_ or not name.startswith(_SAN_CLONE_SUBSYSTEM_PREFIX):
                     continue
                 if (_job_id_prefix_still_running(db, name, _SAN_CLONE_SUBSYSTEM_PREFIX)
-                        or _sfr_session_active_for(db, name)):
+                        or _sfr_session_active_for(db, name)
+                        or _ir_session_active_for(db, name)):
                     continue
                 _add("nvme_subsystem", uuid_, name, (s.get("svm") or {}).get("name", ""))
         except Exception as exc:

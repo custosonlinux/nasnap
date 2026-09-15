@@ -383,6 +383,8 @@ CREATE TABLE IF NOT EXISTS netapp_instant_recovery_sessions (
     clone_volume_name TEXT NOT NULL DEFAULT '',
     junction_path     TEXT NOT NULL DEFAULT '',
     ad_hoc_snapshot   INTEGER NOT NULL DEFAULT 0,
+    protocol          TEXT NOT NULL DEFAULT 'nfs',
+    san_state         TEXT NOT NULL DEFAULT '',
     status            TEXT NOT NULL DEFAULT 'running',
     error             TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL DEFAULT '',

@@ -593,11 +593,10 @@ def mount_san_disk(pve, client, mapping, snap_name, vmid, lv_name, session_id):
             # Maps the clone to a brand-new, host-scoped subsystem — never the
             # production one — so other hosts never see it, mirroring the
             # temporary igroup the iSCSI branch above already uses.
-            nvme_clone_info = nvme_clone_and_map_temp_subsystem(
+            nvme_clone_and_map_temp_subsystem(
                 client, main_ns_uuid, snap_name, vol_name, clone_name, svm_name,
-                host, user, pw, key, token)
-            san["nvme_clone_info"] = nvme_clone_info
-            device = nvme_clone_info["device"]
+                host, user, pw, key, token, out=san["nvme_clone_info"])
+            device = san["nvme_clone_info"]["device"]
         else:
             raise RuntimeError(f"Unsupported SAN protocol for SFR: {protocol}")
 

@@ -646,6 +646,34 @@ def vg_import_clone(ssh_host, ssh_user, ssh_pass, ssh_key, device, base_vg_name)
     return actual
 
 
+def clear_stale_dm_entries(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name):
+    """Deactivates vg_name and force-removes any leftover device-mapper
+    entries under its name prefix — the same defensive cleanup
+    vg_import_clone() already does once right after import (see its comment
+    on udev auto-activation racing the UUID change), but callable again
+    later.
+
+    Needed for Instant Recovery specifically: unlike Clone/Restore-single,
+    which activate+dd-copy the LV themselves right after import, Instant
+    Recovery does nothing between import and registering the clone VG as a
+    PVE storage (pvesm add) — and `qm rescan`/`qm start` afterwards can
+    trigger udev to re-activate the VG under a stale mapping again, which
+    then makes PVE's own disk-attach activation fail with "device-mapper:
+    create ioctl ... failed: Device or resource busy" (observed live against
+    ucnlabasa01 — the VM's config and disk were both fine, only the LV
+    activation at boot time failed).
+    """
+    vg_q = shlex.quote(vg_name)
+    ssh_run(ssh_host, ssh_user, ssh_pass,
+            f"vgchange -an {vg_q} 2>/dev/null; udevadm settle --timeout=3 2>/dev/null; true",
+            key_material=ssh_key)
+    ssh_run(ssh_host, ssh_user, ssh_pass,
+            f"dmsetup ls 2>/dev/null | awk '{{print $1}}' | "
+            f"grep '^{vg_name}-' | "
+            f"xargs -r -I{{}} dmsetup remove --force {{}} 2>/dev/null; true",
+            key_material=ssh_key)
+
+
 def activate_lv_for_restore(ssh_host, ssh_user, ssh_pass, ssh_key,
                               vg_name, lv_name, lvm_type, pool_name=""):
     """Activates an LV (and thin pool if needed) for restore access.
@@ -715,6 +743,14 @@ def cleanup_restore_vg(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name):
     and deleted via ONTAP API afterwards.
     vgremove -f is needed to release dm UUIDs — without it
     a subsequent vgimportclone fails with "Device or resource busy".
+
+    Also force-clears any leftover dm-mapper entry under this VG's name
+    prefix afterwards (see clear_stale_dm_entries) — vgremove alone doesn't
+    reliably clear a dm entry left "Open count: 1" by an interrupted
+    activation attempt (observed live: a VM whose Instant Recovery boot
+    failed left the LV's dm device behind even after vgremove -f, which
+    then made the *next* clone using the same VG/LV name fail with
+    "device-mapper: create ioctl ... Device or resource busy" at qm start).
     """
     vg_q = shlex.quote(vg_name)
     try:
@@ -724,6 +760,10 @@ def cleanup_restore_vg(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name):
         log.info(f"[netapp_storage] restore VG '{vg_name}' removed")
     except Exception as exc:
         log.warning(f"[netapp_storage] VG cleanup {vg_name} failed: {exc}")
+    try:
+        clear_stale_dm_entries(ssh_host, ssh_user, ssh_pass, ssh_key, vg_name)
+    except Exception as exc:
+        log.warning(f"[netapp_storage] stale dm cleanup for {vg_name} failed: {exc}")
 
 
 # ── SAN-Restore: VG deaktivieren / reaktivieren ───────────────────────────────
@@ -1168,7 +1208,7 @@ def nvme_disconnect_by_subsystem_name(ssh_host, ssh_user, ssh_pass, ssh_key, sub
 def nvme_clone_and_map_temp_subsystem(client, main_ns_uuid, snap_name, vol_name,
                                        clone_name, svm_name,
                                        ssh_host, ssh_user, ssh_pass, ssh_key,
-                                       job_id, jlog=None):
+                                       job_id, jlog=None, out=None):
     """Clones an NVMe namespace from a snapshot and maps it to a brand-new,
     host-scoped NVMe subsystem — mirrors the isolation the iSCSI clone path
     already gets via a temporary igroup, so other hosts sharing the
@@ -1180,8 +1220,16 @@ def nvme_clone_and_map_temp_subsystem(client, main_ns_uuid, snap_name, vol_name,
     undoes that mapping immediately after discovery, before mapping the
     clone into the new temp subsystem instead.
 
-    Returns a dict — pass it to nvme_clone_cleanup() for teardown, including
-    on partial failure (whatever fields got set before the exception):
+    out: an existing dict to fill in place, instead of a fresh one — pass
+    the SAME dict the caller will later hand to nvme_clone_cleanup(), so
+    that a partial failure here (e.g. clone created but device discovery
+    times out) still leaves the caller's dict populated with whatever did
+    get created. A fresh local dict discarded on exception would otherwise
+    orphan those objects — the caller never even learns their identifiers
+    to clean them up.
+
+    Returns the dict (same object as `out`, if given) — pass it to
+    nvme_clone_cleanup() for teardown:
       device:          block device path on ssh_host once found
       ns_uuid:         clone namespace uuid
       clone_vol_uuid, clone_vol_name, svm_name: '' unless the clone is backed
@@ -1200,8 +1248,9 @@ def nvme_clone_and_map_temp_subsystem(client, main_ns_uuid, snap_name, vol_name,
         if jlog:
             jlog.log(msg)
 
-    info = {"device": "", "ns_uuid": "", "clone_vol_uuid": "", "clone_vol_name": "",
-            "svm_name": svm_name, "subsystem_uuid": "", "subsystem_name": ""}
+    info = out if out is not None else {}
+    info.update({"device": "", "ns_uuid": "", "clone_vol_uuid": "", "clone_vol_name": "",
+                "svm_name": svm_name, "subsystem_uuid": "", "subsystem_name": ""})
 
     devices_before = nvme_list_devices(ssh_host, ssh_user, ssh_pass, ssh_key)
 

@@ -1,25 +1,36 @@
 """
-Instant Recovery Engine (NFS)
+Instant Recovery Engine (NFS + NVMe)
 
-Boots a VM directly off a NetApp FlexClone of a datastore volume — no data
-copy at clone time (space-efficient; the clone only diverges once written
-to). The user tests the VM, then either:
+Boots a VM directly off a NetApp clone of a datastore volume — no data copy
+at clone time (space-efficient; the clone only diverges once written to).
+The user tests the VM, then either:
 
   - commits it: "Storage Migrate" moves the VM's disks onto a permanent
     datastore online (reuses migrate_engine._migrate_one_vm — the same
     per-disk move_disk/move_volume mechanism Bulk Migrate uses), then the
-    FlexClone is torn down; or
-  - discards it: the temporary VM is destroyed and the FlexClone is torn
-    down immediately — no lasting footprint either way.
+    clone is torn down; or
+  - discards it: the temporary VM is destroyed and the clone is torn down
+    immediately — no lasting footprint either way.
 
-Unlike restore_engine._run_restore_flexclone (which also creates a FlexClone
-but then copies each disk out of it before deleting it) or clone_engine's
-CoW file-clone (which clones individual files within the SAME volume), this
-never copies at creation time — the whole-volume clone is registered as its
-own temporary PVE storage and the VM boots straight off it.
+Unlike restore_engine._run_restore_flexclone/_run_restore_san_single (which
+also clone but then copy each disk out before deleting the clone) or
+clone_engine's CoW file-clone (which clones individual files within the SAME
+volume), this never copies at creation time:
 
-NFS only for now — SAN would need its own "leave the cloned VG un-copied"
-path, deliberately out of scope for v1.
+  - NFS: the whole-volume FlexClone is registered as its own temporary PVE
+    NFS storage (`pvesm add nfs`).
+  - NVMe: the cloned namespace is mapped to a brand-new, host-scoped
+    temporary NVMe subsystem (san_helpers.nvme_clone_and_map_temp_subsystem
+    — shared with Clone/Single-VM Restore/SFR), the resulting device is
+    imported via vgimportclone, and the imported clone VG is registered
+    directly as a temporary PVE lvm/lvmthin storage (`pvesm add lvm`)
+    instead of dd-copying each LV out of it.
+
+Either way the VM boots straight off the temporary storage. iSCSI datastores
+are intentionally not supported for Instant Recovery specifically (unlike
+Clone/Restore/SFR, which do support iSCSI) — a deliberate scope decision, not
+a technical gap: NVMe/TCP is the direction customers are steered towards, so
+iSCSI Instant Recovery was never built.
 """
 
 import json
@@ -152,6 +163,34 @@ def _verify_disks_exist(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
         )
 
 
+def _verify_disks_exist_san(pve_host, pve_user, pve_pass, pve_key, temp_vg_name,
+                            raw_conf, storage_id_old, vm_type, jlog=None):
+    """NVMe equivalent of _verify_disks_exist — confirms every disk LV the
+    manifest lists for this VM actually exists in the imported clone VG
+    before the config is written and the VM is started. See
+    _verify_disks_exist's docstring for why this matters."""
+    disks = _extract_disk_files(raw_conf, storage_id_old, vm_type)
+    if not disks:
+        return
+    checks = " ; ".join(
+        f"lvs --noheadings {shlex.quote(temp_vg_name)}/{shlex.quote(d['file'])} >/dev/null 2>&1 "
+        f"|| echo MISSING:{shlex.quote(d['file'])}"
+        for d in disks
+    )
+    out = ssh_run(pve_host, pve_user, pve_pass, checks, capture=True,
+                 key_material=pve_key, timeout=15) or ""
+    missing = [line.split("MISSING:", 1)[1] for line in out.splitlines() if line.startswith("MISSING:")]
+    if missing:
+        if jlog:
+            jlog.log(f"ERROR: missing disk LV(s) in clone VG: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Disk LV(s) not found in this snapshot's clone: {', '.join(missing)} — "
+            "the manifest used for this VM likely reflects a newer disk layout than this "
+            "particular snapshot (the snapshot predates NaSnap's own tracking of this VM, "
+            "see restore_engine._load_manifest tiers 4/5). Try a more recent snapshot."
+        )
+
+
 # ── Start ─────────────────────────────────────────────────────────────────────
 
 def start_instant_recovery_job(job_id, params, username):
@@ -172,8 +211,11 @@ def _run_instant_recovery(job_id, params, username):
     # IP/MAC conflicts with a source VM that may still be running.
     network_isolated = params.get("network_isolated", True)
 
-    clone_vol_uuid  = ""
+    clone_vol_uuid  = ""   # NFS: FlexClone volume uuid
     clone_name      = ""
+    junction        = ""   # NFS only
+    nvme_clone_info = {}   # NVMe: see san_helpers.nvme_clone_and_map_temp_subsystem
+    temp_vg_name    = ""   # NVMe only
     temp_storage_id = ""
     conf_path_reserved = ""
     pve_host = ""
@@ -183,12 +225,16 @@ def _run_instant_recovery(job_id, params, username):
     node = ""
     vm_type = "qemu"
     mapping = None
+    protocol = "nfs"
 
     try:
         snap = get_snapshot_record(db, snapshot_id)
         mapping = get_mapping(db, snap["mapping_id"])
-        if mapping.get("storage_protocol", "nfs") != "nfs":
-            raise RuntimeError("Instant Recovery currently supports NFS datastores only")
+        protocol = mapping.get("storage_protocol", "nfs")
+        if protocol not in ("nfs", "nvme"):
+            raise RuntimeError(
+                "Instant Recovery currently supports NFS and NVMe datastores only "
+                "(iSCSI is not supported)")
         endpoint = get_endpoint(db, mapping["endpoint_id"])
         client = build_ontap_client(endpoint)
 
@@ -205,67 +251,158 @@ def _run_instant_recovery(job_id, params, username):
 
         # Reserve the VMID immediately, not just check it — a check-only
         # gate here left the target VMID free for several seconds while the
-        # FlexClone got created and the temp storage registered, during
+        # clone got created and the temp storage registered, during
         # which a second concurrent request (e.g. a double-submitted start)
         # could grab the same VMID and only collide once this job reached
         # its own config write, several minutes of wasted work later.
         conf_path_reserved = reserve_vmid(pve_host, pve_user, pve_pass, pve_key, new_vmid, vm_type, jlog=jlog)
 
         jlog.log("Reading manifest …")
-        manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key,
-                                  vmid=src_vmid, jlog=jlog)
-        vm_entry = _find_vm_in_manifest(manifest, src_vmid)
-        if not vm_entry.get("disks"):
-            raise RuntimeError(f"No disks in manifest for VM {src_vmid}")
-        raw_conf = vm_entry.get("raw_config", {})
+        manifest_deferred = False
+        vm_entry = None
+        try:
+            manifest = _load_manifest(snap, mapping, node, mgr, pve_host, pve_user, pve_pass, pve_key,
+                                      vmid=src_vmid, jlog=jlog)
+            vm_entry = _find_vm_in_manifest(manifest, src_vmid)
+        except RuntimeError:
+            if protocol != "nvme":
+                raise
+            # Native ONTAP snapshot (not NaSnap-driven — no manifest_json in the
+            # DB row): the manifest only exists on the snapmanifest LV baked into
+            # this snapshot, which is unreadable until the clone is imported.
+            jlog.log("Manifest not in DB — will read from snapmanifest LV after import …")
+            manifest_deferred = True
 
-        # ── FlexClone the whole volume ─────────────────────────────────
         clone_name = f"nsir_{job_id[:8]}"
-        junction   = f"/{clone_name}"
-        jlog.log(f"Creating FlexClone '{clone_name}' from snapshot '{snap_name}' …")
-        clone_vol_uuid, clone_job_uuid = client.create_flexclone(
-            parent_vol_uuid=mapping["volume_uuid"], snap_name=snap_name,
-            clone_name=clone_name, svm_name=mapping["svm_name"], junction_path=junction,
-        )
-        if clone_job_uuid:
-            poll_cfg = load_plugin_config()
-            client.poll_job(clone_job_uuid,
-                            interval_s=poll_cfg.get("job_poll_interval_s", 3),
-                            timeout_s=poll_cfg.get("job_poll_timeout_s", 300))
-            if not clone_vol_uuid:
-                # ONTAP answered the create call asynchronously (return_timeout=0) —
-                # the volume didn't exist yet at that point, so no uuid came back.
-                # Without this, clone_volume_uuid is stored empty and every later
-                # teardown silently skips FlexClone deletion (the "if
-                # sess.get('clone_volume_uuid')" guard never fires), leaving the
-                # ONTAP volume behind forever with nothing pointing at it.
-                try:
-                    clone_vol_uuid = client.get_volume_by_name(mapping["svm_name"], clone_name).get("uuid", "")
-                except Exception as exc:
-                    jlog.log(f"WARNING: could not resolve FlexClone volume UUID after creation: {exc}")
-        jlog.log("FlexClone ready — no data copied yet.")
-        _set_progress(db, job_id, 35)
 
-        # ── Register the clone as its own temporary PVE storage ────────
-        temp_storage_id = clone_name.replace("_", "-")
-        nfs_ip = mapping.get("nfs_export_ip") or endpoint["host"]
-        jlog.log(f"[{pve_host}] Registering temporary NFS storage '{temp_storage_id}' …")
-        ssh_run(pve_host, pve_user, pve_pass,
-               f"pvesm add nfs {shlex.quote(temp_storage_id)}"
-               f" --server {shlex.quote(nfs_ip)} --export {shlex.quote(junction)}"
-               f" --content images",
-               key_material=pve_key, timeout=60)
-        _set_progress(db, job_id, 55)
+        if protocol == "nfs":
+            if not vm_entry.get("disks"):
+                raise RuntimeError(f"No disks in manifest for VM {src_vmid}")
+            raw_conf = vm_entry.get("raw_config", {})
 
-        # ── Verify the manifest's disk files actually exist in this clone ──
-        # (catches a manifest fallback to the live/current layout — see
-        # restore_engine._load_manifest tiers 4/5 — that doesn't match what
-        # this particular, possibly much older, snapshot actually froze)
-        jlog.log("Verifying disk files exist in the clone …")
-        _verify_disks_exist(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
-                            raw_conf, mapping["pve_storage_id"], vm_type, jlog=jlog)
+            # ── FlexClone the whole volume ─────────────────────────────────
+            junction = f"/{clone_name}"
+            jlog.log(f"Creating FlexClone '{clone_name}' from snapshot '{snap_name}' …")
+            clone_vol_uuid, clone_job_uuid = client.create_flexclone(
+                parent_vol_uuid=mapping["volume_uuid"], snap_name=snap_name,
+                clone_name=clone_name, svm_name=mapping["svm_name"], junction_path=junction,
+            )
+            if clone_job_uuid:
+                poll_cfg = load_plugin_config()
+                client.poll_job(clone_job_uuid,
+                                interval_s=poll_cfg.get("job_poll_interval_s", 3),
+                                timeout_s=poll_cfg.get("job_poll_timeout_s", 300))
+                if not clone_vol_uuid:
+                    # ONTAP answered the create call asynchronously (return_timeout=0) —
+                    # the volume didn't exist yet at that point, so no uuid came back.
+                    # Without this, clone_volume_uuid is stored empty and every later
+                    # teardown silently skips FlexClone deletion (the "if
+                    # sess.get('clone_volume_uuid')" guard never fires), leaving the
+                    # ONTAP volume behind forever with nothing pointing at it.
+                    try:
+                        clone_vol_uuid = client.get_volume_by_name(mapping["svm_name"], clone_name).get("uuid", "")
+                    except Exception as exc:
+                        jlog.log(f"WARNING: could not resolve FlexClone volume UUID after creation: {exc}")
+            jlog.log("FlexClone ready — no data copied yet.")
+            _set_progress(db, job_id, 35)
 
-        # ── Build and write the instant-recovery VM config ─────────────
+            # ── Register the clone as its own temporary PVE storage ────────
+            temp_storage_id = clone_name.replace("_", "-")
+            nfs_ip = mapping.get("nfs_export_ip") or endpoint["host"]
+            jlog.log(f"[{pve_host}] Registering temporary NFS storage '{temp_storage_id}' …")
+            ssh_run(pve_host, pve_user, pve_pass,
+                   f"pvesm add nfs {shlex.quote(temp_storage_id)}"
+                   f" --server {shlex.quote(nfs_ip)} --export {shlex.quote(junction)}"
+                   f" --content images",
+                   key_material=pve_key, timeout=60)
+            _set_progress(db, job_id, 55)
+
+            # ── Verify the manifest's disk files actually exist in this clone ──
+            # (catches a manifest fallback to the live/current layout — see
+            # restore_engine._load_manifest tiers 4/5 — that doesn't match what
+            # this particular, possibly much older, snapshot actually froze)
+            jlog.log("Verifying disk files exist in the clone …")
+            _verify_disks_exist(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
+                                raw_conf, mapping["pve_storage_id"], vm_type, jlog=jlog)
+
+        else:  # nvme
+            from .san_helpers import nvme_clone_and_map_temp_subsystem, vg_import_clone, snapmanifest_read_manifest
+
+            svm_name  = mapping["svm_name"]
+            vol_uuid  = mapping["volume_uuid"]
+            vg_name   = mapping.get("lvm_vg_name", "")
+            lvm_type  = mapping.get("lvm_type", "linear")
+            pool_name = mapping.get("lvm_pool_name", "")
+            if not vg_name:
+                raise RuntimeError("lvm_vg_name not set in mapping — re-run discovery")
+
+            vol_info = client.get_volume(vol_uuid)
+            vol_name = vol_info.get("name", "")
+            if not vol_name:
+                raise RuntimeError(f"Cannot resolve volume name for UUID {vol_uuid}")
+
+            namespaces = client.list_nvme_namespaces(svm_name=svm_name)
+            main_ns = next(
+                (ns for ns in namespaces
+                 if (ns.get("location") or {}).get("volume", {}).get("uuid") == vol_uuid),
+                None,
+            )
+            if not main_ns:
+                main_ns = next(
+                    (ns for ns in namespaces
+                     if (ns.get("location") or {}).get("volume", {}).get("name") == vol_name),
+                    None,
+                )
+            if not main_ns:
+                raise RuntimeError(f"Cannot find NVMe namespace for volume {vol_uuid} — re-run discovery")
+            main_ns_uuid = main_ns["uuid"]
+
+            # ── Clone the namespace, isolated on its own temp subsystem ─────
+            jlog.log(f"Creating NVMe clone '{clone_name}' from snapshot '{snap_name}' …")
+            nvme_clone_and_map_temp_subsystem(
+                client, main_ns_uuid, snap_name, vol_name, clone_name, svm_name,
+                pve_host, pve_user, pve_pass, pve_key, job_id, jlog=jlog, out=nvme_clone_info)
+            jlog.log("NVMe clone ready — no data copied yet.")
+            _set_progress(db, job_id, 35)
+
+            # ── Import the clone VG (no dd copy — the VG itself becomes the
+            #    temporary PVE storage below) ───────────────────────────────
+            jlog.log(f"Importing clone VG from {nvme_clone_info['device']} …")
+            temp_vg_name = vg_import_clone(pve_host, pve_user, pve_pass, pve_key,
+                                           nvme_clone_info["device"], vg_name)
+            jlog.log(f"Clone VG imported as '{temp_vg_name}'")
+            _set_progress(db, job_id, 55)
+
+            if manifest_deferred:
+                jlog.log("Reading manifest from snapmanifest LV in clone VG …")
+                manifest = snapmanifest_read_manifest(pve_host, pve_user, pve_pass, pve_key, temp_vg_name)
+                vm_entry = _find_vm_in_manifest(manifest, src_vmid)
+
+            if not vm_entry.get("disks"):
+                raise RuntimeError(f"No disks in manifest for VM {src_vmid}")
+            raw_conf = vm_entry.get("raw_config", {})
+
+            # ── Verify the manifest's disk LVs actually exist in this clone VG ──
+            jlog.log("Verifying disk LV(s) exist in the clone …")
+            _verify_disks_exist_san(pve_host, pve_user, pve_pass, pve_key, temp_vg_name,
+                                    raw_conf, mapping["pve_storage_id"], vm_type, jlog=jlog)
+
+            # ── Register the imported clone VG as its own temporary PVE storage ──
+            temp_storage_id = clone_name.replace("_", "-")
+            sid_q = shlex.quote(temp_storage_id)
+            vg_q  = shlex.quote(temp_vg_name)
+            jlog.log(f"[{pve_host}] Registering temporary {lvm_type} storage '{temp_storage_id}' …")
+            if lvm_type == "thin":
+                pvesm_cmd = (f"pvesm add lvmthin {sid_q} --vgname {vg_q}"
+                            f" --thinpool {shlex.quote(pool_name or 'data')}"
+                            f" --shared 1 --content images,rootdir")
+            else:
+                pvesm_cmd = (f"pvesm add lvm {sid_q} --vgname {vg_q}"
+                            f" --shared 1 --content images,rootdir")
+            ssh_run(pve_host, pve_user, pve_pass, pvesm_cmd, key_material=pve_key, timeout=60)
+            _set_progress(db, job_id, 75)
+
+        # ── Build and write the instant-recovery VM config (shared) ────
         jlog.log(f"Building VM config for {new_vmid} (name: {new_name!r}) …")
         conf_str = _build_instant_recovery_config(
             raw_conf, mapping["pve_storage_id"], temp_storage_id,
@@ -276,12 +413,22 @@ def _run_instant_recovery(job_id, params, username):
         ssh_run(pve_host, pve_user, pve_pass, f"cat > {shlex.quote(conf_path)}",
                stdin_data=conf_str.encode(), key_material=pve_key)
         jlog.log(f"Config written: {conf_path}")
-        _set_progress(db, job_id, 75)
+        _set_progress(db, job_id, 90)
 
         ssh_run(pve_host, pve_user, pve_pass,
                f"qm rescan {new_vmid} 2>/dev/null || true" if vm_type == "qemu"
                else f"pct rescan {new_vmid} 2>/dev/null || true",
                key_material=pve_key)
+
+        if protocol == "nvme":
+            # qm rescan (or pvesm add itself) can trigger udev to re-activate
+            # the clone VG under a stale dm mapping — see
+            # san_helpers.clear_stale_dm_entries's docstring. Without this,
+            # PVE's own disk-attach activation at qm start can fail with
+            # "device-mapper: create ioctl ... Device or resource busy" even
+            # though the config and disk are both fine (observed live).
+            from .san_helpers import clear_stale_dm_entries
+            clear_stale_dm_entries(pve_host, pve_user, pve_pass, pve_key, temp_vg_name)
 
         jlog.log(f"Starting {vm_type.upper()} {new_vmid} …")
         _vm_start(mgr, node, new_vmid, vm_type)
@@ -289,16 +436,22 @@ def _run_instant_recovery(job_id, params, username):
 
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
+        if protocol == "nvme":
+            san_state_json = json.dumps({**nvme_clone_info, "temp_vg_name": temp_vg_name,
+                                         "lvm_type": mapping.get("lvm_type", "linear"),
+                                         "lvm_pool_name": mapping.get("lvm_pool_name", "")})
+        else:
+            san_state_json = ""
         db.execute(
             "INSERT INTO netapp_instant_recovery_sessions "
             "(id, mapping_id, snapshot_id, source_vmid, source_vm_name, new_vmid, new_name, vm_type, "
             "pve_cluster_id, node, temp_storage_id, clone_volume_uuid, clone_volume_name, "
-            "junction_path, ad_hoc_snapshot, status, created_at, created_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "junction_path, ad_hoc_snapshot, protocol, san_state, status, created_at, created_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (session_id, mapping["id"], snapshot_id, src_vmid, vm_entry.get("name", ""),
              new_vmid, new_name, vm_type, resolved_hid, node, temp_storage_id, clone_vol_uuid,
              clone_name, junction, 1 if params.get("ad_hoc_snapshot") else 0,
-             "running", now, username),
+             protocol, san_state_json, "running", now, username),
         )
 
         _finish_job(db, job_id)
@@ -309,7 +462,8 @@ def _run_instant_recovery(job_id, params, username):
         _cancel_job(db, job_id)
         _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                      clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog,
-                     conf_path_reserved=conf_path_reserved, pve_host_id=resolved_hid)
+                     conf_path_reserved=conf_path_reserved, pve_host_id=resolved_hid,
+                     protocol=protocol, nvme_clone_info=nvme_clone_info, temp_vg_name=temp_vg_name)
     except Exception as exc:
         log.error(f"[netapp_storage] Instant Recovery job {job_id} failed: {exc}")
         jlog.log(f"ERROR: {exc}")
@@ -319,7 +473,8 @@ def _run_instant_recovery(job_id, params, username):
         # persist until the user decides).
         _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                      clone_vol_uuid, (mapping or {}).get("endpoint_id"), db, jlog,
-                     conf_path_reserved=conf_path_reserved, pve_host_id=resolved_hid)
+                     conf_path_reserved=conf_path_reserved, pve_host_id=resolved_hid,
+                     protocol=protocol, nvme_clone_info=nvme_clone_info, temp_vg_name=temp_vg_name)
     finally:
         _reg_unregister(job_id)
 
@@ -408,10 +563,35 @@ def _unmount_everywhere_in_cluster(db, primary_host_id, primary_host, primary_us
 
 def _teardown_raw(pve_host, pve_user, pve_pass, pve_key, temp_storage_id,
                   clone_vol_uuid, endpoint_id, db, jlog, conf_path_reserved="",
-                  pve_host_id=""):
+                  pve_host_id="", protocol="nfs", nvme_clone_info=None, temp_vg_name=""):
     """Best-effort cleanup with only the raw pieces (used when a session row
     was never created, i.e. the start job itself failed partway through)."""
     cleanup_reserved_vmid(pve_host, pve_user, pve_pass, pve_key, conf_path_reserved, jlog=jlog)
+
+    if protocol == "nvme":
+        if temp_storage_id and pve_host:
+            try:
+                ssh_run(pve_host, pve_user, pve_pass,
+                       f"pvesm remove {shlex.quote(temp_storage_id)} 2>/dev/null; true",
+                       key_material=pve_key)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] cleanup pvesm remove: {exc}")
+        if temp_vg_name and pve_host:
+            try:
+                from .san_helpers import cleanup_restore_vg
+                cleanup_restore_vg(pve_host, pve_user, pve_pass, pve_key, temp_vg_name)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] cleanup restore VG: {exc}")
+        if nvme_clone_info and endpoint_id:
+            try:
+                from .san_helpers import nvme_clone_cleanup
+                endpoint = get_endpoint(db, endpoint_id)
+                client = build_ontap_client(endpoint)
+                nvme_clone_cleanup(client, nvme_clone_info, pve_host, pve_user, pve_pass, pve_key, jlog=jlog)
+            except Exception as exc:
+                log.warning(f"[netapp_storage] cleanup nvme clone: {exc}")
+        return
+
     if temp_storage_id and pve_host:
         try:
             ssh_run(pve_host, pve_user, pve_pass,
@@ -470,6 +650,7 @@ def _teardown_session_clone(db, sess, jlog):
     pve_user, pve_pass, pve_key = get_ssh_creds(mgr)
 
     ok = True
+    protocol = sess.get("protocol") or "nfs"
 
     try:
         jlog.log(f"[{pve_host}] Removing temporary storage '{sess['temp_storage_id']}' …")
@@ -479,6 +660,31 @@ def _teardown_session_clone(db, sess, jlog):
     except Exception as exc:
         jlog.log(f"WARNING: pvesm remove failed: {exc}")
         ok = False
+
+    if protocol == "nvme":
+        # LVM storage isn't mounted under /mnt/pve/ (unlike NFS) — PVE accesses
+        # LVs directly via device-mapper. The IR VM only ever ran on this one
+        # node, so only this node could have activated the clone VG's LVs.
+        san_state = {}
+        try:
+            san_state = json.loads(sess.get("san_state") or "{}")
+        except Exception:
+            pass
+        temp_vg_name = san_state.get("temp_vg_name", "")
+        if temp_vg_name:
+            try:
+                from .san_helpers import cleanup_restore_vg
+                cleanup_restore_vg(pve_host, pve_user, pve_pass, pve_key, temp_vg_name)
+            except Exception as exc:
+                jlog.log(f"WARNING: VG cleanup failed: {exc}")
+                ok = False
+        try:
+            from .san_helpers import nvme_clone_cleanup
+            nvme_clone_cleanup(client, san_state, pve_host, pve_user, pve_pass, pve_key, jlog=jlog)
+        except Exception as exc:
+            jlog.log(f"WARNING: NVMe clone cleanup failed: {exc}")
+            ok = False
+        return ok
 
     # pvesm remove only edits storage.cfg — Proxmox mounts a cluster-wide
     # storage (no --nodes restriction, which is how this temp storage was

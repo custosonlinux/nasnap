@@ -499,9 +499,9 @@ def _run_clone_san(job_id, params, username):
             # Maps the clone to a brand-new, host-scoped subsystem — never the
             # production one — so other hosts never see it, mirroring the
             # temporary igroup the iSCSI branch above already uses.
-            nvme_clone_info = nvme_clone_and_map_temp_subsystem(
+            nvme_clone_and_map_temp_subsystem(
                 client, main_ns_uuid, snap_name, vol_name, temp_clone_name, svm_name,
-                pve_host, pve_user, pve_pass, pve_key, job_id, jlog=jlog)
+                pve_host, pve_user, pve_pass, pve_key, job_id, jlog=jlog, out=nvme_clone_info)
             device = nvme_clone_info["device"]
 
         else:

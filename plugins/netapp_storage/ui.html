@@ -4921,14 +4921,14 @@ function rcOpenActionsMenu(evt, vmid, name, dsName, mappingId) {
     + 'border:1px solid var(--border);border-radius:8px;padding:4px;min-width:180px;'
     + 'box-shadow:0 8px 24px rgba(0,0,0,.35);left:-9999px;top:-9999px';
   var vmRow = _rcVms.find(function(v){ return v.vmid===vmid && v.dsName===dsName; }) || {};
-  var irBlocked = !!vmRow.isSan;
+  var irBlocked = !!vmRow.isSan && vmRow.protocol !== 'NVME';
   menu.innerHTML =
       _rcMenuItem('Info', _ico('info',14), 'rcCloseActionsMenu();openVmInfoModal('+vmid+',\''+esc(dsName)+'\',\''+esc(mappingId)+'\')')
     + _rcMenuItem(t('act_restore'), _ico('restore',14), 'rcCloseActionsMenu();openRestoreWizard('+vmid+',null,\''+esc(dsName)+'\')')
     + _rcMenuItem(t('act_clone'),   _ico('clone',14),   'rcCloseActionsMenu();openCloneWizard('+vmid+',null,\''+esc(dsName)+'\')')
     + _rcMenuItem('Instant Recovery', _ico('play',14),
         'rcCloseActionsMenu();openInstantRecoveryModal('+vmid+',\''+esc(name)+'\',\''+esc(dsName)+'\',\''+esc(mappingId)+'\')',
-        irBlocked, irBlocked ? 'NFS datastores only' : '')
+        irBlocked, irBlocked ? 'NFS and NVMe datastores only' : '')
     + _rcMenuItem('Single File Restore', _ico('files',14),
         'rcCloseActionsMenu();openSfrModal('+vmid+',\''+esc(name)+'\',\''+esc(mappingId)+'\')',
         !sfrInfo.qga_ok, sfrInfo.qga_ok ? '' : 'Guest Agent not running — Single File Restore unavailable');
@@ -4994,7 +4994,10 @@ var _irState = { vmid:null, name:'', dsName:'', mappingId:'', pveClusterId:'', s
 
 function openInstantRecoveryModal(vmid, name, dsName, mappingId) {
   var vm = _rcVms.find(function(v){ return v.vmid===vmid && v.dsName===dsName; }) || {};
-  if (vm.isSan) { toast('Instant Recovery currently supports NFS datastores only', 'error'); return; }
+  if (vm.isSan && vm.protocol !== 'NVME') {
+    toast('Instant Recovery currently supports NFS and NVMe datastores only (iSCSI is not supported)', 'error');
+    return;
+  }
   _irState = { vmid:vmid, name:name||vm.name||'', dsName:dsName, mappingId:mappingId,
                pveClusterId:vm.pveClusterId||'', snap:null };
   document.getElementById('ir_vm_hdr').textContent = (_irState.name||'VM')+' (ID: '+vmid+')';
@@ -17920,7 +17923,7 @@ var _helpData = {
   'instant-recovery': {
     title: { en: 'Instant Recovery', de: 'Instant Recovery' },
     en: '<h3>Overview</h3>'
-      + '<p>Instant Recovery boots a VM straight off a NetApp FlexClone of a snapshot (or the live filesystem) — no data is copied up front, so the VM is available almost immediately. Test it, then either commit it permanently or discard it with no lasting footprint. NFS datastores only.</p>'
+      + '<p>Instant Recovery boots a VM straight off a NetApp clone of a snapshot (or the live filesystem) — no data is copied up front, so the VM is available almost immediately. Test it, then either commit it permanently or discard it with no lasting footprint. NFS and NVMe datastores (iSCSI is not supported).</p>'
       + '<h3>Starting a session</h3>'
       + '<p>From the VM Restore &amp; Clone row menu, choose <strong>Instant Recovery</strong>. Pick a snapshot (or <strong>live</strong> for the VM\'s current state), a new VMID and name, and whether the clone should start network-disconnected (recommended — avoids IP/MAC conflicts with the source VM, which may still be running). The dialog checks the new VMID and name against everything already on the target cluster and blocks starting if either collides.</p>'
       + '<h3>Session list &amp; actions</h3><ul>'
@@ -17929,9 +17932,9 @@ var _helpData = {
       + '<li><strong>Clean Up Clone</strong> — For a VM already migrated or removed manually in Proxmox: tears down the leftover FlexClone/temp storage without touching a VM.</li>'
       + '</ul>'
       + '<h3>If a session gets interrupted</h3>'
-      + '<p>Removing the temporary PVE storage only edits <code>storage.cfg</code> — Proxmox itself doesn\'t unmount the filesystem. If a session is interrupted mid-teardown, the mount can be left behind on the OS with no corresponding PVE storage entry. Settings → <strong>PVE Host Maintenance</strong> detects and cleans these up (see its help for details).</p>',
+      + '<p>Removing the temporary PVE storage only edits <code>storage.cfg</code> — Proxmox itself doesn\'t unmount the filesystem (NFS) or deactivate the LVM volume group (NVMe). If a session is interrupted mid-teardown, the mount or VG can be left behind on the OS with no corresponding PVE storage entry. Settings → <strong>PVE Host Maintenance</strong> detects and cleans these up on the Proxmox side; for NVMe, any leftover ONTAP-side clone volume or temporary subsystem shows up in <strong>SAN Clone Cleanup</strong> instead (see their help for details).</p>',
     de: '<h3>Übersicht</h3>'
-      + '<p>Instant Recovery startet eine VM direkt aus einem NetApp-FlexClone eines Snapshots (oder des laufenden Dateisystems) — es werden vorab keine Daten kopiert, die VM steht fast sofort zur Verfügung. Testen, dann entweder dauerhaft übernehmen oder folgenlos verwerfen. Nur für NFS-Datastores.</p>'
+      + '<p>Instant Recovery startet eine VM direkt aus einem NetApp-Klon eines Snapshots (oder des laufenden Dateisystems) — es werden vorab keine Daten kopiert, die VM steht fast sofort zur Verfügung. Testen, dann entweder dauerhaft übernehmen oder folgenlos verwerfen. Für NFS- und NVMe-Datastores (iSCSI wird nicht unterstützt).</p>'
       + '<h3>Session starten</h3>'
       + '<p>Im Zeilenmenü von VM Restore &amp; Clone <strong>Instant Recovery</strong> wählen. Snapshot (oder <strong>live</strong> für den aktuellen Zustand), neue VMID und Name festlegen sowie ob der Klon netzwerkgetrennt starten soll (empfohlen — vermeidet IP-/MAC-Konflikte mit der eventuell noch laufenden Quell-VM). Der Dialog prüft neue VMID und Name gegen alles bereits auf dem Zielcluster Vorhandene und blockiert den Start bei einer Kollision.</p>'
       + '<h3>Sessionliste &amp; Aktionen</h3><ul>'
@@ -17940,7 +17943,7 @@ var _helpData = {
       + '<li><strong>Clean Up Clone</strong> — Für eine bereits manuell migrierte oder in Proxmox entfernte VM: baut den verbliebenen FlexClone/Temp-Storage ab, ohne eine VM anzufassen.</li>'
       + '</ul>'
       + '<h3>Bei einer unterbrochenen Session</h3>'
-      + '<p>Das Entfernen des temporären PVE-Storage ändert nur die <code>storage.cfg</code> — Proxmox hängt das Dateisystem dabei nicht selbst aus. Wird eine Session mitten im Abbau unterbrochen, kann der Mount im OS zurückbleiben, ohne dass PVE noch davon weiß. Einstellungen → <strong>PVE-Host-Wartung</strong> erkennt und bereinigt das (Details siehe dortige Hilfe).</p>'
+      + '<p>Das Entfernen des temporären PVE-Storage ändert nur die <code>storage.cfg</code> — Proxmox hängt das Dateisystem dabei nicht selbst aus (NFS) bzw. deaktiviert die LVM Volume Group nicht (NVMe). Wird eine Session mitten im Abbau unterbrochen, kann der Mount bzw. die VG im OS zurückbleiben, ohne dass PVE noch davon weiß. Einstellungen → <strong>PVE-Host-Wartung</strong> erkennt und bereinigt das auf Proxmox-Seite; ein verbliebenes Clone-Volume oder temporäres Subsystem auf ONTAP-Seite (NVMe) zeigt stattdessen <strong>SAN Clone Cleanup</strong> an (Details siehe dortige Hilfe).</p>'
   },
 
   storage: {

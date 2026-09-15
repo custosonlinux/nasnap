@@ -1,7 +1,7 @@
 """
-Instant Recovery API (NFS)
+Instant Recovery API (NFS + NVMe)
 
-  instant-recovery/start        POST  – boot a VM straight off a FlexClone (from a snapshot,
+  instant-recovery/start        POST  – boot a VM straight off a clone (from a snapshot,
                                          plugin-managed or ONTAP-native via `native: true`)
   instant-recovery/start-live   POST  – same, but source is a live VM (ad-hoc snapshot first)
   instant-recovery/sessions     GET   – list sessions
@@ -56,16 +56,25 @@ def _start():
 
         from ..core._helpers import get_mapping, load_plugin_config
         mapping = get_mapping(db, data["mapping_id"])
-        if mapping.get("storage_protocol", "nfs") != "nfs":
-            return {"error": "Instant Recovery currently supports NFS datastores only"}, 400
+        protocol = mapping.get("storage_protocol", "nfs")
+        if protocol not in ("nfs", "nvme"):
+            return {"error": "Instant Recovery currently supports NFS and NVMe datastores only "
+                              "(iSCSI is not supported)"}, 400
 
         snap_name = data["snap_name"]
-        cfg = load_plugin_config()
-        manifest_subdir = cfg.get("manifest_subdir", ".netapp-snapmanifest")
-        manifest_path = (
-            f"{mapping['nfs_mount_path']}/.snapshot/{snap_name}"
-            f"/{manifest_subdir}/{snap_name}/manifest.json"
-        )
+        if protocol == "nvme":
+            # SAN: manifest is in the snapmanifest LV inside the snapshot; not
+            # directly readable here. Empty path makes the engine fall back to
+            # reading it from the clone VG after import (see _load_manifest /
+            # instant_recovery_engine's manifest_deferred handling).
+            manifest_path = ""
+        else:
+            cfg = load_plugin_config()
+            manifest_subdir = cfg.get("manifest_subdir", ".netapp-snapmanifest")
+            manifest_path = (
+                f"{mapping['nfs_mount_path']}/.snapshot/{snap_name}"
+                f"/{manifest_subdir}/{snap_name}/manifest.json"
+            )
         now = datetime.now(timezone.utc).isoformat()
         snapshot_id = str(uuid.uuid4())
         db.execute(
@@ -352,10 +361,11 @@ def _status():
 
 
 def _scan_orphan_flexclones():
-    """Scans every ONTAP endpoint for Instant-Recovery FlexClone volumes
-    (name prefix 'nsir_', the convention _run_instant_recovery uses) that no
-    active session still needs — either nothing references them anymore, or
-    the referencing session is already discarded/done/erroring. Read-only;
+    """Scans every ONTAP endpoint for Instant-Recovery clone volumes (name
+    prefix 'nsir_' for NFS FlexClones, or 'nsvol_nsir_' for the NVMe/ASA
+    CLI-bridge case — see san_helpers.nvme_clone_and_map_temp_subsystem) that
+    no active session still needs — either nothing references them anymore,
+    or the referencing session is already discarded/done/erroring. Read-only;
     deletion is a separate, explicit, per-volume step so a false positive
     (e.g. a same-prefixed volume created outside NaSnap) can't be deleted
     by accident.
@@ -380,12 +390,19 @@ def _scan_orphan_flexclones():
         for v in (vols or []):
             name = v.get("name", "")
             uuid_ = v.get("uuid", "")
-            if not name.startswith("nsir_") or not uuid_:
+            if not name.startswith(("nsir_", "nsvol_nsir_")) or not uuid_:
                 continue
             sess_row = db.query_one(
                 "SELECT id, status, error, new_vmid, new_name FROM netapp_instant_recovery_sessions "
                 "WHERE clone_volume_uuid=?", (uuid_,)
             )
+            if not sess_row:
+                # NVMe: the clone's own identity lives inside the JSON san_state
+                # blob (clone_vol_uuid), not the top-level clone_volume_uuid column.
+                sess_row = db.query_one(
+                    "SELECT id, status, error, new_vmid, new_name FROM netapp_instant_recovery_sessions "
+                    "WHERE protocol='nvme' AND san_state LIKE ?", (f"%{uuid_}%",)
+                )
             sess = dict(sess_row) if sess_row else None
             still_active = sess and sess["status"] in ("running", "migrating", "discarding") and not sess["error"]
             if still_active:
