@@ -17,7 +17,7 @@ NaSnap connects to one or more NetApp ONTAP systems and gives you full snapshot 
 - **Snapshot** any VM or set of VMs on a shared ONTAP datastore — crash-consistent, app-consistent (QEMU guest agent), or suspend-based.
 - **Restore** individual VMs (SFSR for NFS, LV copy for SAN) or revert an entire datastore to a snapshot in seconds (volume revert).
 - **Clone** VMs from any snapshot to a new VMID with fresh MAC addresses.
-- **Instant Recovery** *(Stable, NFS; SAN planned)* — Veeam-style instant boot: a VM starts directly off a NetApp FlexClone of the datastore volume, with no data copied up front. Test the VM (optionally network-isolated with fresh MACs to avoid IP/MAC collisions with the source), then either **Storage Migrate** it onto a permanent datastore live (falling back to a brief automatic stop/restart only if the VM has a TPM device, which ONTAP/PVE can't move while running), migrate the disks yourself outside NaSnap and use **Clean Up Clone** to tear down just the FlexClone afterwards, or **Discard** the whole thing to remove the temporary VM and clone with no lasting footprint. Also works from a live VM (takes a small ad-hoc snapshot first). Sessions left running past 3 days get a log reminder to commit or discard.
+- **Instant Recovery** *(Stable, NFS · Beta, NVMe-oF · not supported for iSCSI)* — Veeam-style instant boot: a VM starts directly off a NetApp clone of the datastore volume — a FlexClone for NFS, or a cloned NVMe namespace mapped to its own temporary, host-scoped NVMe subsystem for NVMe-oF — with no data copied up front. Test the VM (optionally network-isolated with fresh MACs to avoid IP/MAC collisions with the source), then either **Storage Migrate** it onto a permanent datastore live (falling back to a brief automatic stop/restart only if the VM has a TPM device, which ONTAP/PVE can't move while running), migrate the disks yourself outside NaSnap and use **Clean Up Clone** to tear down just the clone afterwards, or **Discard** the whole thing to remove the temporary VM and clone with no lasting footprint. Also works from a live VM (takes a small ad-hoc snapshot first). Sessions left running past 3 days get a log reminder to commit or discard. iSCSI is intentionally not supported — NVMe/TCP is the recommended SAN protocol going forward.
 - **Protect datastores with Protection Plans** — assign multiple datastores to a single plan with unified scheduling, retention, hooks, and email notifications. Each datastore runs as an independent job (Veeam-style); a consolidated email summarises all results per plan run.
 - **Replicate** snapshots to a secondary ONTAP cluster via SnapMirror® and restore or clone directly from the replica — without touching the primary.
 - **Set up SnapMirror/SnapVault replication in one click** *(Beta)* — pick a second registered NetApp system and NaSnap automatically peers the clusters and SVMs (if not already peered), then creates the relationship with an existing or newly created policy (Mirror for DR, Vault for retention). Available at provisioning time or retroactively via the datastore's **SnapMirror / Vault** action, which also handles policy changes and safely breaking/removing a relationship (optionally keeping the destination volume for restore).
@@ -52,7 +52,7 @@ All operations run as background jobs with live log streaming. Every snapshot em
 | Restore — Single VM (LV-copy via temp clone) | ❌ n/a | 🟡 Beta | 🟡 Beta¹ |
 | Restore — Volume Revert (all VMs) | ✅ | 🟡 Beta | 🟡 Beta |
 | VM Clone from snapshot | ✅ | 🟡 Beta | 🟡 Beta¹ |
-| Instant Recovery (boot from FlexClone, commit or discard) | ✅ | 🔄 Planned | 🔄 Planned |
+| Instant Recovery (boot from clone, commit or discard) | ✅ | ❌ N/A | 🟡 Beta¹ |
 | Clone from ONTAP-native snapshots | ✅ | 🟡 Beta | 🟡 Beta |
 | Multi-VM snapshot | ✅ | 🟡 Beta | 🟡 Beta |
 | ONTAP-native snapshot visibility | ✅ | 🟡 Beta | 🟡 Beta |
@@ -87,7 +87,7 @@ These features are application-level and independent of the storage protocol.
 | PVE Cluster Grouping (auto-detected via `/cluster/status`, Settings → PVE Hosts) | 🟡 Beta |
 | Bulk Migrate (move VMs between datastores with live progress) | 🟡 Beta |
 
-¹ NVMe Single VM Restore and Clone on ASA use a full volume clone via the ONTAP CLI bridge (`private/cli/volume/clone`). Direct namespace clone APIs are not available on ASA, but the volume clone approach achieves identical results.
+¹ NVMe Single VM Restore, Clone, and Instant Recovery on ASA use a full volume clone via the ONTAP CLI bridge (`private/cli/volume/clone`). Direct namespace clone APIs are not available on ASA, but the volume clone approach achieves identical results.
 
 ---
 
@@ -851,20 +851,26 @@ All plugin routes are relative to `/api/plugins/netapp_storage/api/`.
 | POST | `clone/dr-start` | Start DR clone job |
 | GET | `clone/nextid` | Suggest next free VMID (`mapping_id` or `pve_cluster_id`) |
 | GET | `clone/nodes` | List available Proxmox nodes |
+| GET | `clone/orphan-san-clones` | Scan every ONTAP endpoint for leftover temporary SAN clone objects (volumes / NVMe subsystems / iSCSI igroups) from Clone, Single-VM Restore, and SFR that no in-flight job or open session still needs |
+| POST | `clone/orphan-san-clones/delete` | Delete one orphaned object, after explicit admin review |
 
-### Instant Recovery (NFS)
+### Instant Recovery (NFS + NVMe-oF)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `instant-recovery/start` | Boot a VM off a FlexClone of a snapshot (plugin-managed or ONTAP-native via `native: true`) |
+| POST | `instant-recovery/start` | Boot a VM off a clone of a snapshot — a FlexClone (NFS) or a namespace clone on a temporary host-scoped subsystem (NVMe) — from a snapshot (plugin-managed or ONTAP-native via `native: true`) |
 | POST | `instant-recovery/start-live` | Same, but source is a live VM (ad-hoc snapshot taken first) |
 | GET | `instant-recovery/sessions` | List active/recent sessions |
 | POST | `instant-recovery/migrate` | Commit: Storage Migrate onto a permanent datastore |
 | GET | `instant-recovery/migrate-tpm-check` | Whether a session's VM has a TPM device requiring a brief stop/restart to migrate |
-| POST | `instant-recovery/cleanup-clone` | VM was migrated manually (e.g. in Proxmox) — tear down just the FlexClone/temp storage, never touches the VM (fails if the VM still has a disk on the temp storage) |
+| POST | `instant-recovery/cleanup-clone` | VM was migrated manually (e.g. in Proxmox) — tear down just the clone/temp storage, never touches the VM (fails if the VM still has a disk on the temp storage) |
 | POST | `instant-recovery/dismiss` | Remove a completed (migrated) session from the list — bookkeeping only, never touches the VM |
-| POST | `instant-recovery/discard` | Tear down: destroy the temporary VM + FlexClone |
+| POST | `instant-recovery/discard` | Tear down: destroy the temporary VM + clone |
 | GET | `instant-recovery/status` | Job status (`?job_id=`) |
+| GET | `instant-recovery/orphan-clones` | Scan every ONTAP endpoint for leftover clone volumes (NFS `nsir_*` / NVMe `nsvol_nsir_*`) no active session still needs |
+| POST | `instant-recovery/orphan-clones/delete` | Delete one orphaned clone volume, after explicit admin review |
+
+Instant Recovery is not supported for iSCSI datastores — a deliberate scope decision (NVMe/TCP is the recommended SAN protocol), not a technical gap. See `clone/orphan-san-clones` above for the equivalent leftover-object scanner covering Clone/Single-VM Restore/SFR's own temporary NVMe objects.
 
 ### Schedules & Jobs
 

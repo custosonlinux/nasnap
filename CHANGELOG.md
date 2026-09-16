@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Instant Recovery for NVMe-oF datastores** — boots a VM straight off an NVMe clone with no data copy, mirroring the existing NFS mechanism: the cloned namespace is mapped to a brand-new, host-scoped temporary NVMe subsystem, imported via `vgimportclone`, and the imported VG is registered directly as a temporary PVE `lvm`/`lvmthin` storage instead of copying each disk out of it. Commit (Storage Migrate), Discard, and Clean Up Clone all work the same way as NFS. iSCSI is intentionally not supported for Instant Recovery — NVMe/TCP is the recommended SAN protocol going forward.
+- **SAN Clone Cleanup** (Settings) — scans every ONTAP endpoint for leftover temporary SAN clone objects (volumes / NVMe subsystems / iSCSI igroups) from Clone, Single-VM Restore, and SFR that no in-flight job or open session still needs. Mirrors the existing NFS Instant Recovery orphan-clone scanner.
+
+### Fixed
+
+- **NVMe clone volumes/subsystems could be orphaned on Clone, Single-VM Restore, and SFR** — the ASA CLI-bridge namespace-clone fallback tracked the clone's backing FlexClone volume in an in-memory, per-`OntapClient`-instance cache that never survived a process restart or a freshly built client; cleanup then silently deleted only the namespace object, leaving the real volume behind with no error raised. Fixed by returning the volume identity explicitly instead of caching it. NVMe clones are now also mapped to a brand-new, host-scoped temporary subsystem instead of the production one, matching the isolation the iSCSI path already had via a temporary igroup.
+- **`delete_nvme_subsystem()` always failed with a 409** — every subsystem this app creates has a host added right after creation, and ONTAP refuses to delete a subsystem with a host still attached unless `allow_delete_with_hosts` is set.
+- **Clone-volume delete could silently no-op right after creation** — the generic `delete_volume()` fallback resolves the volume's name via a fresh GET by UUID before using the CLI-bridge delete needed on ASA; that GET was observed live to sometimes return no name immediately after the clone was created, skipping the delete entirely. Fixed by threading the name through from creation time instead of re-deriving it.
+- **A stuck LV activation could block the next clone reusing the same VG/LV name** — `cleanup_restore_vg`'s plain `vgremove -f` doesn't reliably clear a device-mapper entry left "Open count: 1" by an interrupted activation attempt, which then made the *next* clone (deterministic name: `vgimportclone --basevgname X` always produces `X1`) fail at `qm start` with "device-mapper: create ioctl ... Device or resource busy". Fixed by also force-clearing stale dm entries by name prefix, the same defensive cleanup `vg_import_clone` already does once right after import.
+
 ---
 
 ## [1.11.0] — 2026-08-28
