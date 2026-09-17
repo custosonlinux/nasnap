@@ -5291,11 +5291,19 @@ async function openIrMigrateModal(sessionId) {
     var sessions = await apiFetch('instant-recovery/sessions');
     var sess = sessions.find(function(s){ return s.id === sessionId; });
     var maps = await apiFetch('volume-mappings');
+    // Any registered datastore on the same PVE cluster is a valid migration
+    // target, regardless of protocol — qm move-disk/move_volume (the same
+    // mechanism Bulk Migrate uses) works between any two PVE storage types.
+    // Used to be hardcoded to NFS only, back when Instant Recovery itself
+    // was NFS-only — that's no longer true (NVMe source), and even then the
+    // *target* was never actually restricted to match the source's protocol.
     var opts = (maps||[]).filter(function(m){
-      return m.storage_protocol === 'nfs' && (!sess || m.pve_cluster_id === sess.pve_cluster_id);
+      return !sess || m.pve_cluster_id === sess.pve_cluster_id;
     });
     sel.innerHTML = opts.length
-      ? opts.map(function(m){ return '<option value="'+esc(m.id)+'">'+esc(m.pve_storage_id)+'</option>'; }).join('')
+      ? opts.map(function(m){
+          return '<option value="'+esc(m.id)+'">'+esc(m.pve_storage_id)+' ('+esc((m.storage_protocol||'nfs').toUpperCase())+')</option>';
+        }).join('')
       : '<option value="">— no eligible datastore found —</option>';
   } catch(e) {
     sel.innerHTML = '<option value="">— error loading —</option>';
